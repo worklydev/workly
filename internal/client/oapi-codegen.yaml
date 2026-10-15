@@ -1,0 +1,8 @@
+# Client for the CLI, generated from the same spec as the server.
+package: client
+output: gen.go
+generate:
+  client: true
+  models: true
+output-options:
+  skip-prune: true

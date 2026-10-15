@@ -1,0 +1,99 @@
+# Workly on Kubernetes: two replicas against an existing Postgres. One
+# replica delivers tasks (the leader); both serve the API and dashboard, and
+# the standby takes over within seconds if the leader goes away.
+#
+# Create the secret first, then apply (see docs/self-hosting.md):
+#
+#   kubectl create secret generic workly \
+#     --from-literal=database-url='postgres://user:pass@host:5432/workly' \
+#     --from-literal=signing-secret="$(openssl rand -hex 32)" \
+#     --from-literal=api-key="$(openssl rand -hex 32)"
+#   kubectl apply -f deploy/kubernetes/workly.yaml
+#
+# Pin the image to a release (ghcr.io/worklydev/workly:X.Y.Z) in production.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: workly
+  labels: {app.kubernetes.io/name: workly}
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app.kubernetes.io/name: workly}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: workly}
+      annotations:
+        # Metrics are served without the API key on their own port, which
+        # the Service doesn't expose.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: /metrics
+    spec:
+      # Must cover WORKLY_SHUTDOWN_TIMEOUT (25s), the time in-flight
+      # deliveries get to finish. Raise both if queues have long timeouts;
+      # interrupted deliveries are retried, not lost.
+      terminationGracePeriodSeconds: 30
+      # Otherwise the Service below makes Kubernetes set WORKLY_PORT to
+      # tcp://<ip>:7337 in the pod (Workly ignores it, but it's noise).
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {app.kubernetes.io/name: workly}
+      containers:
+        - name: workly
+          image: ghcr.io/worklydev/workly:latest
+          args: [serve]
+          ports:
+            - {name: http, containerPort: 7337}
+            - {name: metrics, containerPort: 9090}
+          env:
+            - name: WORKLY_DATABASE_URL
+              valueFrom: {secretKeyRef: {name: workly, key: database-url}}
+            - name: WORKLY_SIGNING_SECRET
+              valueFrom: {secretKeyRef: {name: workly, key: signing-secret}}
+            - name: WORKLY_API_KEY
+              valueFrom: {secretKeyRef: {name: workly, key: api-key}}
+            - {name: WORKLY_METRICS_PORT, value: "9090"}
+          # Ready once the database is reachable and migrated (replicas
+          # migrate on startup, one at a time).
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests: {cpu: 100m, memory: 64Mi}
+            limits: {memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: workly
+  labels: {app.kubernetes.io/name: workly}
+spec:
+  selector: {app.kubernetes.io/name: workly}
+  ports:
+    - {name: http, port: 7337, targetPort: http}
+---
+# Keeps one replica serving during node drains and upgrades.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: workly
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: workly}

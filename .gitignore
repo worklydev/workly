@@ -1,0 +1,22 @@
+# Build output
+/bin/
+/dist/
+
+# Local dev database
+.workly/
+
+# Dashboard build output (embedded into the binary; placeholder kept)
+/dashboard/dist/*
+!/dashboard/dist/.gitkeep
+
+# Environment and editors
+.env
+.env.*
+.idea/
+.vscode/
+.DS_Store
+
+# Python SDK
+.venv/
+__pycache__/
+/sdks/python/dist/

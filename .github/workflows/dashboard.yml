@@ -1,0 +1,37 @@
+name: dashboard
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "dashboard/**"
+      - "api/openapi.yaml"
+      - ".github/workflows/dashboard.yml"
+
+defaults:
+  run:
+    working-directory: dashboard
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - run: npm ci
+
+      - name: Generated client is up to date
+        run: |
+          npm run generate
+          git diff --exit-code -- src/api
+
+      - name: Type-check and lint
+        run: npm run check
+
+      - name: Build
+        run: npm run build

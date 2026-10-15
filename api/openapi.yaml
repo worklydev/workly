@@ -1,0 +1,1784 @@
+openapi: 3.0.3
+info:
+  title: Workly API
+  version: 0.1.0
+  description: |
+    Workly is an open-source HTTP task queue and scheduler.
+
+    Queues deliver tasks you enqueue. Schedules are separate: they call an
+    endpoint on a cron schedule, and each call is a run with its own
+    attempts. Schedules never create tasks or use queues.
+
+    Requests under `/v1` are scoped to a workspace, resolved from the
+    `Authorization: Bearer <key>` header. The workspace never appears in paths.
+servers:
+  - url: http://localhost:7337
+paths:
+  /healthz:
+    get:
+      operationId: getHealthz
+      summary: Liveness probe
+      description: Returns 200 while the process is running. Does not touch the database.
+      tags: [operational]
+      responses:
+        "200":
+          description: Process is alive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /readyz:
+    get:
+      operationId: getReadyz
+      summary: Readiness probe
+      description: Returns 200 when the database is reachable and migrations are applied.
+      tags: [operational]
+      responses:
+        "200":
+          description: Ready to serve traffic
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+        "503":
+          description: Not ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v1/queues:
+    get:
+      operationId: listQueues
+      summary: List queues
+      tags: [queues]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: All queues in the workspace, by name, with their stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueueList"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/queues/{queue}:
+    parameters:
+      - $ref: "#/components/parameters/QueueName"
+    get:
+      operationId: getQueue
+      summary: Get a queue
+      tags: [queues]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: The queue, with its stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Queue"
+        default:
+          $ref: "#/components/responses/Error"
+    put:
+      operationId: putQueue
+      summary: Create or update a queue
+      description: |
+        Declarative and idempotent: the queue ends up with exactly the given
+        configuration, and omitted fields are reset to their defaults. This
+        makes queue configuration easy to keep in code. It doesn't change
+        whether the queue is paused.
+      tags: [queues]
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QueueConfig"
+      responses:
+        "200":
+          description: Queue updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Queue"
+        "201":
+          description: Queue created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Queue"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: deleteQueue
+      summary: Delete a queue and all its tasks
+      tags: [queues]
+      security: [{bearerAuth: []}]
+      responses:
+        "204":
+          description: Queue deleted
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/queues/{queue}/pause:
+    parameters:
+      - $ref: "#/components/parameters/QueueName"
+    post:
+      operationId: pauseQueue
+      summary: Pause a queue
+      description: |
+        Stops dispatching the queue's tasks. Deliveries already in flight
+        finish, and tasks can still be enqueued.
+      tags: [queues]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: The paused queue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Queue"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/queues/{queue}/resume:
+    parameters:
+      - $ref: "#/components/parameters/QueueName"
+    post:
+      operationId: resumeQueue
+      summary: Resume a paused queue
+      tags: [queues]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: The resumed queue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Queue"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/queues/{queue}/cancel-pending:
+    parameters:
+      - $ref: "#/components/parameters/QueueName"
+    post:
+      operationId: cancelPendingTasks
+      summary: Cancel a queue's pending tasks
+      description: |
+        Cancels every pending task, including scheduled ones and ones waiting
+        to retry, as `POST /v1/tasks/{id}/cancel` does for one task. Running
+        tasks finish their attempt. Cancelled tasks stay in the history until
+        retention removes them, and can be retried.
+      tags: [queues]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: Tasks cancelled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CancelPendingResult"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/queues/{queue}/retry-failed:
+    parameters:
+      - $ref: "#/components/parameters/QueueName"
+    post:
+      operationId: retryFailedTasks
+      summary: Retry every failed task in a queue
+      description: |
+        Replays every failed task in the queue now, each with a fresh set of
+        `max_attempts`, as `POST /v1/tasks/{id}/retry` does for one task. Use
+        it to recover after an outage of the endpoint. Pause the queue first
+        or set a rate limit to control how fast the replays are delivered.
+
+        With `last_error`, only the failed tasks whose latest error is exactly
+        that (as `GET /v1/queues/{queue}/failures` groups them) are retried.
+      tags: [queues]
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/LastError"
+      responses:
+        "200":
+          description: Tasks retried
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RetryFailedResult"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/queues/{queue}/failures:
+    parameters:
+      - $ref: "#/components/parameters/QueueName"
+    get:
+      operationId: getQueueFailures
+      summary: Group a queue's failed tasks by error
+      description: |
+        Groups the queue's failed tasks by their latest error, most common
+        first, so one broken endpoint or bad payload shows up as one line.
+        Only the 10,000 most recently failed tasks are grouped.
+      tags: [queues]
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: limit
+          in: query
+          description: How many groups to return.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+      responses:
+        "200":
+          description: The queue's failures, grouped
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueueFailures"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/queues/{queue}/activity:
+    parameters:
+      - $ref: "#/components/parameters/QueueName"
+    get:
+      operationId: getQueueActivity
+      summary: Count a queue's finished tasks
+      description: |
+        Counts the tasks that finished since `since`, by final state. Finished
+        tasks are deleted after the server's retention period, so a `since`
+        further back than `retention_seconds` only counts what is left.
+      tags: [queues]
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: since
+          in: query
+          description: Defaults to 7 days ago.
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: The queue's activity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueueActivity"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/activity:
+    get:
+      operationId: getActivity
+      summary: Count created tasks over time, by queue
+      description: |
+        Counts the workspace's tasks created in each bucket of the range, per
+        queue, oldest bucket first; every bucket is listed, empty ones too.
+        Buckets are 5 minutes for `1h`, 1 hour for `24h` and 6 hours for `7d`,
+        aligned to UTC. Finished tasks are deleted after the server's
+        retention period, so buckets further back than `retention_seconds`
+        only count what is left.
+      tags: [queues]
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: range
+          in: query
+          schema:
+            type: string
+            enum: [1h, 24h, 7d]
+            default: 24h
+      responses:
+        "200":
+          description: Tasks created per bucket and queue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Activity"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/queues/{queue}/tasks:
+    parameters:
+      - $ref: "#/components/parameters/QueueName"
+    post:
+      operationId: createTask
+      summary: Enqueue a task
+      description: |
+        The queue is created with default settings if it doesn't exist, unless
+        the server runs with `WORKLY_AUTO_CREATE_QUEUES=false`.
+
+        If `idempotency_key` matches an existing task in the queue, that task
+        is returned with status 200 and nothing is enqueued.
+      tags: [tasks]
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: traceparent
+          in: header
+          description: W3C trace context, propagated on delivery.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EnqueueRequest"
+      responses:
+        "201":
+          description: Task enqueued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "200":
+          description: A task with this idempotency key already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        default:
+          $ref: "#/components/responses/Error"
+    get:
+      operationId: listTasks
+      summary: List a queue's tasks, newest first
+      tags: [tasks]
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: state
+          in: query
+          schema:
+            $ref: "#/components/schemas/TaskState"
+        - $ref: "#/components/parameters/LastError"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: A page of tasks
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskList"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/queues/{queue}/tasks:batch:
+    parameters:
+      - $ref: "#/components/parameters/QueueName"
+    post:
+      operationId: createTasks
+      summary: Enqueue up to 100 tasks at once
+      description: |
+        Enqueues all the tasks or none: if any task is invalid, nothing is
+        enqueued and the error names the first invalid one (`tasks[3]: ...`).
+        Idempotency keys work as for a single enqueue, including between
+        tasks in the same batch.
+
+        The whole request is limited to the payload limit plus 256 KB.
+      tags: [tasks]
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: traceparent
+          in: header
+          description: W3C trace context, propagated on delivery of every task.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchEnqueueRequest"
+      responses:
+        "200":
+          description: The tasks, in request order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchEnqueueResponse"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/tasks:
+    get:
+      operationId: searchTasks
+      summary: Search tasks across queues, newest first
+      description: |
+        All filters are optional and combine with AND. To find one task by
+        ID, use `GET /v1/tasks/{id}`.
+      tags: [tasks]
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: queue
+          in: query
+          schema:
+            type: string
+        - name: state
+          in: query
+          schema:
+            $ref: "#/components/schemas/TaskState"
+        - name: idempotency_key
+          in: query
+          schema:
+            type: string
+        - $ref: "#/components/parameters/LastError"
+        - name: created_after
+          in: query
+          description: Only tasks created at or after this time.
+          schema:
+            type: string
+            format: date-time
+        - name: created_before
+          in: query
+          description: Only tasks created before this time.
+          schema:
+            type: string
+            format: date-time
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: A page of tasks
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskList"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/tasks/{id}:
+    parameters:
+      - $ref: "#/components/parameters/TaskID"
+    get:
+      operationId: getTask
+      summary: Get a task
+      tags: [tasks]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: The task
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/tasks/{id}/attempts:
+    parameters:
+      - $ref: "#/components/parameters/TaskID"
+    get:
+      operationId: listAttempts
+      summary: List a task's delivery attempts, oldest first
+      tags: [tasks]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: The task's attempts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttemptList"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/tasks/{id}/delivery:
+    parameters:
+      - $ref: "#/components/parameters/TaskID"
+    get:
+      operationId: getTaskDelivery
+      summary: Get the request that delivers a task
+      description: |
+        The HTTP request Workly sends to deliver the task, as it would be sent
+        now: the task's own headers plus Workly's (`Workly-Task-Id`,
+        `Workly-Signature`, ...), and the exact body. The signature is fresh,
+        so replaying the request (for example with curl) while fixing an
+        endpoint passes verification until the timestamp is too old. Nothing
+        is sent and the task doesn't change. `Workly-Attempt` is the next
+        attempt for a pending task, otherwise the latest.
+      tags: [tasks]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: The delivery request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Delivery"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/tasks/{id}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/TaskID"
+    post:
+      operationId: cancelTask
+      summary: Cancel a task
+      description: |
+        Cancels a pending or running task. A running task's current attempt
+        finishes and is recorded, but the task isn't retried. Cancelling a
+        cancelled task does nothing; a succeeded or failed task can't be
+        cancelled (`invalid_state`).
+      tags: [tasks]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: The cancelled task
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/tasks/{id}/retry:
+    parameters:
+      - $ref: "#/components/parameters/TaskID"
+    post:
+      operationId: retryTask
+      summary: Retry a task now
+      description: |
+        Makes the task due now. A succeeded, failed or cancelled task is
+        replayed with a fresh set of `max_attempts`; its attempt numbers keep
+        counting. A pending task (scheduled or waiting to retry) just runs
+        sooner. A task can't be retried while an attempt is in flight
+        (`invalid_state`).
+      tags: [tasks]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: The task, now pending
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/schedules:
+    get:
+      operationId: listSchedules
+      summary: List schedules
+      tags: [schedules]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: All schedules in the workspace, by name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScheduleList"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/schedules/{schedule}:
+    parameters:
+      - $ref: "#/components/parameters/ScheduleName"
+    get:
+      operationId: getSchedule
+      summary: Get a schedule
+      tags: [schedules]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: The schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Schedule"
+        default:
+          $ref: "#/components/responses/Error"
+    put:
+      operationId: putSchedule
+      summary: Create or update a schedule
+      description: |
+        Declarative and idempotent: the schedule ends up with exactly the
+        given settings, and omitted fields are reset to their defaults. It
+        doesn't change whether the schedule is paused. The response's
+        `next_runs` shows when it will run, so a cron expression can be
+        checked before relying on it.
+
+        Runs already created keep the request they were created with; retries
+        use the schedule's current retry policy and timeout.
+      tags: [schedules]
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScheduleConfig"
+      responses:
+        "200":
+          description: Schedule updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Schedule"
+        "201":
+          description: Schedule created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Schedule"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: deleteSchedule
+      summary: Delete a schedule and all its runs
+      description: A run in flight finishes, but its result isn't recorded.
+      tags: [schedules]
+      security: [{bearerAuth: []}]
+      responses:
+        "204":
+          description: Schedule deleted
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/cron/preview:
+    get:
+      operationId: previewCron
+      summary: Preview a cron timetable
+      description: |
+        The next times a schedule with this cron expression and timezone
+        would run, from now, without creating it. For forms that check a
+        timetable as it's typed.
+      tags: [schedules]
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: cron
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: timezone
+          in: query
+          description: IANA name. Defaults to UTC.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The next runs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CronPreview"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/schedules/{schedule}/pause:
+    parameters:
+      - $ref: "#/components/parameters/ScheduleName"
+    post:
+      operationId: pauseSchedule
+      summary: Pause a schedule
+      description: |
+        Stops the schedule from firing. Runs already pending or in flight
+        still finish, and "run now" still works.
+      tags: [schedules]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: The paused schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Schedule"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/schedules/{schedule}/resume:
+    parameters:
+      - $ref: "#/components/parameters/ScheduleName"
+    post:
+      operationId: resumeSchedule
+      summary: Resume a paused schedule
+      description: |
+        The schedule fires again from its next slot after now. Slots that
+        passed while it was paused are not run.
+      tags: [schedules]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: The resumed schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Schedule"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/schedules/{schedule}/trigger:
+    parameters:
+      - $ref: "#/components/parameters/ScheduleName"
+    post:
+      operationId: triggerSchedule
+      summary: Run a schedule now
+      description: |
+        Creates a run that is delivered right away, with `trigger: manual`.
+        It runs even if the schedule is paused or a run is in flight, and
+        doesn't change when the schedule next fires.
+      tags: [schedules]
+      security: [{bearerAuth: []}]
+      responses:
+        "201":
+          description: The new run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/schedules/{schedule}/runs:
+    parameters:
+      - $ref: "#/components/parameters/ScheduleName"
+    get:
+      operationId: listRuns
+      summary: List a schedule's runs, newest first
+      tags: [schedules]
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: state
+          in: query
+          schema:
+            $ref: "#/components/schemas/RunState"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: A page of runs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunList"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/runs/{id}:
+    parameters:
+      - $ref: "#/components/parameters/RunID"
+    get:
+      operationId: getRun
+      summary: Get a run
+      tags: [schedules]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: The run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/runs/{id}/attempts:
+    parameters:
+      - $ref: "#/components/parameters/RunID"
+    get:
+      operationId: listRunAttempts
+      summary: List a run's delivery attempts, oldest first
+      tags: [schedules]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: The run's attempts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttemptList"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/runs/{id}/delivery:
+    parameters:
+      - $ref: "#/components/parameters/RunID"
+    get:
+      operationId: getRunDelivery
+      summary: Get the request that delivers a run
+      description: |
+        The HTTP request Workly sends to deliver the run, as it would be sent
+        now, with a fresh signature, as for `GET /v1/tasks/{id}/delivery`.
+        Nothing is sent.
+      tags: [schedules]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: The delivery request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Delivery"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/runs/{id}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/RunID"
+    post:
+      operationId: cancelRun
+      summary: Cancel a run
+      description: |
+        Cancels a pending or running run. A running run's current attempt
+        finishes and is recorded, but the run isn't retried. Cancelling a
+        cancelled run does nothing; a finished or skipped run can't be
+        cancelled (`invalid_state`).
+      tags: [schedules]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: The cancelled run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/runs/{id}/retry:
+    parameters:
+      - $ref: "#/components/parameters/RunID"
+    post:
+      operationId: retryRun
+      summary: Retry a run now
+      description: |
+        Makes the run due now. A succeeded, failed, cancelled or skipped run
+        is delivered again with a fresh set of `max_attempts`; a pending run
+        just runs sooner. A run can't be retried while an attempt is in
+        flight (`invalid_state`).
+      tags: [schedules]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: The run, now pending
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/alert-channels:
+    get:
+      operationId: listAlertChannels
+      summary: List alert channels
+      description: |
+        Where the workspace's alerts go. When tasks in a queue or runs of a
+        schedule fail (after their last attempt), every channel gets an
+        alert within about a minute, naming the errors. After that, a queue
+        or schedule gets at most one alert every 30 minutes, covering the
+        failures since its previous one.
+      tags: [alerts]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: The workspace's channels, oldest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlertChannelList"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: createAlertChannel
+      summary: Add an alert channel
+      description: |
+        A workspace has at most 10 channels. Email channels need a server
+        that can send email (`email_enabled` in the list); a Slack channel
+        takes an incoming webhook URL (`https://hooks.slack.com/...`).
+      tags: [alerts]
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewAlertChannel"
+      responses:
+        "201":
+          description: Channel added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlertChannel"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/alert-channels/{id}:
+    parameters:
+      - $ref: "#/components/parameters/AlertChannelID"
+    delete:
+      operationId: deleteAlertChannel
+      summary: Remove an alert channel
+      tags: [alerts]
+      security: [{bearerAuth: []}]
+      responses:
+        "204":
+          description: Channel removed
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/alert-channels/{id}/test:
+    parameters:
+      - $ref: "#/components/parameters/AlertChannelID"
+    post:
+      operationId: testAlertChannel
+      summary: Send a test alert
+      description: |
+        Sends a test message to the channel now, to check it's set up
+        right. If it can't be sent, the error (`alert_failed`, 502) says
+        why.
+      tags: [alerts]
+      security: [{bearerAuth: []}]
+      responses:
+        "204":
+          description: Sent
+        default:
+          $ref: "#/components/responses/Error"
+components:
+  parameters:
+    QueueName:
+      name: queue
+      in: path
+      required: true
+      description: Queue name. Lowercase letters, digits, `-` and `_`; at most 64 characters.
+      schema:
+        type: string
+    Cursor:
+      name: cursor
+      in: query
+      description: The `next_cursor` of the previous page.
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    LastError:
+      name: last_error
+      in: query
+      description: Only tasks whose latest error is exactly this.
+      schema:
+        type: string
+    TaskID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    ScheduleName:
+      name: schedule
+      in: path
+      required: true
+      description: Schedule name. Lowercase letters, digits, `-` and `_`; at most 64 characters.
+      schema:
+        type: string
+    RunID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    AlertChannelID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    Error:
+      description: |
+        An error. Codes include `invalid_request`, `unauthorized`,
+        `queue_not_found`, `task_not_found`, `schedule_not_found`,
+        `run_not_found`, `alert_channel_not_found`,
+        `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
+        `invalid_state` (409), `payload_too_large` and
+        `internal`.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: ok
+    QueueConfig:
+      type: object
+      description: A queue's delivery policy. Omitted fields take the default.
+      properties:
+        max_attempts:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          default: 5
+          description: Total delivery attempts before a task fails. Tasks can override it.
+        min_backoff_seconds:
+          type: number
+          format: double
+          minimum: 0
+          default: 2
+        max_backoff_seconds:
+          type: number
+          format: double
+          minimum: 0
+          default: 3600
+        backoff_multiplier:
+          type: number
+          format: double
+          minimum: 1
+          default: 2
+          description: |
+            Retry n waits a random time between `min_backoff_seconds` and
+            `min_backoff_seconds * backoff_multiplier^(n-1)`, capped at
+            `max_backoff_seconds`. `Retry-After` response headers are honoured.
+        timeout_seconds:
+          type: number
+          format: double
+          minimum: 1
+          maximum: 1800
+          default: 30
+          description: How long to wait for a response. Tasks can override it.
+        retry_on_4xx:
+          type: boolean
+          default: false
+          description: |
+            Retry 4xx responses. By default only 408 and 429 are retried, as
+            other client errors usually fail again.
+        rate_per_second:
+          type: number
+          format: double
+          minimum: 0
+          exclusiveMinimum: true
+          maximum: 10000
+          description: |
+            Most deliveries started per second. Omit for no limit. Retries
+            count; recovering a lost attempt does too. Deliveries are spread
+            out evenly: after an idle spell, at most a tenth of a second's
+            worth (at least 1) start at once.
+        max_concurrency:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          default: 3
+          description: |
+            Most deliveries in flight at once. There is always a limit; the
+            default is low so a new queue can't overwhelm its endpoint.
+    Queue:
+      allOf:
+        - $ref: "#/components/schemas/QueueConfig"
+        - type: object
+          required: [name, paused, max_attempts, min_backoff_seconds, max_backoff_seconds, backoff_multiplier, timeout_seconds, retry_on_4xx, max_concurrency, created_at, updated_at]
+          properties:
+            name:
+              type: string
+            paused:
+              type: boolean
+            stats:
+              $ref: "#/components/schemas/QueueStats"
+            created_at:
+              type: string
+              format: date-time
+            updated_at:
+              type: string
+              format: date-time
+    QueueStats:
+      type: object
+      description: |
+        The queue's current work. Returned when getting or listing queues.
+        Counts stop at 10,000, so 10000 means "10,000 or more".
+      required: [due, scheduled, running, failed]
+      properties:
+        due:
+          type: integer
+          description: Pending tasks that are due now.
+        scheduled:
+          type: integer
+          description: Pending tasks due later, including ones waiting to retry.
+        running:
+          type: integer
+          description: Tasks with a delivery in flight.
+        failed:
+          type: integer
+          description: |
+            Failed tasks still retained (see `WORKLY_RETENTION`). Retry them
+            with `POST /v1/queues/{queue}/retry-failed`.
+        oldest_due_at:
+          type: string
+          format: date-time
+          description: |
+            When the longest-waiting due task became due, i.e. how far behind
+            the queue is. Absent when nothing is due.
+    QueueActivity:
+      type: object
+      description: Counts stop at 10,000, so 10000 means "10,000 or more".
+      required: [since, succeeded, failed, cancelled]
+      properties:
+        since:
+          type: string
+          format: date-time
+          description: The start of the period counted.
+        succeeded:
+          type: integer
+        failed:
+          type: integer
+        cancelled:
+          type: integer
+        retention_seconds:
+          type: number
+          format: double
+          description: |
+            How long the server keeps finished tasks (`WORKLY_RETENTION`).
+            Absent if it keeps them forever.
+    Activity:
+      type: object
+      required: [range, bucket_seconds, buckets]
+      properties:
+        range:
+          type: string
+          enum: [1h, 24h, 7d]
+        bucket_seconds:
+          type: integer
+        buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActivityBucket"
+        retention_seconds:
+          type: number
+          format: double
+          description: |
+            How long the server keeps finished tasks (`WORKLY_RETENTION`).
+            Absent if it keeps them forever.
+    ActivityBucket:
+      type: object
+      required: [start, counts]
+      properties:
+        start:
+          type: string
+          format: date-time
+        counts:
+          type: object
+          description: Tasks created in the bucket, by queue; queues with none are left out.
+          additionalProperties:
+            type: integer
+    CronPreview:
+      type: object
+      required: [next_runs, interval_seconds]
+      properties:
+        next_runs:
+          type: array
+          description: The next 5 runs, from now.
+          items:
+            type: string
+            format: date-time
+        interval_seconds:
+          type: integer
+          description: The shortest time between two of its runs.
+    QueueFailures:
+      type: object
+      required: [groups]
+      properties:
+        groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/FailureGroup"
+    FailureGroup:
+      type: object
+      description: Failed tasks whose latest attempt ended the same way.
+      required: [error, count, last_failed_at, latest_task_id]
+      properties:
+        outcome:
+          $ref: "#/components/schemas/Outcome"
+        status_code:
+          type: integer
+          description: Absent if there was no response.
+        error:
+          type: string
+          description: The tasks' `last_error`. Pass it as `last_error` to list or retry them.
+        count:
+          type: integer
+        last_failed_at:
+          type: string
+          format: date-time
+        latest_task_id:
+          type: string
+          description: The most recently failed task in the group.
+        response_body:
+          type: string
+          description: The start (500 bytes) of the latest task's last response body, if it had one.
+    QueueList:
+      type: object
+      required: [queues]
+      properties:
+        queues:
+          type: array
+          items:
+            $ref: "#/components/schemas/Queue"
+    CancelPendingResult:
+      type: object
+      required: [cancelled]
+      properties:
+        cancelled:
+          type: integer
+          description: How many pending tasks were cancelled.
+    RetryFailedResult:
+      type: object
+      required: [retried]
+      properties:
+        retried:
+          type: integer
+          description: How many failed tasks were made pending again.
+    HTTPMethod:
+      type: string
+      enum: [GET, POST, PUT, PATCH, DELETE]
+    TaskState:
+      type: string
+      enum: [pending, running, succeeded, failed, cancelled]
+      description: |
+        A `pending` task with `run_at` in the future is scheduled. A `failed`
+        task has exhausted its attempts or got a non-retryable response.
+    Outcome:
+      type: string
+      enum: [success, http_error, timeout, network_error, lost]
+      description: |
+        How a delivery attempt ended. `lost` means the result is unknown: the
+        dispatcher crashed or shut down mid-delivery, and the endpoint may
+        have processed the request.
+    EnqueueRequest:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          description: The http(s) URL to deliver the task to.
+          example: https://api.example.com/send-email
+        method:
+          $ref: "#/components/schemas/HTTPMethod"
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+          description: Headers sent with every delivery. `Workly-*` headers are reserved.
+        payload:
+          description: "A JSON body, sent with `Content-Type: application/json`. Use this or `body`."
+          x-go-type: json.RawMessage
+        body:
+          type: string
+          description: A raw text body. Use this or `payload`.
+        content_type:
+          type: string
+          description: Content type of `body`. Defaults to `text/plain; charset=utf-8`.
+        delay_seconds:
+          type: number
+          format: double
+          minimum: 0
+          description: Deliver after this delay. Use this or `run_at`.
+        run_at:
+          type: string
+          format: date-time
+          description: Deliver at this time. Use this or `delay_seconds`.
+        idempotency_key:
+          type: string
+          maxLength: 256
+          description: Deduplicates enqueues within the queue.
+        max_attempts:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          description: Overrides the queue's `max_attempts`.
+        timeout_seconds:
+          type: number
+          format: double
+          minimum: 1
+          maximum: 1800
+          description: Overrides the queue's `timeout_seconds`.
+    BatchEnqueueRequest:
+      type: object
+      required: [tasks]
+      properties:
+        tasks:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/EnqueueRequest"
+    BatchEnqueueResponse:
+      type: object
+      required: [results]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/BatchEnqueueResult"
+    BatchEnqueueResult:
+      type: object
+      required: [created, task]
+      properties:
+        created:
+          type: boolean
+          description: False if a task with the same idempotency key already existed.
+        task:
+          $ref: "#/components/schemas/Task"
+    Task:
+      type: object
+      required: [id, queue, state, method, url, headers, run_at, attempt_count, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          example: task_01J9ZK3M5Q8R2T4V6W8X0Y2Z4A
+        queue:
+          type: string
+        state:
+          $ref: "#/components/schemas/TaskState"
+        method:
+          $ref: "#/components/schemas/HTTPMethod"
+        url:
+          type: string
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        payload:
+          description: The body, when it is JSON.
+          x-go-type: json.RawMessage
+        body:
+          type: string
+          description: The body, when it is not JSON.
+        run_at:
+          type: string
+          format: date-time
+          description: When the task is next eligible for delivery.
+        attempt_count:
+          type: integer
+        max_attempts:
+          type: integer
+          description: Per-task override, if set.
+        timeout_seconds:
+          type: number
+          format: double
+          description: Per-task override, if set.
+        idempotency_key:
+          type: string
+        last_status:
+          type: integer
+          description: HTTP status of the latest attempt, if it got a response.
+        last_outcome:
+          $ref: "#/components/schemas/Outcome"
+        last_error:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+          description: When the task succeeded, failed or was cancelled.
+        last_attempt_at:
+          type: string
+          format: date-time
+          description: When the latest attempt finished. Absent before the first attempt.
+        retried_at:
+          type: string
+          format: date-time
+          description: |
+            When the task was last retried by hand (`POST /v1/tasks/{id}/retry`
+            or `POST /v1/queues/{queue}/retry-failed`). Absent if never.
+    Delivery:
+      type: object
+      required: [method, url, headers, body]
+      properties:
+        method:
+          $ref: "#/components/schemas/HTTPMethod"
+        url:
+          type: string
+        headers:
+          type: object
+          description: Every header Workly sets, including the task's own.
+          additionalProperties:
+            type: string
+        body:
+          type: string
+          description: The body exactly as sent; the signature covers these bytes.
+    TaskList:
+      type: object
+      required: [tasks]
+      properties:
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/Task"
+        next_cursor:
+          type: string
+          description: Pass as `cursor` to get the next page. Absent on the last page.
+    Attempt:
+      type: object
+      required: [id, number, started_at, finished_at, duration_ms, outcome, response_headers]
+      properties:
+        id:
+          type: string
+        number:
+          type: integer
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+        duration_ms:
+          type: integer
+        status_code:
+          type: integer
+          description: Absent if there was no response.
+        outcome:
+          $ref: "#/components/schemas/Outcome"
+        error:
+          type: string
+        response_body:
+          type: string
+          description: The first 4 KB of the response body.
+        response_headers:
+          type: object
+          additionalProperties:
+            type: string
+          description: Selected response headers (Content-Type, Retry-After, Location).
+        retried_at:
+          type: string
+          format: date-time
+          description: |
+            Set when the task or run was retried by hand between the previous
+            attempt and this one: when that happened. Absent for automatic
+            retries.
+    AttemptList:
+      type: object
+      required: [attempts]
+      properties:
+        attempts:
+          type: array
+          items:
+            $ref: "#/components/schemas/Attempt"
+    ScheduleConfig:
+      type: object
+      description: |
+        A schedule's settings. Omitted fields take the default. The request
+        fields (`url` to `content_type`) work as in `EnqueueRequest`.
+      required: [cron, url]
+      properties:
+        cron:
+          type: string
+          description: |
+            When to run: five fields (minute, hour, day of month, month, day
+            of week) with `*`, lists, ranges, steps and names (`jan`, `mon`),
+            or `@yearly`, `@monthly`, `@weekly`, `@daily` or `@hourly`. When
+            both day fields are restricted, a day matches either.
+          example: "0 3 * * *"
+        timezone:
+          type: string
+          default: UTC
+          description: |
+            IANA timezone the cron expression is read in, e.g.
+            `Europe/Stockholm`. A slot in the hour skipped by a daylight
+            saving change runs right after it; a slot in a repeated hour runs
+            once.
+        url:
+          type: string
+          description: The http(s) URL to call.
+          example: https://api.example.com/reports/nightly
+        method:
+          $ref: "#/components/schemas/HTTPMethod"
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+          description: Headers sent with every run. `Workly-*` headers are reserved.
+        payload:
+          description: "A JSON body, sent with `Content-Type: application/json`. Use this or `body`."
+          x-go-type: json.RawMessage
+        body:
+          type: string
+          description: A raw text body. Use this or `payload`.
+        content_type:
+          type: string
+          description: Content type of `body`. Defaults to `text/plain; charset=utf-8`.
+        timeout_seconds:
+          type: number
+          format: double
+          minimum: 1
+          maximum: 1800
+          default: 30
+          description: How long to wait for a response.
+        max_attempts:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          default: 3
+          description: Total delivery attempts before a run fails.
+        min_backoff_seconds:
+          type: number
+          format: double
+          minimum: 0
+          default: 5
+        max_backoff_seconds:
+          type: number
+          format: double
+          minimum: 0
+          default: 300
+        backoff_multiplier:
+          type: number
+          format: double
+          minimum: 1
+          default: 2
+          description: Retries back off as for queues (see `QueueConfig`).
+        retry_on_4xx:
+          type: boolean
+          default: false
+          description: Retry 4xx responses. By default only 408 and 429 are retried.
+        overlap:
+          $ref: "#/components/schemas/OverlapPolicy"
+        missed:
+          $ref: "#/components/schemas/MissedPolicy"
+    OverlapPolicy:
+      type: string
+      enum: [skip, allow]
+      default: skip
+      description: |
+        What happens when a slot comes up while the previous run is still
+        pending or running. `skip` records the slot as a `skipped` run;
+        `allow` runs it alongside.
+    MissedPolicy:
+      type: string
+      enum: [skip, catch_up]
+      default: skip
+      description: |
+        What happens to slots missed while the server was down (a slot is
+        missed if it can't fire within a minute). `skip` records the most
+        recent missed slot as a `skipped` run; `catch_up` runs it. Either
+        way, at most one run is created for the missed slots.
+    Schedule:
+      type: object
+      required: [name, cron, timezone, method, url, headers, timeout_seconds, max_attempts, min_backoff_seconds, max_backoff_seconds, backoff_multiplier, retry_on_4xx, overlap, missed, paused, next_runs, created_at, updated_at]
+      properties:
+        name:
+          type: string
+        cron:
+          type: string
+        timezone:
+          type: string
+        method:
+          $ref: "#/components/schemas/HTTPMethod"
+        url:
+          type: string
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        payload:
+          description: The body, when it is JSON.
+          x-go-type: json.RawMessage
+        body:
+          type: string
+          description: The body, when it is not JSON.
+        timeout_seconds:
+          type: number
+          format: double
+        max_attempts:
+          type: integer
+        min_backoff_seconds:
+          type: number
+          format: double
+        max_backoff_seconds:
+          type: number
+          format: double
+        backoff_multiplier:
+          type: number
+          format: double
+        retry_on_4xx:
+          type: boolean
+        overlap:
+          $ref: "#/components/schemas/OverlapPolicy"
+        missed:
+          $ref: "#/components/schemas/MissedPolicy"
+        paused:
+          type: boolean
+        next_run_at:
+          type: string
+          format: date-time
+          description: When the schedule next fires. Absent while paused.
+        next_runs:
+          type: array
+          description: The next five slots, also while paused (as if resumed now).
+          items:
+            type: string
+            format: date-time
+        last_run:
+          $ref: "#/components/schemas/LastRun"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    LastRun:
+      type: object
+      description: The schedule's most recent run. Absent before the first.
+      required: [id, state, trigger, scheduled_for]
+      properties:
+        id:
+          type: string
+        state:
+          $ref: "#/components/schemas/RunState"
+        trigger:
+          $ref: "#/components/schemas/RunTrigger"
+        scheduled_for:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+        last_status:
+          type: integer
+        last_error:
+          type: string
+    ScheduleList:
+      type: object
+      required: [schedules]
+      properties:
+        schedules:
+          type: array
+          items:
+            $ref: "#/components/schemas/Schedule"
+    RunState:
+      type: string
+      enum: [pending, running, succeeded, failed, cancelled, skipped]
+      description: |
+        A `skipped` run was never delivered: see `skip_reason`. It can be
+        retried to deliver it now.
+    RunTrigger:
+      type: string
+      enum: [schedule, manual]
+      description: "`schedule` for a cron slot, `manual` for \"run now\"."
+    SkipReason:
+      type: string
+      enum: [overlap, missed]
+      description: |
+        `overlap`: the previous run was still pending or running (overlap
+        policy `skip`). `missed`: the server was down at the slot (missed
+        policy `skip`).
+    Run:
+      type: object
+      required: [id, schedule, state, trigger, scheduled_for, method, url, headers, run_at, attempt_count, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          example: run_01J9ZK3M5Q8R2T4V6W8X0Y2Z4A
+        schedule:
+          type: string
+        state:
+          $ref: "#/components/schemas/RunState"
+        trigger:
+          $ref: "#/components/schemas/RunTrigger"
+        scheduled_for:
+          type: string
+          format: date-time
+          description: The cron slot, or when a manual run was triggered. Sent as `Workly-Scheduled-For`.
+        skip_reason:
+          $ref: "#/components/schemas/SkipReason"
+        method:
+          $ref: "#/components/schemas/HTTPMethod"
+        url:
+          type: string
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        payload:
+          description: The body, when it is JSON.
+          x-go-type: json.RawMessage
+        body:
+          type: string
+          description: The body, when it is not JSON.
+        run_at:
+          type: string
+          format: date-time
+          description: When the run is next eligible for delivery.
+        attempt_count:
+          type: integer
+        last_status:
+          type: integer
+          description: HTTP status of the latest attempt, if it got a response.
+        last_outcome:
+          $ref: "#/components/schemas/Outcome"
+        last_error:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+          description: When the run succeeded, failed, was cancelled or was skipped.
+        last_attempt_at:
+          type: string
+          format: date-time
+        retried_at:
+          type: string
+          format: date-time
+          description: When the run was last retried by hand. Absent if never.
+    RunList:
+      type: object
+      required: [runs]
+      properties:
+        runs:
+          type: array
+          items:
+            $ref: "#/components/schemas/Run"
+        next_cursor:
+          type: string
+          description: Pass as `cursor` to get the next page. Absent on the last page.
+    AlertChannelType:
+      type: string
+      enum: [email, slack]
+    NewAlertChannel:
+      type: object
+      required: [type, target]
+      properties:
+        type:
+          $ref: "#/components/schemas/AlertChannelType"
+        target:
+          type: string
+          description: An email address, or a Slack incoming webhook URL.
+          example: oncall@example.com
+    AlertChannel:
+      type: object
+      required: [id, type, target, created_at]
+      properties:
+        id:
+          type: string
+          example: ach_01J9ZK3M5Q8R2T4V6W8X0Y2Z4A
+        type:
+          $ref: "#/components/schemas/AlertChannelType"
+        target:
+          type: string
+          description: |
+            The email address, or the Slack webhook URL with its secret part
+            hidden.
+        created_at:
+          type: string
+          format: date-time
+    AlertChannelList:
+      type: object
+      required: [channels, email_enabled]
+      properties:
+        channels:
+          type: array
+          items:
+            $ref: "#/components/schemas/AlertChannel"
+        email_enabled:
+          type: boolean
+          description: Whether this server can send email, so email channels can be added.
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorBody"
+    ErrorBody:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Stable, machine-readable error code.
+          example: queue_not_found
+        message:
+          type: string
+          description: Human-readable description.

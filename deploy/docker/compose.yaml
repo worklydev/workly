@@ -1,0 +1,40 @@
+# Workly with Postgres, for self-hosting on a single machine:
+#
+#   export WORKLY_SIGNING_SECRET=$(openssl rand -hex 32)
+#   export WORKLY_API_KEY=$(openssl rand -hex 32)
+#   docker compose -f deploy/docker/compose.yaml up -d
+#
+# The API and dashboard are on http://localhost:7337. See docs/self-hosting.md.
+name: workly
+
+services:
+  workly:
+    image: ${WORKLY_IMAGE:-ghcr.io/worklydev/workly:latest}
+    restart: unless-stopped
+    ports: ["${WORKLY_HOST_PORT:-7337}:7337"]
+    environment:
+      WORKLY_DATABASE_URL: postgres://workly:workly@postgres:5432/workly?sslmode=disable
+      WORKLY_SIGNING_SECRET: ${WORKLY_SIGNING_SECRET:?set WORKLY_SIGNING_SECRET, e.g. openssl rand -hex 32}
+      WORKLY_API_KEY: ${WORKLY_API_KEY:?set WORKLY_API_KEY, e.g. openssl rand -hex 32}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Deliveries in flight get 25s to finish on shutdown (WORKLY_SHUTDOWN_TIMEOUT).
+    stop_grace_period: 30s
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: workly
+      POSTGRES_PASSWORD: workly
+      POSTGRES_DB: workly
+    volumes: [postgres:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "workly"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+volumes:
+  postgres:

@@ -1,0 +1,61 @@
+# Server releases: tagging vX.Y.Z builds the binaries for GitHub releases and
+# the ghcr.io/worklydev/workly image. The release workflow then wraps the
+# binaries into workly-cli wheels for PyPI (packaging/pypi). Check changes
+# with `just release-snapshot`.
+version: 2
+
+before:
+  hooks:
+    - sh -c "cd dashboard && npm ci && npm run build"
+
+builds:
+  - main: ./cmd/workly
+    binary: workly
+    env:
+      - CGO_ENABLED=0 # SQLite is pure Go, so binaries are static
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  # No version in the name, so releases/latest/download/... URLs are stable.
+  - name_template: "workly_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files: [README.md, LICENSE]
+
+dockers_v2:
+  - images: [ghcr.io/worklydev/workly]
+    dockerfile: deploy/docker/Dockerfile
+    platforms: [linux/amd64, linux/arm64]
+    tags:
+      - "{{ .Version }}"
+      - "{{ if not .Prerelease }}{{ .Major }}.{{ .Minor }}{{ end }}"
+      - "{{ if not .Prerelease }}latest{{ end }}"
+    labels:
+      org.opencontainers.image.title: workly
+      org.opencontainers.image.description: An open-source HTTP task queue
+      org.opencontainers.image.source: https://github.com/worklydev/workly
+      org.opencontainers.image.url: https://workly.run
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.created: "{{ .Date }}"
+
+checksum:
+  name_template: checksums.txt
+
+git:
+  # SDKs are tagged separately (sdk-python/vX.Y.Z, sdk-typescript/vX.Y.Z); they aren't server versions.
+  ignore_tags: ["sdk-*"]
+
+changelog:
+  use: github
+  filters:
+    exclude: ["^docs:", "^test:", "^chore:"]
+
+release:
+  prerelease: auto

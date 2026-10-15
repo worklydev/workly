@@ -1,0 +1,51 @@
+# Tagging sdk-python/vX.Y.Z publishes the Python SDK (`workly`) to PyPI. The
+# tag must match the version in sdks/python/pyproject.toml.
+name: sdk-python-release
+
+on:
+  push:
+    tags: ["sdk-python/v*"]
+
+defaults:
+  run:
+    working-directory: sdks/python
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Tag matches the package version
+        run: |
+          tag="${GITHUB_REF_NAME#sdk-python/v}"
+          version="$(uv version --short)"
+          if [ "$tag" != "$version" ]; then
+            echo "tag $GITHUB_REF_NAME doesn't match pyproject.toml version $version" >&2
+            exit 1
+          fi
+
+      - run: uv run pytest -q
+      - run: uv build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdk
+          path: sdks/python/dist/
+
+  pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: sdk
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

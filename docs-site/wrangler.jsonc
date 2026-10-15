@@ -1,0 +1,12 @@
+// docs.workly.run, served as static assets by Cloudflare Workers (no Worker
+// code). .github/workflows/docs.yml deploys it on release tags with
+// `wrangler deploy`, which also attaches the custom domain.
+{
+  "name": "workly-docs",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "404-page"
+  },
+  "routes": [{ "pattern": "docs.workly.run", "custom_domain": true }]
+}

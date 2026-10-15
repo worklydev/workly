@@ -1,0 +1,45 @@
+# Tagging sdk-typescript/vX.Y.Z publishes the TypeScript SDK (@workly/sdk) to
+# npm. The tag must match the version in sdks/typescript/package.json.
+name: sdk-typescript-release
+
+on:
+  push:
+    tags: ["sdk-typescript/v*"]
+
+defaults:
+  run:
+    working-directory: sdks/typescript
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing, with provenance
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm 11.5.1 or newer.
+      - run: npm install -g npm@latest
+
+      - name: Tag matches the package version
+        run: |
+          tag="${GITHUB_REF_NAME#sdk-typescript/v}"
+          version="$(node -p 'require("./package.json").version')"
+          if [ "$tag" != "$version" ]; then
+            echo "tag $GITHUB_REF_NAME doesn't match package.json version $version" >&2
+            exit 1
+          fi
+
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: npm run build
+      - run: npm publish --access public

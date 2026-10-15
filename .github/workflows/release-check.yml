@@ -1,0 +1,77 @@
+# Runs the release build on changes to packaging, so a broken config is found
+# before tagging rather than after.
+name: release-check
+
+on:
+  pull_request:
+    paths:
+      - ".goreleaser.yaml"
+      - "deploy/**"
+      - "packaging/**"
+      - "install.sh"
+      - ".github/workflows/release*.yml"
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --snapshot --clean
+
+      - name: Build and install the workly-cli wheel
+        run: |
+          python3 packaging/pypi/build_wheels.py
+          python3 -m venv /tmp/venv
+          /tmp/venv/bin/pip install dist/pypi/*manylinux*x86_64*.whl
+          /tmp/venv/bin/workly version
+          /tmp/venv/bin/workly-cli version
+
+      - name: install.sh
+        run: |
+          WORKLY_DOWNLOAD_URL="file://$PWD/dist" WORKLY_INSTALL_DIR=/tmp/bin sh install.sh
+          /tmp/bin/workly version
+
+      - name: Docker image
+        run: |
+          docker run --rm ghcr.io/worklydev/workly:latest-amd64 version
+          docker run -d --name workly -p 7337:7337 ghcr.io/worklydev/workly:latest-amd64 dev
+          timeout 30 sh -c 'until curl -sf localhost:7337/healthz; do sleep 1; done'
+          docker rm -f workly
+
+      # The manifests against a real cluster, with the image just built.
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: workly
+      - name: Kubernetes manifests
+        run: |
+          kind load docker-image ghcr.io/worklydev/workly:latest-amd64 --name workly
+          kubectl run postgres --image=postgres:17-alpine --port=5432 --expose \
+            --env=POSTGRES_USER=workly --env=POSTGRES_PASSWORD=workly --env=POSTGRES_DB=workly
+          kubectl create secret generic workly \
+            --from-literal=database-url='postgres://workly:workly@postgres:5432/workly?sslmode=disable' \
+            --from-literal=signing-secret=test --from-literal=api-key=test
+          sed 's|image: ghcr.io/worklydev/workly:latest|image: ghcr.io/worklydev/workly:latest-amd64\n          imagePullPolicy: Never|' \
+            deploy/kubernetes/workly.yaml | kubectl apply -f -
+          kubectl rollout status deployment/workly --timeout=180s
+      - name: Kubernetes diagnostics
+        if: failure()
+        run: |
+          kubectl get pods -o wide
+          kubectl describe pods -l app.kubernetes.io/name=workly
+          kubectl logs -l app.kubernetes.io/name=workly --tail=50

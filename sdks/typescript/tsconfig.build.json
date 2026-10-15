@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "src",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    // The SDK runs outside Node too (Deno, Bun, edge runtimes), so it only
+    // uses web APIs; Node types are for the tests.
+    "types": []
+  },
+  "include": ["src"]
+}

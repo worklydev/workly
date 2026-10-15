@@ -1,0 +1,53 @@
+/* The dashboard's look (dashboard/DESIGN.md): neutral greys, one orange
+   accent, Geist and JetBrains Mono, regular and medium weights only. */
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/jetbrains-mono';
+
+:root {
+  --sl-font: 'Geist Variable', system-ui, sans-serif;
+  --sl-font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
+
+  /* Dark (Starlight's default). */
+  --sl-color-accent-low: oklch(0.32 0.07 50);
+  --sl-color-accent: oklch(0.74 0.17 50);
+  --sl-color-accent-high: oklch(0.86 0.09 55);
+  --sl-color-white: oklch(0.93 0 0);
+  --sl-color-gray-1: oklch(0.86 0 0);
+  --sl-color-gray-2: oklch(0.75 0 0);
+  --sl-color-gray-3: oklch(0.65 0 0);
+  --sl-color-gray-4: oklch(0.5 0 0);
+  --sl-color-gray-5: oklch(0.34 0 0);
+  --sl-color-gray-6: oklch(0.26 0 0);
+  --sl-color-black: oklch(0.205 0 0);
+}
+
+:root[data-theme='light'] {
+  --sl-color-accent-low: oklch(0.93 0.04 55);
+  --sl-color-accent: oklch(0.58 0.19 45);
+  --sl-color-accent-high: oklch(0.4 0.13 45);
+  --sl-color-white: oklch(0.21 0 0);
+  --sl-color-gray-1: oklch(0.3 0 0);
+  --sl-color-gray-2: oklch(0.4 0 0);
+  --sl-color-gray-3: oklch(0.5 0 0);
+  --sl-color-gray-4: oklch(0.65 0 0);
+  --sl-color-gray-5: oklch(0.88 0 0);
+  --sl-color-gray-6: oklch(0.94 0 0);
+  --sl-color-gray-7: oklch(0.97 0 0);
+  --sl-color-black: oklch(0.99 0 0);
+}
+
+/* Regular and medium weights only. */
+.sl-markdown-content :is(h1, h2, h3, h4, h5, h6, strong, b, th),
+:is(h1, .site-title) {
+  font-weight: 500;
+}
+
+/* Tinted, not solid: the current page is a muted fill with an orange marker. */
+.sidebar-content a[aria-current='page'] {
+  background-color: var(--sl-color-gray-6);
+  color: var(--sl-color-white);
+  box-shadow: inset 2px 0 0 var(--sl-color-accent);
+}
+.site-title {
+  color: var(--sl-color-white);
+}

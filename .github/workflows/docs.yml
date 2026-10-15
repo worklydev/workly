@@ -1,0 +1,78 @@
+# docs.workly.run: built from docs/ and api/openapi.yaml by docs-site/.
+# Pull requests and main only check that the site builds; a vX.Y.Z tag
+# publishes it, so the docs describe the latest release, not unreleased work.
+# Run it by hand with a tag to republish (e.g. after fixing a typo in docs/,
+# cherry-picked onto a new patch tag, or to roll back).
+name: docs
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - "docs/**"
+      - "docs-site/**"
+      - "api/openapi.yaml"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    paths:
+      - "docs/**"
+      - "docs-site/**"
+      - "api/openapi.yaml"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Release tag to publish (vX.Y.Z)
+        required: true
+
+defaults:
+  run:
+    working-directory: docs-site
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: docs-site/package-lock.json
+      - run: npm ci
+      - name: Type-check
+        run: npm run check
+      - name: Build
+        run: npm run build
+        env:
+          # Links to repo files point at the published tag.
+          DOCS_REF: ${{ inputs.ref || (github.ref_type == 'tag' && github.ref_name) || 'main' }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docs-site
+          # The config travels with the build, so publishing needs no checkout.
+          path: |
+            docs-site/dist/
+            docs-site/wrangler.jsonc
+
+  publish:
+    needs: build
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: docs
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: docs-site
+          path: docs-site/
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # The action's default wrangler predates assets-only Workers.
+          wranglerVersion: "4.146.0"
+          workingDirectory: docs-site
+          command: deploy

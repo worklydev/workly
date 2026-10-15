@@ -1,0 +1,45 @@
+{
+  "name": "@workly/sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for Workly, the open-source HTTP task queue",
+  "keywords": [
+    "task queue",
+    "background jobs",
+    "webhooks",
+    "http"
+  ],
+  "license": "Apache-2.0",
+  "homepage": "https://workly.run",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/worklydev/workly.git",
+    "directory": "sdks/typescript"
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "check": "tsc && oxlint && prettier --check .",
+    "format": "prettier --write .",
+    "test": "node --test 'test/**/*.test.ts'"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "oxlint": "^1.86.0",
+    "prettier": "^3.9.9",
+    "typescript": "~6.0.2"
+  }
+}

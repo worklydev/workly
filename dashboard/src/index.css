@@ -1,0 +1,139 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/jetbrains-mono';
+
+/* Let a wrapping app (workly-cloud) use these tokens and classes too. */
+@source ".";
+
+@custom-variant dark (&:is(.dark *));
+/* Base UI state attributes, e.g. data-open:animate-in. */
+@custom-variant data-open (&:where([data-open]:not([data-open="false"])));
+@custom-variant data-closed (&:where([data-closed]:not([data-closed="false"])));
+@custom-variant data-active (&:where([data-active]:not([data-active="false"])));
+@custom-variant data-disabled (&:where([data-disabled]:not([data-disabled="false"])));
+
+/* Tokens — see DESIGN.md. Flat surfaces, three text levels, one orange accent. */
+:root {
+  --background: oklch(0.99 0 0);
+  --surface: oklch(0.99 0 0);
+  --foreground: oklch(0.21 0 0);
+  --card: oklch(0.97 0 0);
+  --card-foreground: oklch(0.21 0 0);
+  --popover: oklch(0.99 0 0);
+  --popover-foreground: oklch(0.21 0 0);
+  --primary: oklch(0.64 0.19 45);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.21 0 0);
+  --muted: oklch(0.94 0 0);
+  --muted-foreground: oklch(0.5 0 0);
+  --faint: oklch(0.65 0 0);
+  --accent: oklch(0.94 0 0);
+  --accent-foreground: oklch(0.21 0 0);
+  --success: oklch(0.56 0.14 150);
+  /* Yellow rather than amber, so it doesn't read as the accent. */
+  --warning: oklch(0.62 0.13 95);
+  --destructive: oklch(0.577 0.2 27);
+  /* Chart series: muted, and clear of the accent and status hues. */
+  --chart-1: oklch(0.6 0.11 250);
+  --chart-2: oklch(0.62 0.09 195);
+  --chart-3: oklch(0.58 0.11 300);
+  --chart-4: oklch(0.64 0.09 340);
+  --chart-5: oklch(0.6 0.06 230);
+  --chart-other: oklch(0.8 0 0);
+  --border: oklch(0 0 0 / 8%);
+  --input: oklch(0 0 0 / 12%);
+  --ring: oklch(0.64 0.19 45);
+  --radius: 0.5rem;
+}
+
+.dark {
+  --background: oklch(0.205 0 0);
+  --surface: oklch(0.232 0.0015 17);
+  --foreground: oklch(0.93 0 0);
+  --card: oklch(0.26 0 0);
+  --card-foreground: oklch(0.93 0 0);
+  --popover: oklch(0.26 0 0);
+  --popover-foreground: oklch(0.93 0 0);
+  --primary: oklch(0.74 0.17 50);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.26 0 0);
+  --secondary-foreground: oklch(0.93 0 0);
+  --muted: oklch(0.295 0 0);
+  --muted-foreground: oklch(0.65 0 0);
+  --faint: oklch(0.5 0 0);
+  --accent: oklch(0.295 0 0);
+  --accent-foreground: oklch(0.93 0 0);
+  --success: oklch(0.78 0.15 150);
+  --warning: oklch(0.86 0.14 95);
+  --destructive: oklch(0.7 0.17 22);
+  --chart-1: oklch(0.72 0.11 250);
+  --chart-2: oklch(0.74 0.09 195);
+  --chart-3: oklch(0.7 0.11 300);
+  --chart-4: oklch(0.75 0.09 340);
+  --chart-5: oklch(0.7 0.06 230);
+  --chart-other: oklch(0.45 0 0);
+  --border: oklch(1 0 0 / 7%);
+  --input: oklch(1 0 0 / 10%);
+  --ring: oklch(0.74 0.17 50);
+}
+
+@theme inline {
+  --font-heading: var(--font-sans);
+  --font-sans: 'Geist Variable', sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-destructive: var(--destructive);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-other: var(--chart-other);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-faint: var(--faint);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']),
+  [role='option'],
+  [role='tab'] {
+    @apply cursor-pointer;
+  }
+  html {
+    @apply font-sans;
+  }
+  body {
+    @apply bg-background text-sm text-foreground antialiased;
+  }
+  .font-mono {
+    font-variant-numeric: tabular-nums;
+  }
+}

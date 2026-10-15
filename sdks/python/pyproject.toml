@@ -1,0 +1,52 @@
+[project]
+name = "workly"
+version = "0.1.0"
+description = "Python SDK for Workly, the open-source HTTP task queue"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = ["httpx>=0.27,<1"]
+keywords = ["task queue", "background jobs", "webhooks", "http"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://workly.run"
+Repository = "https://github.com/worklydev/workly"
+
+[project.optional-dependencies]
+# The workly binary (`workly dev`, the CLI), packaged in packaging/pypi.
+cli = ["workly-cli"]
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6", "pyright>=1.1.380"]
+
+[build-system]
+requires = ["uv_build>=0.8,<0.13"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.pyright]
+include = ["src", "tests"]
+typeCheckingMode = "strict"
+# Modules are private (_client.py, ...), so their members can be shared freely.
+reportPrivateUsage = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.uv]
+# workly-cli is built from this repo's releases, not needed to develop the SDK.
+exclude-dependencies = ["workly-cli"]

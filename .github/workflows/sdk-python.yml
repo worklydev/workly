@@ -1,0 +1,44 @@
+name: sdk-python
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "sdks/python/**"
+      - "api/openapi.yaml"
+      - "internal/**"
+      - "cmd/**"
+      - ".github/workflows/sdk-python.yml"
+
+defaults:
+  run:
+    working-directory: sdks/python
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.11", "3.14"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Lint and type-check
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+          uv run pyright
+
+      # Integration tests build and run the server from this commit.
+      - name: Test
+        run: uv run pytest -q
+
+      - name: Build
+        run: uv build
