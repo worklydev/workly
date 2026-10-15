@@ -55,7 +55,7 @@ jobs:
     permissions:
       id-token: write # trusted publishing; no API token stored
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: wheels
           path: dist/
