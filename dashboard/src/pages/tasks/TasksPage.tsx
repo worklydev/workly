@@ -13,6 +13,7 @@ import { LIVE } from '../../lib/api';
 import { useNow } from '../../hooks/useNow';
 import { Input } from '../../primitives/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../primitives/select';
+import { PAGE_SIZE } from '../../hooks/useListPage';
 
 const STATE_ITEMS = [
   { value: 'all', label: 'All states' },
@@ -58,7 +59,7 @@ export function TasksPage() {
   const sorting = useTaskSort(state as TaskState | 'all');
   const { sort, order } = sorting.query;
   const query = useMemo(() => {
-    const q: SearchTasksData['query'] = { sort, order };
+    const q: SearchTasksData['query'] = { sort, order, limit: PAGE_SIZE };
     if (key) q.idempotency_key = key;
     if (queue !== 'all') q.queue = queue;
     if (state !== 'all') q.state = state as TaskState;

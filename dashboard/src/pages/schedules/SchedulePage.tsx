@@ -30,6 +30,7 @@ import { EditSchedule } from './EditSchedule';
 import { RecentRuns } from './RecentRuns';
 import { runPaging } from '../../lib/runs';
 import { RunTable } from './RunTable';
+import { PAGE_SIZE } from '../../hooks/useListPage';
 
 const STATES: (RunState | 'all')[] = ['all', 'pending', 'running', 'succeeded', 'failed', 'skipped', 'cancelled'];
 
@@ -227,7 +228,7 @@ function Request({ schedule: s }: { schedule: Schedule }) {
 function Runs({ schedule }: { schedule: string }) {
   const [params, setParams] = useSearchParams();
   const state = (params.get('state') ?? 'all') as RunState | 'all';
-  const query: ListRunsData['query'] = state === 'all' ? {} : { state };
+  const query: ListRunsData['query'] = state === 'all' ? { limit: PAGE_SIZE } : { state, limit: PAGE_SIZE };
   const pages = useInfiniteQuery({
     ...listRunsInfiniteOptions({ path: { schedule }, query }),
     ...runPaging,

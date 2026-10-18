@@ -42,6 +42,7 @@ import { SortSummary } from '../../components/SortSummary';
 import { useTaskSort } from '../../lib/taskSort';
 import { EditPolicy } from './EditPolicy';
 import { EnqueueTask } from './EnqueueTask';
+import { PAGE_SIZE } from '../../hooks/useListPage';
 
 const STATES: (TaskState | 'all')[] = ['all', 'pending', 'running', 'succeeded', 'failed', 'cancelled'];
 
@@ -390,7 +391,7 @@ function QueueTasks({ queue }: { queue: Queue }) {
   const lastError = params.get('last_error');
   const counts = stateCounts(queue);
   const sorting = useTaskSort(state);
-  const query: ListTasksData['query'] = { ...sorting.query };
+  const query: ListTasksData['query'] = { ...sorting.query, limit: PAGE_SIZE };
   if (state !== 'all') query.state = state;
   if (lastError !== null) query.last_error = lastError;
   const pages = useInfiniteQuery({
