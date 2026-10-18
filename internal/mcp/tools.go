@@ -187,7 +187,7 @@ var getQueue = newTool("get_queue", "Get queue",
 	})
 
 var listTasks = newTool("list_tasks", "List tasks",
-	`Tasks, newest first, filtered by any of queue, state, idempotency key, last error and creation time. Returns summaries (state, URL, attempts, last status and error); use get_task for payloads and attempt details. Pass next_cursor as cursor for the next page. A "pending" task whose run_at is in the future is scheduled or waiting to retry.`,
+	`Tasks, newest first unless sorted otherwise, filtered by any of queue, state, idempotency key, last error and creation time. To see what runs next, list pending tasks sorted by run_at. Returns summaries (state, URL, attempts, last status and error); use get_task for payloads and attempt details. Pass next_cursor as cursor for the next page. A "pending" task whose run_at is in the future is scheduled or waiting to retry.`,
 	object(map[string]any{
 		"queue":           queueProp,
 		"state":           prop("string", "Only tasks in this state.", "enum", taskStates),
@@ -195,6 +195,8 @@ var listTasks = newTool("list_tasks", "List tasks",
 		"last_error":      prop("string", "Only tasks whose last_error is exactly this, e.g. an error from get_queue's failures."),
 		"created_after":   timeProp("Only tasks created at or after this time."),
 		"created_before":  timeProp("Only tasks created before this time."),
+		"sort":            prop("string", "Order by: created_at (default), run_at (when it runs next), last_attempt_at or attempt_count.", "enum", []string{"created_at", "run_at", "last_attempt_at", "attempt_count"}),
+		"order":           prop("string", "asc or desc. Defaults to asc (soonest first) for run_at, desc for the rest.", "enum", []string{"asc", "desc"}),
 		"limit":           prop("integer", "Tasks per page (default 20).", "minimum", 1, "maximum", 100),
 		"cursor":          prop("string", "next_cursor from the previous page."),
 	}), readOnly,
@@ -205,13 +207,16 @@ var listTasks = newTool("list_tasks", "List tasks",
 		LastError      string `json:"last_error"`
 		CreatedAfter   string `json:"created_after"`
 		CreatedBefore  string `json:"created_before"`
+		Sort           string `json:"sort"`
+		Order          string `json:"order"`
 		Limit          int    `json:"limit"`
 		Cursor         string `json:"cursor"`
 	}) (any, error) {
 		q := url.Values{}
 		for k, v := range map[string]string{
 			"queue": args.Queue, "state": args.State, "idempotency_key": args.IdempotencyKey, "last_error": args.LastError,
-			"created_after": args.CreatedAfter, "created_before": args.CreatedBefore, "cursor": args.Cursor,
+			"created_after": args.CreatedAfter, "created_before": args.CreatedBefore, "sort": args.Sort, "order": args.Order,
+			"cursor": args.Cursor,
 		} {
 			if v != "" {
 				q.Set(k, v)

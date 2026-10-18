@@ -278,7 +278,7 @@ func TestMCPTools(t *testing.T) {
 		t.Errorf("get_task = %v", got)
 	}
 
-	list := c.call("list_tasks", map[string]any{"queue": "emails", "state": "pending"})
+	list := c.call("list_tasks", map[string]any{"queue": "emails", "state": "pending", "sort": "run_at"})
 	tasks := list["tasks"].([]any)
 	if len(tasks) != 1 {
 		t.Fatalf("list_tasks = %v", list)

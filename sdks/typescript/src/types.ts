@@ -4,6 +4,9 @@
 // too, just not typed yet. Payloads and headers are passed through as they are.
 
 export type TaskState = 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+/** What tasks are listed by. `runAt` is when a task runs next: pending tasks run in that order. */
+export type TaskSort = 'createdAt' | 'runAt' | 'lastAttemptAt' | 'attemptCount';
+export type SortOrder = 'asc' | 'desc';
 export type HTTPMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 export type AttemptOutcome = 'success' | 'http_error' | 'timeout' | 'network_error' | 'lost';
 export type RunState = 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'skipped';
@@ -217,6 +220,10 @@ export interface TaskFilter {
   lastError?: string | undefined;
   createdAfter?: Date | string | undefined;
   createdBefore?: Date | string | undefined;
+  /** Defaults to `createdAt`. List pending tasks by `runAt` to see them in the order they run. */
+  sort?: TaskSort | undefined;
+  /** Defaults to `asc` (soonest first) for `runAt` and to `desc` (newest or most first) for the rest. */
+  order?: SortOrder | undefined;
 }
 
 /**

@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -240,6 +241,67 @@ func TestListTasks(t *testing.T) {
 	} {
 		if res := do(t, h, "GET", path, ""); errorCode(res) != code {
 			t.Errorf("GET %s = %d %s, want %s", path, res.status, res.body, code)
+		}
+	}
+}
+
+// Tasks sort by run_at soonest first by default, so a queue's pending tasks
+// list in the order they run; other sorts default to newest first.
+func TestListTasksSorted(t *testing.T) {
+	h := newServer(t, server.Options{DisableDispatcher: true}).Handler()
+	delays := map[string]int{}
+	for _, d := range []int{30, 10, 20} {
+		res := doBody(t, h, "POST", "/v1/queues/emails/tasks", "", fmt.Sprintf(`{"url": "http://x.test", "delay_seconds": %d}`, d))
+		delays[res.json["id"].(string)] = d
+	}
+	order := func(path string) []int {
+		t.Helper()
+		var got []int
+		for {
+			res := do(t, h, "GET", path, "")
+			if res.status != 200 {
+				t.Fatalf("GET %s = %d %s", path, res.status, res.body)
+			}
+			for _, task := range res.json["tasks"].([]any) {
+				got = append(got, delays[task.(map[string]any)["id"].(string)])
+			}
+			cursor, ok := res.json["next_cursor"].(string)
+			if !ok {
+				return got
+			}
+			path = strings.Split(path, "&cursor=")[0] + "&cursor=" + cursor
+		}
+	}
+	for path, want := range map[string][]int{
+		"/v1/queues/emails/tasks?state=pending&sort=run_at&limit=1": {10, 20, 30},
+		"/v1/queues/emails/tasks?sort=run_at&order=desc&limit=1":    {30, 20, 10},
+		"/v1/tasks?sort=run_at&limit=2":                             {10, 20, 30},
+		// Tasks created in the same millisecond may be in either order.
+		"/v1/queues/emails/tasks?sort=created_at&order=asc&limit=2":                  nil,
+		"/v1/queues/emails/tasks?limit=2":                                            nil,
+		"/v1/queues/emails/tasks?sort=attempt_count&order=asc&limit=1&state=pending": nil,
+	} {
+		got := order(path)
+		if want == nil {
+			if len(got) != 3 {
+				t.Errorf("GET %s listed %d tasks, want 3", path, len(got))
+			}
+			continue
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("GET %s = %v, want %v", path, got, want)
+		}
+	}
+
+	next := do(t, h, "GET", "/v1/queues/emails/tasks?sort=run_at&limit=1", "").json["next_cursor"].(string)
+	for _, path := range []string{
+		"/v1/queues/emails/tasks?sort=soonest",
+		"/v1/queues/emails/tasks?order=up",
+		"/v1/queues/emails/tasks?sort=attempt_count&cursor=" + next,
+		"/v1/tasks?cursor=nonsense",
+	} {
+		if res := do(t, h, "GET", path, ""); errorCode(res) != "invalid_request" {
+			t.Errorf("GET %s = %d %s, want invalid_request", path, res.status, res.body)
 		}
 	}
 }

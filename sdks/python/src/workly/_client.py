@@ -30,8 +30,10 @@ from ._models import (
     RunPage,
     RunState,
     Schedule,
+    SortOrder,
     Task,
     TaskPage,
+    TaskSort,
     TaskState,
 )
 
@@ -274,9 +276,16 @@ class Tasks:
         last_error: str | None = None,
         created_after: datetime | None = None,
         created_before: datetime | None = None,
+        sort: TaskSort | None = None,
+        order: SortOrder | None = None,
         page_size: int | None = None,
     ) -> Iterator[Task]:
-        """Tasks matching every filter given, newest first, fetching pages as needed."""
+        """Tasks matching every filter given, fetching pages as needed.
+
+        Newest first, unless `sort` and `order` say otherwise: `order` defaults
+        to "asc" (soonest first) for `sort="run_at"` and to "desc" for the rest.
+        List pending tasks by `run_at` to see them in the order they run.
+        """
         cursor: str | None = None
         while True:
             page = self.list_page(
@@ -286,6 +295,8 @@ class Tasks:
                 last_error=last_error,
                 created_after=created_after,
                 created_before=created_before,
+                sort=sort,
+                order=order,
                 cursor=cursor,
                 limit=page_size,
             )
@@ -303,6 +314,8 @@ class Tasks:
         last_error: str | None = None,
         created_after: datetime | None = None,
         created_before: datetime | None = None,
+        sort: TaskSort | None = None,
+        order: SortOrder | None = None,
         cursor: str | None = None,
         limit: int | None = None,
     ) -> TaskPage:
@@ -314,6 +327,8 @@ class Tasks:
             last_error=last_error,
             created_after=created_after,
             created_before=created_before,
+            sort=sort,
+            order=order,
             cursor=cursor,
             limit=limit,
         )

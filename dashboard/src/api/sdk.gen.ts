@@ -179,7 +179,9 @@ export const getActivity = <ThrowOnError extends boolean = false>(options?: Opti
 });
 
 /**
- * List a queue's tasks, newest first
+ * List a queue's tasks
+ *
+ * Newest first, unless `sort` and `order` say otherwise.
  */
 export const listTasks = <ThrowOnError extends boolean = false>(options: Options<ListTasksData, ThrowOnError>): RequestResult<ListTasksResponses, ListTasksErrors, ThrowOnError> => (options.client ?? client).get<ListTasksResponses, ListTasksErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
@@ -229,10 +231,11 @@ export const createTasks = <ThrowOnError extends boolean = false>(options: Optio
 });
 
 /**
- * Search tasks across queues, newest first
+ * Search tasks across queues
  *
  * All filters are optional and combine with AND. To find one task by
- * ID, use `GET /v1/tasks/{id}`.
+ * ID, use `GET /v1/tasks/{id}`. Newest first, unless `sort` and
+ * `order` say otherwise.
  *
  */
 export const searchTasks = <ThrowOnError extends boolean = false>(options?: Options<SearchTasksData, ThrowOnError>): RequestResult<SearchTasksResponses, SearchTasksErrors, ThrowOnError> => (options?.client ?? client).get<SearchTasksResponses, SearchTasksErrors, ThrowOnError>({

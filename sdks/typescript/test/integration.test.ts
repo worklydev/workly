@@ -206,6 +206,13 @@ describe('integration', { skip: server ? false : 'set WORKLY_BIN or install Go' 
     assert.equal(page.tasks.length, 2);
     assert.ok(page.nextCursor);
 
+    // Pending tasks by runAt come in the order they run, soonest first.
+    const later = await workly.tasks.enqueue(queue, { url: 'https://example.test', delaySeconds: 60 });
+    const soon = await workly.tasks.enqueue(queue, { url: 'https://example.test', delaySeconds: 30 });
+    const byRunAt: string[] = [];
+    for await (const t of workly.tasks.list({ queue, sort: 'runAt', pageSize: 2 })) byRunAt.push(t.id);
+    assert.deepEqual(byRunAt.slice(-2), [soon.id, later.id]);
+
     const byKey: Task[] = [];
     for await (const t of workly.tasks.list({ queue, idempotencyKey: 'k3' })) byKey.push(t);
     assert.deepEqual(

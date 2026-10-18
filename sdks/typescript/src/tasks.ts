@@ -9,6 +9,7 @@ import type {
   Task,
   TaskFilter,
   TaskPage,
+  TaskSort,
   TaskSpec,
 } from './types.ts';
 
@@ -116,7 +117,8 @@ export class Tasks {
   }
 
   /**
-   * Tasks matching every filter given, newest first, fetching pages as needed.
+   * Tasks matching every filter given, fetching pages as needed. Newest first,
+   * unless `sort` and `order` say otherwise.
    *
    * ```ts
    * for await (const task of workly.tasks.list({ queue: 'emails', state: 'failed' })) { ... }
@@ -144,6 +146,8 @@ export class Tasks {
         last_error: options.lastError,
         created_after: timestamp(options.createdAfter, 'createdAfter'),
         created_before: timestamp(options.createdBefore, 'createdBefore'),
+        sort: options.sort && SORT_FIELDS[options.sort],
+        order: options.order,
         cursor: options.cursor,
         limit: options.limit?.toString(),
       },
@@ -166,6 +170,13 @@ export class Tasks {
     });
   }
 }
+
+const SORT_FIELDS: Record<TaskSort, string> = {
+  createdAt: 'created_at',
+  runAt: 'run_at',
+  lastAttemptAt: 'last_attempt_at',
+  attemptCount: 'attempt_count',
+};
 
 function taskBody(spec: TaskSpec): Record<string, unknown> {
   if (spec.payload !== undefined && spec.body !== undefined) throw new TypeError('pass payload or body, not both');

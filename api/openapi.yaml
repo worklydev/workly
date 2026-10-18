@@ -335,7 +335,8 @@ paths:
           $ref: "#/components/responses/Error"
     get:
       operationId: listTasks
-      summary: List a queue's tasks, newest first
+      summary: List a queue's tasks
+      description: Newest first, unless `sort` and `order` say otherwise.
       tags: [tasks]
       security: [{bearerAuth: []}]
       parameters:
@@ -344,6 +345,8 @@ paths:
           schema:
             $ref: "#/components/schemas/TaskState"
         - $ref: "#/components/parameters/LastError"
+        - $ref: "#/components/parameters/TaskSort"
+        - $ref: "#/components/parameters/SortOrder"
         - $ref: "#/components/parameters/Cursor"
         - $ref: "#/components/parameters/Limit"
       responses:
@@ -394,10 +397,11 @@ paths:
   /v1/tasks:
     get:
       operationId: searchTasks
-      summary: Search tasks across queues, newest first
+      summary: Search tasks across queues
       description: |
         All filters are optional and combine with AND. To find one task by
-        ID, use `GET /v1/tasks/{id}`.
+        ID, use `GET /v1/tasks/{id}`. Newest first, unless `sort` and
+        `order` say otherwise.
       tags: [tasks]
       security: [{bearerAuth: []}]
       parameters:
@@ -426,6 +430,8 @@ paths:
           schema:
             type: string
             format: date-time
+        - $ref: "#/components/parameters/TaskSort"
+        - $ref: "#/components/parameters/SortOrder"
         - $ref: "#/components/parameters/Cursor"
         - $ref: "#/components/parameters/Limit"
       responses:
@@ -920,7 +926,9 @@ components:
     Cursor:
       name: cursor
       in: query
-      description: The `next_cursor` of the previous page.
+      description: |
+        The `next_cursor` of the previous page, requested with the same
+        filters and order.
       schema:
         type: string
     Limit:
@@ -931,6 +939,32 @@ components:
         minimum: 1
         maximum: 200
         default: 50
+    TaskSort:
+      name: sort
+      in: query
+      description: |
+        What to order tasks by:
+
+        - `created_at` (the default): when the task was enqueued.
+        - `run_at`: when it runs next. Pending tasks are delivered in this
+          order, so ascending lists them as they'll run.
+        - `last_attempt_at`: when its latest attempt finished. Tasks never
+          attempted count as oldest.
+        - `attempt_count`: how many attempts it has had.
+
+        Ties are broken by task ID.
+      schema:
+        type: string
+        enum: [created_at, run_at, last_attempt_at, attempt_count]
+    SortOrder:
+      name: order
+      in: query
+      description: |
+        `asc` or `desc`. Defaults to `asc` (soonest first) for `run_at` and
+        to `desc` (newest or most first) for the rest.
+      schema:
+        type: string
+        enum: [asc, desc]
     LastError:
       name: last_error
       in: query

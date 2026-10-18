@@ -43,25 +43,39 @@ function TableHead({ className, ...props }: React.ComponentProps<"th">) {
 }
 
 // Clickable header for a sortable column; `direction` is set on the active column only.
+// Inactive columns show a faint arrow on hover, pointing the way a click sorts.
 function SortableTableHead({
   direction,
+  next = "desc",
   onSort,
   children,
   ...props
-}: React.ComponentProps<"th"> & { direction?: "asc" | "desc"; onSort: () => void }) {
-  const Arrow = direction === "asc" ? ArrowUp : ArrowDown
+}: React.ComponentProps<"th"> & {
+  direction?: "asc" | "desc"
+  /** The direction a click on an inactive column sorts in. */
+  next?: "asc" | "desc"
+  onSort: () => void
+}) {
+  const Arrow = (direction ?? next) === "asc" ? ArrowUp : ArrowDown
   return (
     <TableHead aria-sort={direction ? `${direction}ending` : undefined} {...props}>
       <button
         type="button"
         onClick={onSort}
         className={cn(
-          "inline-flex items-center gap-1 hover:text-foreground",
+          "group/sort -mx-1 inline-flex items-center gap-1 rounded-sm px-1 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40",
           direction && "text-foreground"
         )}
       >
         {children}
-        <Arrow className={cn("size-3", !direction && "invisible")} />
+        <Arrow
+          className={cn(
+            "size-3 transition-opacity",
+            direction
+              ? "text-primary"
+              : "text-faint opacity-0 group-hover/sort:opacity-100 group-focus-visible/sort:opacity-100"
+          )}
+        />
       </button>
     </TableHead>
   )

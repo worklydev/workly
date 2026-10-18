@@ -5,8 +5,10 @@ import { useNavigate, useSearchParams } from 'react-router';
 import { listQueuesOptions, searchTasksInfiniteOptions } from '../../api/@tanstack/react-query.gen';
 import type { SearchTasksData, TaskState } from '../../api';
 import { PageHeader } from '../../components/PageHeader';
+import { SortSummary } from '../../components/SortSummary';
 import { TaskTable } from '../../components/TaskTable';
 import { taskPaging } from '../../lib/tasks';
+import { useTaskSort } from '../../lib/taskSort';
 import { LIVE } from '../../lib/api';
 import { useNow } from '../../hooks/useNow';
 import { Input } from '../../primitives/input';
@@ -53,15 +55,17 @@ export function TasksPage() {
   // The cutoff moves once a minute, not on every render, so the query key
   // stays stable between polls.
   const minute = Math.floor(useNow(60_000) / 60_000) * 60_000;
+  const sorting = useTaskSort(state as TaskState | 'all');
+  const { sort, order } = sorting.query;
   const query = useMemo(() => {
-    const q: SearchTasksData['query'] = {};
+    const q: SearchTasksData['query'] = { sort, order };
     if (key) q.idempotency_key = key;
     if (queue !== 'all') q.queue = queue;
     if (state !== 'all') q.state = state as TaskState;
     const ms = SINCE_ITEMS.find((i) => i.value === since)?.ms;
     if (ms) q.created_after = new Date(minute - ms).toISOString();
     return q;
-  }, [key, queue, state, since, minute]);
+  }, [key, queue, state, since, minute, sort, order]);
 
   const pages = useInfiniteQuery({ ...searchTasksInfiniteOptions({ query }), ...taskPaging, ...LIVE });
   const queues = useQuery({ ...listQueuesOptions(), ...LIVE });
@@ -80,7 +84,7 @@ export function TasksPage() {
 
   return (
     <>
-      <PageHeader title="Tasks" description="Search across all queues, newest first." />
+      <PageHeader title="Tasks" description="Search across all queues." />
       <div className="flex flex-wrap items-center gap-2">
         <form onSubmit={submit}>
           <Input
@@ -95,8 +99,11 @@ export function TasksPage() {
         <Filter items={queueItems} value={queue} onChange={(v) => set('queue', v)} className="w-40" />
         <Filter items={STATE_ITEMS} value={state} onChange={(v) => set('state', v)} className="w-36" />
         <Filter items={SINCE_ITEMS} value={since} onChange={(v) => set('since', v)} className="w-40" />
+        <div className="ml-auto">
+          <SortSummary sorting={sorting} />
+        </div>
       </div>
-      <TaskTable pages={pages} showQueue paused={(q) => paused.has(q)} empty="No tasks match." />
+      <TaskTable pages={pages} showQueue sorting={sorting} paused={(q) => paused.has(q)} empty="No tasks match." />
     </>
   );
 }

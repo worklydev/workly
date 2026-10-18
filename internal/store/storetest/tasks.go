@@ -1,8 +1,11 @@
 package storetest
 
 import (
+	"cmp"
 	"errors"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -564,5 +567,84 @@ func testLeaderWake(t *testing.T, open func() store.Store) {
 	case <-leader.Lost():
 		t.Fatal("leadership lost")
 	default:
+	}
+}
+
+func testListTasksSorted(t *testing.T, open func() store.Store) {
+	s := seeded(t, open)
+	ctx := t.Context()
+	ws := workspace.Default
+
+	// Attempted tasks, one at a time (claim takes the only due task).
+	retried := mustCreate(t, s, ws, store.NewTask{Queue: "emails", RunAt: now().Add(-time.Hour)})
+	attempt(t, s, retried, store.TaskPending)
+	attempt(t, s, retried, store.TaskSucceeded)
+	failed := mustCreate(t, s, ws, store.NewTask{Queue: "emails"})
+	attempt(t, s, failed, store.TaskFailed)
+	// Never attempted, with a tie on run_at.
+	for _, d := range []time.Duration{time.Hour, time.Hour, 2 * time.Hour, 30 * time.Minute} {
+		mustCreate(t, s, ws, store.NewTask{Queue: "emails", RunAt: now().Add(d)})
+	}
+	mustCreate(t, s, ws, store.NewTask{Queue: "billing"})
+
+	all, _, err := s.ListTasks(ctx, ws, store.TaskFilter{Queue: "emails", Limit: 100})
+	if err != nil {
+		t.Fatalf("ListTasks: %v", err)
+	}
+	keys := map[store.TaskSort]func(store.Task) int64{
+		store.SortCreated: func(store.Task) int64 { return 0 }, // ID order alone
+		store.SortRunAt:   func(t store.Task) int64 { return t.RunAt.UnixMilli() },
+		store.SortLastAttempt: func(t store.Task) int64 {
+			if t.LastAttemptAt == nil {
+				return 0
+			}
+			return t.LastAttemptAt.UnixMilli()
+		},
+		store.SortAttempts: func(t store.Task) int64 { return int64(t.AttemptCount) },
+	}
+	for sort, key := range keys {
+		for _, asc := range []bool{true, false} {
+			want := slices.Clone(all)
+			slices.SortFunc(want, func(a, b store.Task) int {
+				c := cmp.Or(cmp.Compare(key(a), key(b)), strings.Compare(a.ID, b.ID))
+				if !asc {
+					c = -c
+				}
+				return c
+			})
+			var got []store.Task
+			cursor := ""
+			for range len(all) {
+				page, next, err := s.ListTasks(ctx, ws, store.TaskFilter{
+					Queue: "emails", Sort: sort, Ascending: asc, Cursor: cursor, Limit: 2,
+				})
+				if err != nil {
+					t.Fatalf("ListTasks(%s, asc %v): %v", sort, asc, err)
+				}
+				got = append(got, page...)
+				if cursor = next; cursor == "" {
+					break
+				}
+			}
+			if !slices.Equal(taskIDs(got), taskIDs(want)) {
+				t.Errorf("ListTasks(%s, asc %v) = %v, want %v", sort, asc, taskIDs(got), taskIDs(want))
+			}
+		}
+	}
+
+	// A cursor only continues the listing it came from.
+	_, next, err := s.ListTasks(ctx, ws, store.TaskFilter{Queue: "emails", Sort: store.SortRunAt, Limit: 2})
+	if err != nil || next == "" {
+		t.Fatalf("ListTasks: next %q, err %v", next, err)
+	}
+	for _, f := range []store.TaskFilter{
+		{Queue: "emails", Sort: store.SortRunAt, Ascending: true, Cursor: next},
+		{Queue: "emails", Sort: store.SortAttempts, Cursor: next},
+		{Queue: "emails", Cursor: next},
+		{Queue: "emails", Sort: store.SortRunAt, Cursor: "garbage"},
+	} {
+		if _, _, err := s.ListTasks(ctx, ws, f); !errors.Is(err, store.ErrInvalidCursor) {
+			t.Errorf("ListTasks(%+v) err = %v, want ErrInvalidCursor", f, err)
+		}
 	}
 }

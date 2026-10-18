@@ -231,13 +231,20 @@ def test_list_paginates() -> None:
         return httpx.Response(200, json=pages[req.url.params.get("cursor")])
 
     tasks = client(handler).tasks.list(
-        queue="emails", state="failed", created_after=datetime(2026, 1, 1, tzinfo=UTC), page_size=2
+        queue="emails",
+        state="failed",
+        created_after=datetime(2026, 1, 1, tzinfo=UTC),
+        sort="last_attempt_at",
+        order="asc",
+        page_size=2,
     )
     assert [t.id for t in tasks] == ["task_1", "task_2", "task_3"]
     assert dict(requests[0].url.params) == {
         "queue": "emails",
         "state": "failed",
         "created_after": "2026-01-01T00:00:00+00:00",
+        "sort": "last_attempt_at",
+        "order": "asc",
         "limit": "2",
     }
     assert requests[1].url.params["cursor"] == "c1"

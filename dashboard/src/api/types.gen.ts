@@ -648,11 +648,35 @@ export type ErrorBody = {
 export type QueueName = string;
 
 /**
- * The `next_cursor` of the previous page.
+ * The `next_cursor` of the previous page, requested with the same
+ * filters and order.
+ *
  */
 export type Cursor = string;
 
 export type Limit = number;
+
+/**
+ * What to order tasks by:
+ *
+ * - `created_at` (the default): when the task was enqueued.
+ * - `run_at`: when it runs next. Pending tasks are delivered in this
+ * order, so ascending lists them as they'll run.
+ * - `last_attempt_at`: when its latest attempt finished. Tasks never
+ * attempted count as oldest.
+ * - `attempt_count`: how many attempts it has had.
+ *
+ * Ties are broken by task ID.
+ *
+ */
+export type TaskSort = 'created_at' | 'run_at' | 'last_attempt_at' | 'attempt_count';
+
+/**
+ * `asc` or `desc`. Defaults to `asc` (soonest first) for `run_at` and
+ * to `desc` (newest or most first) for the rest.
+ *
+ */
+export type SortOrder = 'asc' | 'desc';
 
 /**
  * Only tasks whose latest error is exactly this.
@@ -1133,7 +1157,29 @@ export type ListTasksData = {
          */
         last_error?: string;
         /**
-         * The `next_cursor` of the previous page.
+         * What to order tasks by:
+         *
+         * - `created_at` (the default): when the task was enqueued.
+         * - `run_at`: when it runs next. Pending tasks are delivered in this
+         * order, so ascending lists them as they'll run.
+         * - `last_attempt_at`: when its latest attempt finished. Tasks never
+         * attempted count as oldest.
+         * - `attempt_count`: how many attempts it has had.
+         *
+         * Ties are broken by task ID.
+         *
+         */
+        sort?: 'created_at' | 'run_at' | 'last_attempt_at' | 'attempt_count';
+        /**
+         * `asc` or `desc`. Defaults to `asc` (soonest first) for `run_at` and
+         * to `desc` (newest or most first) for the rest.
+         *
+         */
+        order?: 'asc' | 'desc';
+        /**
+         * The `next_cursor` of the previous page, requested with the same
+         * filters and order.
+         *
          */
         cursor?: string;
         limit?: number;
@@ -1273,7 +1319,29 @@ export type SearchTasksData = {
          */
         created_before?: string;
         /**
-         * The `next_cursor` of the previous page.
+         * What to order tasks by:
+         *
+         * - `created_at` (the default): when the task was enqueued.
+         * - `run_at`: when it runs next. Pending tasks are delivered in this
+         * order, so ascending lists them as they'll run.
+         * - `last_attempt_at`: when its latest attempt finished. Tasks never
+         * attempted count as oldest.
+         * - `attempt_count`: how many attempts it has had.
+         *
+         * Ties are broken by task ID.
+         *
+         */
+        sort?: 'created_at' | 'run_at' | 'last_attempt_at' | 'attempt_count';
+        /**
+         * `asc` or `desc`. Defaults to `asc` (soonest first) for `run_at` and
+         * to `desc` (newest or most first) for the rest.
+         *
+         */
+        order?: 'asc' | 'desc';
+        /**
+         * The `next_cursor` of the previous page, requested with the same
+         * filters and order.
+         *
          */
         cursor?: string;
         limit?: number;
@@ -1769,7 +1837,9 @@ export type ListRunsData = {
     query?: {
         state?: RunState;
         /**
-         * The `next_cursor` of the previous page.
+         * The `next_cursor` of the previous page, requested with the same
+         * filters and order.
+         *
          */
         cursor?: string;
         limit?: number;

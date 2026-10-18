@@ -48,8 +48,10 @@ from ._models import (
     RunTrigger,
     Schedule,
     SkipReason,
+    SortOrder,
     Task,
     TaskPage,
+    TaskSort,
     TaskState,
 )
 from ._requests import TaskSpec, __version__
@@ -101,8 +103,10 @@ __all__ = [
     "Schedules",
     "SignatureVerificationError",
     "SkipReason",
+    "SortOrder",
     "Task",
     "TaskPage",
+    "TaskSort",
     "TaskSpec",
     "TaskState",
     "Tasks",

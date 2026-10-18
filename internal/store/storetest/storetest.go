@@ -33,6 +33,7 @@ func Run(t *testing.T, factory Factory) {
 		{"CreateTask", testCreateTask},
 		{"Idempotency", testIdempotency},
 		{"ListTasks", testListTasks},
+		{"ListTasksSorted", testListTasksSorted},
 		{"ClaimAndFinish", testClaimAndFinish},
 		{"FinishAttempts", testFinishAttempts},
 		{"LeaderWake", testLeaderWake},

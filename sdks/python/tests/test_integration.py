@@ -196,6 +196,12 @@ def test_enqueue_many_and_search(client: workly.Workly, queue: str) -> None:
     assert len(page.tasks) == 2
     assert page.next_cursor is not None
 
+    # Pending tasks by run_at come in the order they run, soonest first.
+    later = client.tasks.enqueue(queue, url="https://example.test", delay_seconds=60)
+    soon = client.tasks.enqueue(queue, url="https://example.test", delay_seconds=30)
+    by_run_at = [t.id for t in client.tasks.list(queue=queue, sort="run_at", page_size=2)]
+    assert by_run_at[-2:] == [soon.id, later.id]
+
     [task] = client.tasks.list(idempotency_key="k3", queue=queue)
     assert task.body == "3"
 

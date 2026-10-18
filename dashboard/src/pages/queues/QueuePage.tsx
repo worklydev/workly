@@ -38,6 +38,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Tabs, TabsList, TabsTab } from '../../primitives/tabs';
 import { LONGEST_WAIT_TITLE, LongestWait } from './LongestWait';
 import { PendingCard } from './PendingCard';
+import { SortSummary } from '../../components/SortSummary';
+import { useTaskSort } from '../../lib/taskSort';
 import { EditPolicy } from './EditPolicy';
 import { EnqueueTask } from './EnqueueTask';
 
@@ -387,7 +389,8 @@ function QueueTasks({ queue }: { queue: Queue }) {
   const state = (params.get('state') ?? 'all') as TaskState | 'all';
   const lastError = params.get('last_error');
   const counts = stateCounts(queue);
-  const query: ListTasksData['query'] = {};
+  const sorting = useTaskSort(state);
+  const query: ListTasksData['query'] = { ...sorting.query };
   if (state !== 'all') query.state = state;
   if (lastError !== null) query.last_error = lastError;
   const pages = useInfiniteQuery({
@@ -407,20 +410,23 @@ function QueueTasks({ queue }: { queue: Queue }) {
   return (
     <div id={TASKS_ID} className="scroll-mt-4">
       <Section title="Tasks">
-        <Tabs value={state} onValueChange={(value) => set('state', String(value))}>
-          <TabsList>
-            {STATES.map((s) => (
-              <TabsTab key={s} value={s} className="flex items-center gap-1.5">
-                {s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
-                {s !== 'all' && counts[s] !== undefined && counts[s] > 0 && (
-                  <span className={cn('font-mono text-xs', s === 'failed' ? 'text-destructive' : 'text-faint')}>
-                    {formatCount(counts[s])}
-                  </span>
-                )}
-              </TabsTab>
-            ))}
-          </TabsList>
-        </Tabs>
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <Tabs value={state} onValueChange={(value) => set('state', String(value))}>
+            <TabsList>
+              {STATES.map((s) => (
+                <TabsTab key={s} value={s} className="flex items-center gap-1.5">
+                  {s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
+                  {s !== 'all' && counts[s] !== undefined && counts[s] > 0 && (
+                    <span className={cn('font-mono text-xs', s === 'failed' ? 'text-destructive' : 'text-faint')}>
+                      {formatCount(counts[s])}
+                    </span>
+                  )}
+                </TabsTab>
+              ))}
+            </TabsList>
+          </Tabs>
+          <SortSummary sorting={sorting} />
+        </div>
         {lastError !== null && (
           <div className="flex min-w-0 items-center gap-2 text-xs">
             <span className="shrink-0 text-muted-foreground">Last error</span>
@@ -435,6 +441,7 @@ function QueueTasks({ queue }: { queue: Queue }) {
         )}
         <TaskTable
           pages={pages}
+          sorting={sorting}
           paused={() => queue.paused}
           empty={
             lastError !== null

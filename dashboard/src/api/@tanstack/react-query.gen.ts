@@ -317,7 +317,9 @@ export const getActivityOptions = (options?: Options<GetActivityData>) => queryO
 export const listTasksQueryKey = (options: Options<ListTasksData>) => createQueryKey('listTasks', options);
 
 /**
- * List a queue's tasks, newest first
+ * List a queue's tasks
+ *
+ * Newest first, unless `sort` and `order` say otherwise.
  */
 export const listTasksOptions = (options: Options<ListTasksData>) => queryOptions<ListTasksResponse, ListTasksError, ListTasksResponse, ReturnType<typeof listTasksQueryKey>>({
     queryFn: async ({ queryKey, signal }) => {
@@ -364,7 +366,9 @@ const createInfiniteParams = <K extends Pick<QueryKey<Options>[0], 'body' | 'hea
 export const listTasksInfiniteQueryKey = (options: Options<ListTasksData>): QueryKey<Options<ListTasksData>> => createQueryKey('listTasks', options, true);
 
 /**
- * List a queue's tasks, newest first
+ * List a queue's tasks
+ *
+ * Newest first, unless `sort` and `order` say otherwise.
  */
 export const listTasksInfiniteOptions = (options: Options<ListTasksData>) => {
     const opts = infiniteQueryOptions<ListTasksResponse, ListTasksError, InfiniteData<ListTasksResponse>, QueryKey<Options<ListTasksData>>, string | Pick<QueryKey<Options<ListTasksData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
@@ -443,10 +447,11 @@ export const createTasksMutation = (options?: Partial<Options<CreateTasksData>>)
 export const searchTasksQueryKey = (options?: Options<SearchTasksData>) => createQueryKey('searchTasks', options);
 
 /**
- * Search tasks across queues, newest first
+ * Search tasks across queues
  *
  * All filters are optional and combine with AND. To find one task by
- * ID, use `GET /v1/tasks/{id}`.
+ * ID, use `GET /v1/tasks/{id}`. Newest first, unless `sort` and
+ * `order` say otherwise.
  *
  */
 export const searchTasksOptions = (options?: Options<SearchTasksData>) => queryOptions<SearchTasksResponse, SearchTasksError, SearchTasksResponse, ReturnType<typeof searchTasksQueryKey>>({
@@ -465,10 +470,11 @@ export const searchTasksOptions = (options?: Options<SearchTasksData>) => queryO
 export const searchTasksInfiniteQueryKey = (options?: Options<SearchTasksData>): QueryKey<Options<SearchTasksData>> => createQueryKey('searchTasks', options, true);
 
 /**
- * Search tasks across queues, newest first
+ * Search tasks across queues
  *
  * All filters are optional and combine with AND. To find one task by
- * ID, use `GET /v1/tasks/{id}`.
+ * ID, use `GET /v1/tasks/{id}`. Newest first, unless `sort` and
+ * `order` say otherwise.
  *
  */
 export const searchTasksInfiniteOptions = (options?: Options<SearchTasksData>) => {

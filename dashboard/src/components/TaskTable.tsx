@@ -10,8 +10,17 @@ import { errorMessage } from '../lib/api';
 import { useFromHere } from '../lib/from';
 import { displayState } from '../lib/states';
 import type { TaskPages } from '../lib/tasks';
+import type { SortField, TaskSorting } from '../lib/taskSort';
 import { Button } from '../primitives/button';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../primitives/table';
+import {
+  SortableTableHead,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '../primitives/table';
 import { ConfirmButton } from './ConfirmButton';
 import { CursorPager } from './ListControls';
 import { useCursorPages } from '../hooks/useCursorPages';
@@ -26,9 +35,11 @@ type Props = {
   empty: string;
   /** Whether a queue is paused, so its pending tasks don't read as about to run. */
   paused?: (queue: string) => boolean;
+  /** Makes the columns it can sort by clickable. */
+  sorting?: TaskSorting;
 };
 
-export function TaskTable({ pages, showQueue, empty, paused = () => false }: Props) {
+export function TaskTable({ pages, showQueue, empty, paused = () => false, sorting }: Props) {
   const navigate = useNavigate();
   const from = useFromHere();
   // Scheduled tasks become due without their data changing.
@@ -39,6 +50,21 @@ export function TaskTable({ pages, showQueue, empty, paused = () => false }: Pro
   if (pages.error) return <ErrorText error={pages.error} />;
   const tasks = page.items;
   if (tasks.length === 0) return <Muted>{empty}</Muted>;
+
+  /** A column header, clickable when the list can sort by its field. */
+  const head = (field: SortField, label: string, props: React.ComponentProps<'th'> = {}) =>
+    sorting?.fields.includes(field) ? (
+      <SortableTableHead
+        {...props}
+        direction={sorting.sort.field === field ? sorting.sort.order : undefined}
+        next={field === 'run_at' ? 'asc' : 'desc'}
+        onSort={() => sorting.toggle(field)}
+      >
+        {label}
+      </SortableTableHead>
+    ) : (
+      <TableHead {...props}>{label}</TableHead>
+    );
 
   // Selections of tasks no longer listed (e.g. after a filter change) don't count.
   const chosen = tasks.filter((t) => selected.has(t.id));
@@ -66,11 +92,11 @@ export function TaskTable({ pages, showQueue, empty, paused = () => false }: Pro
             <TableHead>Task</TableHead>
             {showQueue && <TableHead>Queue</TableHead>}
             <TableHead>State</TableHead>
-            <TableHead className="text-right">Attempts</TableHead>
+            {head('attempt_count', 'Attempts', { className: 'text-right' })}
             <TableHead>Last result</TableHead>
-            <TableHead>Next run</TableHead>
-            <TableHead title="When the latest attempt finished">Last run</TableHead>
-            <TableHead>Created</TableHead>
+            {head('run_at', 'Next run')}
+            {head('last_attempt_at', 'Last run', { title: 'When the latest attempt finished' })}
+            {head('created_at', 'Created')}
             <TableHead>Target</TableHead>
             <TableHead className="w-0">
               <span className="sr-only">Actions</span>

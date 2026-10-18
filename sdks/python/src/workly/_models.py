@@ -10,6 +10,9 @@ from datetime import datetime
 from typing import Any, Literal
 
 TaskState = Literal["pending", "running", "succeeded", "failed", "cancelled"]
+TaskSort = Literal["created_at", "run_at", "last_attempt_at", "attempt_count"]
+"""What tasks are listed by. `run_at` is when a task runs next: pending tasks run in that order."""
+SortOrder = Literal["asc", "desc"]
 HTTPMethod = Literal["GET", "POST", "PUT", "PATCH", "DELETE"]
 AttemptOutcome = Literal["success", "http_error", "timeout", "network_error", "lost"]
 RunState = Literal["pending", "running", "succeeded", "failed", "cancelled", "skipped"]

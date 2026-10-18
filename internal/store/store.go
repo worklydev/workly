@@ -28,6 +28,9 @@ var (
 	// ErrInvalidState is returned when a task or run can't make the requested
 	// transition, e.g. cancelling a task that already succeeded.
 	ErrInvalidState = errors.New("invalid task or run state for this operation")
+	// ErrInvalidCursor is returned by ListTasks for a cursor it didn't
+	// issue, or issued for another sort.
+	ErrInvalidCursor = errors.New("invalid cursor")
 )
 
 type Store interface {
@@ -84,8 +87,9 @@ type Store interface {
 	// CreateTasks enqueues tasks atomically, as CreateTask does one.
 	CreateTasks(ctx context.Context, ws workspace.ID, ts []NewTask, autoCreateQueue bool) (tasks []Task, created []bool, err error)
 	GetTask(ctx context.Context, ws workspace.ID, id string) (Task, error)
-	// ListTasks returns tasks matching the filter, newest first. Pass the returned cursor back to
-	// get the next page; it is empty on the last page.
+	// ListTasks returns tasks matching the filter, in the filter's order
+	// (newest first by default). Pass the returned cursor back, with the
+	// same filter, to get the next page; it is empty on the last page.
 	ListTasks(ctx context.Context, ws workspace.ID, f TaskFilter) (tasks []Task, cursor string, err error)
 	// ListAttempts returns a task's attempts, oldest first.
 	ListAttempts(ctx context.Context, ws workspace.ID, taskID string) ([]Attempt, error)
@@ -444,9 +448,25 @@ type TaskFilter struct {
 	LastError      string
 	CreatedAfter   time.Time
 	CreatedBefore  time.Time
-	Cursor         string
-	Limit          int
+	// Sort defaults to SortCreated. Ties are broken by ID, in the same
+	// direction.
+	Sort      TaskSort
+	Ascending bool
+	// Cursor continues a listing with the same filter, sort and direction.
+	Cursor string
+	Limit  int
 }
+
+// TaskSort is what tasks are listed by.
+type TaskSort string
+
+const (
+	SortCreated TaskSort = "created_at"
+	SortRunAt   TaskSort = "run_at"
+	// SortLastAttempt orders tasks never attempted as oldest.
+	SortLastAttempt TaskSort = "last_attempt_at"
+	SortAttempts    TaskSort = "attempt_count"
+)
 
 type Outcome string
 

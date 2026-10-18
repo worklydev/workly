@@ -239,6 +239,48 @@ func (e TaskState) Valid() bool {
 	}
 }
 
+// Defines values for SortOrder.
+const (
+	SortOrderAsc  SortOrder = "asc"
+	SortOrderDesc SortOrder = "desc"
+)
+
+// Valid indicates whether the value is a known member of the SortOrder enum.
+func (e SortOrder) Valid() bool {
+	switch e {
+	case SortOrderAsc:
+		return true
+	case SortOrderDesc:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TaskSort.
+const (
+	TaskSortAttemptCount  TaskSort = "attempt_count"
+	TaskSortCreatedAt     TaskSort = "created_at"
+	TaskSortLastAttemptAt TaskSort = "last_attempt_at"
+	TaskSortRunAt         TaskSort = "run_at"
+)
+
+// Valid indicates whether the value is a known member of the TaskSort enum.
+func (e TaskSort) Valid() bool {
+	switch e {
+	case TaskSortAttemptCount:
+		return true
+	case TaskSortCreatedAt:
+		return true
+	case TaskSortLastAttemptAt:
+		return true
+	case TaskSortRunAt:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetActivityParamsRange.
 const (
 	GetActivityParamsRangeN1h  GetActivityParamsRange = "1h"
@@ -254,6 +296,90 @@ func (e GetActivityParamsRange) Valid() bool {
 	case GetActivityParamsRangeN24h:
 		return true
 	case GetActivityParamsRangeN7d:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListTasksParamsSort.
+const (
+	ListTasksParamsSortAttemptCount  ListTasksParamsSort = "attempt_count"
+	ListTasksParamsSortCreatedAt     ListTasksParamsSort = "created_at"
+	ListTasksParamsSortLastAttemptAt ListTasksParamsSort = "last_attempt_at"
+	ListTasksParamsSortRunAt         ListTasksParamsSort = "run_at"
+)
+
+// Valid indicates whether the value is a known member of the ListTasksParamsSort enum.
+func (e ListTasksParamsSort) Valid() bool {
+	switch e {
+	case ListTasksParamsSortAttemptCount:
+		return true
+	case ListTasksParamsSortCreatedAt:
+		return true
+	case ListTasksParamsSortLastAttemptAt:
+		return true
+	case ListTasksParamsSortRunAt:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListTasksParamsOrder.
+const (
+	ListTasksParamsOrderAsc  ListTasksParamsOrder = "asc"
+	ListTasksParamsOrderDesc ListTasksParamsOrder = "desc"
+)
+
+// Valid indicates whether the value is a known member of the ListTasksParamsOrder enum.
+func (e ListTasksParamsOrder) Valid() bool {
+	switch e {
+	case ListTasksParamsOrderAsc:
+		return true
+	case ListTasksParamsOrderDesc:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SearchTasksParamsSort.
+const (
+	SearchTasksParamsSortAttemptCount  SearchTasksParamsSort = "attempt_count"
+	SearchTasksParamsSortCreatedAt     SearchTasksParamsSort = "created_at"
+	SearchTasksParamsSortLastAttemptAt SearchTasksParamsSort = "last_attempt_at"
+	SearchTasksParamsSortRunAt         SearchTasksParamsSort = "run_at"
+)
+
+// Valid indicates whether the value is a known member of the SearchTasksParamsSort enum.
+func (e SearchTasksParamsSort) Valid() bool {
+	switch e {
+	case SearchTasksParamsSortAttemptCount:
+		return true
+	case SearchTasksParamsSortCreatedAt:
+		return true
+	case SearchTasksParamsSortLastAttemptAt:
+		return true
+	case SearchTasksParamsSortRunAt:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SearchTasksParamsOrder.
+const (
+	SearchTasksParamsOrderAsc  SearchTasksParamsOrder = "asc"
+	SearchTasksParamsOrderDesc SearchTasksParamsOrder = "desc"
+)
+
+// Valid indicates whether the value is a known member of the SearchTasksParamsOrder enum.
+func (e SearchTasksParamsOrder) Valid() bool {
+	switch e {
+	case SearchTasksParamsOrderAsc:
+		return true
+	case SearchTasksParamsOrderDesc:
 		return true
 	default:
 		return false
@@ -896,8 +1022,14 @@ type RunID = string
 // ScheduleName defines model for ScheduleName.
 type ScheduleName = string
 
+// SortOrder defines model for SortOrder.
+type SortOrder string
+
 // TaskID defines model for TaskID.
 type TaskID = string
+
+// TaskSort defines model for TaskSort.
+type TaskSort string
 
 // GetActivityParams defines parameters for GetActivity.
 type GetActivityParams struct {
@@ -940,10 +1072,33 @@ type ListTasksParams struct {
 	// LastError Only tasks whose latest error is exactly this.
 	LastError *LastError `form:"last_error,omitempty" json:"last_error,omitempty"`
 
-	// Cursor The `next_cursor` of the previous page.
+	// Sort What to order tasks by:
+	//
+	// - `created_at` (the default): when the task was enqueued.
+	// - `run_at`: when it runs next. Pending tasks are delivered in this
+	//   order, so ascending lists them as they'll run.
+	// - `last_attempt_at`: when its latest attempt finished. Tasks never
+	//   attempted count as oldest.
+	// - `attempt_count`: how many attempts it has had.
+	//
+	// Ties are broken by task ID.
+	Sort *ListTasksParamsSort `form:"sort,omitempty" json:"sort,omitempty"`
+
+	// Order `asc` or `desc`. Defaults to `asc` (soonest first) for `run_at` and
+	// to `desc` (newest or most first) for the rest.
+	Order *ListTasksParamsOrder `form:"order,omitempty" json:"order,omitempty"`
+
+	// Cursor The `next_cursor` of the previous page, requested with the same
+	// filters and order.
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
 	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
 }
+
+// ListTasksParamsSort defines parameters for ListTasks.
+type ListTasksParamsSort string
+
+// ListTasksParamsOrder defines parameters for ListTasks.
+type ListTasksParamsOrder string
 
 // CreateTaskParams defines parameters for CreateTask.
 type CreateTaskParams struct {
@@ -961,7 +1116,8 @@ type CreateTasksParams struct {
 type ListRunsParams struct {
 	State *RunState `form:"state,omitempty" json:"state,omitempty"`
 
-	// Cursor The `next_cursor` of the previous page.
+	// Cursor The `next_cursor` of the previous page, requested with the same
+	// filters and order.
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
 	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
 }
@@ -981,10 +1137,33 @@ type SearchTasksParams struct {
 	// CreatedBefore Only tasks created before this time.
 	CreatedBefore *time.Time `form:"created_before,omitempty" json:"created_before,omitempty"`
 
-	// Cursor The `next_cursor` of the previous page.
+	// Sort What to order tasks by:
+	//
+	// - `created_at` (the default): when the task was enqueued.
+	// - `run_at`: when it runs next. Pending tasks are delivered in this
+	//   order, so ascending lists them as they'll run.
+	// - `last_attempt_at`: when its latest attempt finished. Tasks never
+	//   attempted count as oldest.
+	// - `attempt_count`: how many attempts it has had.
+	//
+	// Ties are broken by task ID.
+	Sort *SearchTasksParamsSort `form:"sort,omitempty" json:"sort,omitempty"`
+
+	// Order `asc` or `desc`. Defaults to `asc` (soonest first) for `run_at` and
+	// to `desc` (newest or most first) for the rest.
+	Order *SearchTasksParamsOrder `form:"order,omitempty" json:"order,omitempty"`
+
+	// Cursor The `next_cursor` of the previous page, requested with the same
+	// filters and order.
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
 	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
 }
+
+// SearchTasksParamsSort defines parameters for SearchTasks.
+type SearchTasksParamsSort string
+
+// SearchTasksParamsOrder defines parameters for SearchTasks.
+type SearchTasksParamsOrder string
 
 // CreateAlertChannelJSONRequestBody defines body for CreateAlertChannel for application/json ContentType.
 type CreateAlertChannelJSONRequestBody = NewAlertChannel
@@ -1250,7 +1429,9 @@ type ClientInterface interface {
 	// Corresponds with POST /v1/queues/{queue}/retry-failed (the `RetryFailedTasks` operationId).
 	RetryFailedTasks(ctx context.Context, queue QueueName, params *RetryFailedTasksParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// ListTasks List a queue's tasks, newest first
+	// ListTasks List a queue's tasks
+	//
+	// Newest first, unless `sort` and `order` say otherwise.
 	//
 	// Corresponds with GET /v1/queues/{queue}/tasks (the `ListTasks` operationId).
 	ListTasks(ctx context.Context, queue QueueName, params *ListTasksParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -1427,10 +1608,11 @@ type ClientInterface interface {
 	// Corresponds with POST /v1/schedules/{schedule}/trigger (the `TriggerSchedule` operationId).
 	TriggerSchedule(ctx context.Context, schedule ScheduleName, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// SearchTasks Search tasks across queues, newest first
+	// SearchTasks Search tasks across queues
 	//
 	// All filters are optional and combine with AND. To find one task by
-	// ID, use `GET /v1/tasks/{id}`.
+	// ID, use `GET /v1/tasks/{id}`. Newest first, unless `sort` and
+	// `order` say otherwise.
 	//
 	// Corresponds with GET /v1/tasks (the `SearchTasks` operationId).
 	SearchTasks(ctx context.Context, params *SearchTasksParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -1855,7 +2037,9 @@ func (c *Client) RetryFailedTasks(ctx context.Context, queue QueueName, params *
 	return c.Client.Do(req)
 }
 
-// ListTasks List a queue's tasks, newest first
+// ListTasks List a queue's tasks
+//
+// Newest first, unless `sort` and `order` say otherwise.
 //
 // Corresponds with GET /v1/queues/{queue}/tasks (the `ListTasks` operationId).
 func (c *Client) ListTasks(ctx context.Context, queue QueueName, params *ListTasksParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -2222,10 +2406,11 @@ func (c *Client) TriggerSchedule(ctx context.Context, schedule ScheduleName, req
 	return c.Client.Do(req)
 }
 
-// SearchTasks Search tasks across queues, newest first
+// SearchTasks Search tasks across queues
 //
 // All filters are optional and combine with AND. To find one task by
-// ID, use `GET /v1/tasks/{id}`.
+// ID, use `GET /v1/tasks/{id}`. Newest first, unless `sort` and
+// `order` say otherwise.
 //
 // Corresponds with GET /v1/tasks (the `SearchTasks` operationId).
 func (c *Client) SearchTasks(ctx context.Context, params *SearchTasksParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -3125,6 +3310,30 @@ func NewListTasksRequest(server string, queue QueueName, params *ListTasksParams
 
 		}
 
+		if params.Sort != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "sort", *params.Sort, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Order != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "order", *params.Order, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
 		if params.Cursor != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "cursor", *params.Cursor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
@@ -3886,6 +4095,30 @@ func NewSearchTasksRequest(server string, params *SearchTasksParams) (*http.Requ
 
 		}
 
+		if params.Sort != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "sort", *params.Sort, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Order != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "order", *params.Order, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
 		if params.Cursor != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "cursor", *params.Cursor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
@@ -4345,7 +4578,9 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /v1/queues/{queue}/retry-failed (the `RetryFailedTasks` operationId).
 	RetryFailedTasksWithResponse(ctx context.Context, queue QueueName, params *RetryFailedTasksParams, reqEditors ...RequestEditorFn) (*RetryFailedTasksResponse, error)
 
-	// ListTasksWithResponse List a queue's tasks, newest first
+	// ListTasksWithResponse List a queue's tasks
+	//
+	// Newest first, unless `sort` and `order` say otherwise.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -4548,10 +4783,11 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /v1/schedules/{schedule}/trigger (the `TriggerSchedule` operationId).
 	TriggerScheduleWithResponse(ctx context.Context, schedule ScheduleName, reqEditors ...RequestEditorFn) (*TriggerScheduleResponse, error)
 
-	// SearchTasksWithResponse Search tasks across queues, newest first
+	// SearchTasksWithResponse Search tasks across queues
 	//
 	// All filters are optional and combine with AND. To find one task by
-	// ID, use `GET /v1/tasks/{id}`.
+	// ID, use `GET /v1/tasks/{id}`. Newest first, unless `sort` and
+	// `order` say otherwise.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -6846,7 +7082,9 @@ func (c *ClientWithResponses) RetryFailedTasksWithResponse(ctx context.Context, 
 	return ParseRetryFailedTasksResponse(rsp)
 }
 
-// ListTasksWithResponse List a queue's tasks, newest first
+// ListTasksWithResponse List a queue's tasks
+//
+// Newest first, unless `sort` and `order` say otherwise.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -7163,10 +7401,11 @@ func (c *ClientWithResponses) TriggerScheduleWithResponse(ctx context.Context, s
 	return ParseTriggerScheduleResponse(rsp)
 }
 
-// SearchTasksWithResponse Search tasks across queues, newest first
+// SearchTasksWithResponse Search tasks across queues
 //
 // All filters are optional and combine with AND. To find one task by
-// ID, use `GET /v1/tasks/{id}`.
+// ID, use `GET /v1/tasks/{id}`. Newest first, unless `sort` and
+// `order` say otherwise.
 //
 // Returns a wrapper object for the known response body format(s).
 //

@@ -101,6 +101,9 @@ func (h Handlers) ListTasks(ctx context.Context, req ListTasksRequestObject) (Li
 	if err := page(&f, req.Params.State, req.Params.Cursor, req.Params.Limit); err != nil {
 		return nil, err
 	}
+	if err := sortTasks(&f, (*string)(req.Params.Sort), (*string)(req.Params.Order)); err != nil {
+		return nil, err
+	}
 	// Distinguish an empty queue from a missing one.
 	if _, err := h.Store.GetQueue(ctx, ws, req.Queue); errors.Is(err, store.ErrNotFound) {
 		return nil, queueNotFound(req.Queue)
@@ -118,6 +121,9 @@ func (h Handlers) SearchTasks(ctx context.Context, req SearchTasksRequestObject)
 	p := req.Params
 	var f store.TaskFilter
 	if err := page(&f, p.State, p.Cursor, p.Limit); err != nil {
+		return nil, err
+	}
+	if err := sortTasks(&f, (*string)(p.Sort), (*string)(p.Order)); err != nil {
 		return nil, err
 	}
 	if p.Queue != nil {
@@ -164,8 +170,37 @@ func page(f *store.TaskFilter, state *TaskState, cursor *string, limit *int) err
 	return nil
 }
 
+// sortTasks applies the sort and order parameters shared by the task
+// listings. Times sort newest first, except run_at: soonest first is the
+// order pending tasks run in.
+func sortTasks(f *store.TaskFilter, sort, order *string) error {
+	if sort != nil {
+		switch s := store.TaskSort(*sort); s {
+		case store.SortCreated, store.SortRunAt, store.SortLastAttempt, store.SortAttempts:
+			f.Sort = s
+		default:
+			return invalid("unknown sort %q; use created_at, run_at, last_attempt_at or attempt_count", *sort)
+		}
+	}
+	f.Ascending = f.Sort == store.SortRunAt
+	if order != nil {
+		switch *order {
+		case "asc":
+			f.Ascending = true
+		case "desc":
+			f.Ascending = false
+		default:
+			return invalid("unknown order %q; use asc or desc", *order)
+		}
+	}
+	return nil
+}
+
 func (h Handlers) listTasks(ctx context.Context, f store.TaskFilter) (TaskList, error) {
 	tasks, cursor, err := h.Store.ListTasks(ctx, workspaceID(ctx), f)
+	if errors.Is(err, store.ErrInvalidCursor) {
+		return TaskList{}, invalid("cursor is not from this listing: pass the next_cursor of the previous page, with the same filters, sort and order")
+	}
 	if err != nil {
 		return TaskList{}, err
 	}

@@ -203,6 +203,8 @@ describe('tasks', () => {
       lastError: 'HTTP 500',
       createdAfter: new Date('2030-01-01T00:00:00Z'),
       createdBefore: '2030-02-01T00:00:00Z',
+      sort: 'lastAttemptAt',
+      order: 'asc',
       limit: 10,
     });
     assert.deepEqual(Object.fromEntries(sent[0]!.url.searchParams), {
@@ -210,6 +212,8 @@ describe('tasks', () => {
       last_error: 'HTTP 500',
       created_after: '2030-01-01T00:00:00.000Z',
       created_before: '2030-02-01T00:00:00Z',
+      sort: 'last_attempt_at',
+      order: 'asc',
       limit: '10',
     });
   });

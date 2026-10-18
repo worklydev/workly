@@ -731,12 +731,18 @@ func (s *Store) ListTasks(ctx context.Context, ws workspace.ID, f store.TaskFilt
 		query += ` AND created_at < ?`
 		args = append(args, s.ts(f.CreatedBefore))
 	}
-	if f.Cursor != "" {
-		query += ` AND id < ?`
-		args = append(args, f.Cursor)
+	order, err := s.taskOrder(f)
+	if err != nil {
+		return nil, "", err
 	}
+	after, afterArgs, orderBy, err := order.clause(f.Cursor)
+	if err != nil {
+		return nil, "", err
+	}
+	query += after
+	args = append(args, afterArgs...)
 	// Fetch one extra row to know whether there is a next page.
-	query += ` ORDER BY id DESC LIMIT ?`
+	query += orderBy + ` LIMIT ?`
 	args = append(args, f.Limit+1)
 
 	tasks, err := s.listTasks(ctx, s.db, query, args...)
@@ -746,7 +752,7 @@ func (s *Store) ListTasks(ctx context.Context, ws workspace.ID, f store.TaskFilt
 	var cursor string
 	if len(tasks) > f.Limit {
 		tasks = tasks[:f.Limit]
-		cursor = tasks[len(tasks)-1].ID
+		cursor = order.cursor(tasks[len(tasks)-1])
 	}
 	return tasks, cursor, nil
 }

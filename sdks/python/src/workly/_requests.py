@@ -14,7 +14,7 @@ from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Required, TypedDict
 from urllib.parse import quote
 
-from ._models import AlertChannelType, HTTPMethod, RunState, TaskState
+from ._models import AlertChannelType, HTTPMethod, RunState, SortOrder, TaskSort, TaskState
 
 DEFAULT_URL = "http://localhost:7337"
 
@@ -182,6 +182,8 @@ def search_tasks(
     last_error: str | None,
     created_after: datetime | None,
     created_before: datetime | None,
+    sort: TaskSort | None,
+    order: SortOrder | None,
     cursor: str | None,
     limit: int | None,
 ) -> Request:
@@ -198,6 +200,10 @@ def search_tasks(
         params["created_after"] = _timestamp(created_after, "created_after")
     if created_before is not None:
         params["created_before"] = _timestamp(created_before, "created_before")
+    if sort is not None:
+        params["sort"] = sort
+    if order is not None:
+        params["order"] = order
     if cursor is not None:
         params["cursor"] = cursor
     if limit is not None:
