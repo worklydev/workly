@@ -18,7 +18,8 @@ import { ActivityChart } from './ActivityChart';
 import { useRange, useRangeSince } from '../../hooks/useRange';
 import { EditPolicy } from './EditPolicy';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../primitives/table';
-import { Behind } from './Behind';
+import { LONGEST_WAIT_TITLE, LongestWait } from './LongestWait';
+import { PendingCard } from './PendingCard';
 import { limits } from '../../lib/queues';
 import { useNow } from '../../hooks/useNow';
 import { useListPage } from '../../hooks/useListPage';
@@ -72,18 +73,15 @@ function Totals({ queues }: { queues: Queue[] }) {
   const failed = sum('failed');
 
   return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-      <StatCard label="Due" value={formatCount(sum('due'))} title="Pending tasks that are due now" />
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <PendingCard due={sum('due')} scheduled={sum('scheduled')} to="/tasks?state=pending" />
       <StatCard label="Running" value={formatCount(sum('running'))} />
       <StatCard
-        label="Scheduled"
-        value={formatCount(sum('scheduled'))}
-        title="Pending tasks due later, including ones waiting to retry"
-      />
-      <StatCard
-        label="Most behind"
+        label="Longest wait"
         value={oldest ? formatDuration(behind) : '—'}
+        detail={oldest ? 'oldest task past its run time' : 'nothing waiting'}
         tone={behind > 60_000 ? 'warning' : undefined}
+        title={LONGEST_WAIT_TITLE}
       />
       <StatCard
         label="Failed"
@@ -130,13 +128,16 @@ function QueueTable({ queues }: { queues: Queue[] }) {
       <TableHeader>
         <TableRow>
           <TableHead>Queue</TableHead>
-          <TableHead className="text-right">Due</TableHead>
+          <TableHead className="text-right" title="Tasks not run yet: due now, or scheduled for later">
+            Pending
+          </TableHead>
           <TableHead className="text-right">Running</TableHead>
-          <TableHead className="text-right">Scheduled</TableHead>
           <TableHead className="text-right" title="Failed tasks still kept (WORKLY_RETENTION)">
             Failed
           </TableHead>
-          <TableHead className="text-right">Behind</TableHead>
+          <TableHead className="text-right" title={LONGEST_WAIT_TITLE}>
+            Longest wait
+          </TableHead>
           <TableHead className="text-right" title={`Tasks that succeeded or failed in the last ${range}`}>
             Done {range}
           </TableHead>
@@ -157,16 +158,15 @@ function QueueTable({ queues }: { queues: Queue[] }) {
                 {q.paused && <Badge variant="warning">paused</Badge>}
               </div>
             </TableCell>
-            <TableCell className="text-right font-mono text-xs">{formatCount(q.stats?.due ?? 0)}</TableCell>
-            <TableCell className="text-right font-mono text-xs">{formatCount(q.stats?.running ?? 0)}</TableCell>
-            <TableCell className="text-right font-mono text-xs text-muted-foreground">
-              {formatCount(q.stats?.scheduled ?? 0)}
+            <TableCell className="text-right font-mono text-xs">
+              {formatCount(Math.min(COUNT_LIMIT, (q.stats?.due ?? 0) + (q.stats?.scheduled ?? 0)))}
             </TableCell>
+            <TableCell className="text-right font-mono text-xs">{formatCount(q.stats?.running ?? 0)}</TableCell>
             <TableCell className="text-right font-mono text-xs">
               <Failed n={q.stats?.failed ?? 0} />
             </TableCell>
             <TableCell className="text-right font-mono text-xs">
-              <Behind since={q.stats?.oldest_due_at} />
+              <LongestWait since={q.stats?.oldest_due_at} />
             </TableCell>
             <DayActivity activity={day.get(q.name)} />
             <TableCell className="text-xs text-muted-foreground">{limits(q)}</TableCell>

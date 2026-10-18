@@ -179,7 +179,7 @@ export function DesignPage() {
 
         <Section title="Card & code">
           <div className="grid grid-cols-3 gap-3">
-            <StatCard label="Due" value="1,204" />
+            <StatCard label="Pending" value="1,204" detail="1,180 now · 24 scheduled" />
             <Card className="col-span-2">
               <CardHeader>
                 <CardTitle>Card title</CardTitle>

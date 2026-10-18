@@ -3,12 +3,20 @@ import { Link } from 'react-router';
 import { Card, CardDescription } from '../primitives/card';
 import { cn } from 'cn';
 
-type Props = { label: string; value: ReactNode; tone?: 'warning' | 'danger'; to?: string; title?: string };
+type Props = {
+  label: string;
+  value: ReactNode;
+  /** A short line under the value, for what the number means. */
+  detail?: ReactNode;
+  tone?: 'warning' | 'danger';
+  to?: string;
+  title?: string;
+};
 
 /** A labelled number. With `to`, the card links to the tasks behind it. */
-export function StatCard({ label, value, tone, to, title }: Props) {
+export function StatCard({ label, value, detail, tone, to, title }: Props) {
   const card = (
-    <Card className={cn('gap-1', to && 'transition-colors hover:bg-muted')} title={title}>
+    <Card className={cn('h-full gap-1', to && 'transition-colors hover:bg-muted')} title={title}>
       <CardDescription>{label}</CardDescription>
       <div
         className={cn(
@@ -19,10 +27,11 @@ export function StatCard({ label, value, tone, to, title }: Props) {
       >
         {value}
       </div>
+      {detail && <p className="text-xs text-faint">{detail}</p>}
     </Card>
   );
   return to ? (
-    <Link to={to} className="rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring/40">
+    <Link to={to} className="h-full rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring/40">
       {card}
     </Link>
   ) : (

@@ -36,7 +36,8 @@ import { Badge } from '../../primitives/badge';
 import { Button } from '../../primitives/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../primitives/table';
 import { Tabs, TabsList, TabsTab } from '../../primitives/tabs';
-import { Behind } from './Behind';
+import { LONGEST_WAIT_TITLE, LongestWait } from './LongestWait';
+import { PendingCard } from './PendingCard';
 import { EditPolicy } from './EditPolicy';
 import { EnqueueTask } from './EnqueueTask';
 
@@ -56,15 +57,19 @@ export function QueuePage() {
         <QueueActions queue={queue} />
       </PageHeader>
       <Section title="Backlog">
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          <StatCard label="Due" value={formatCount(queue.stats?.due ?? 0)} title="Pending tasks that are due now" />
-          <StatCard label="Running" value={formatCount(queue.stats?.running ?? 0)} />
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+          <PendingCard due={queue.stats?.due ?? 0} scheduled={queue.stats?.scheduled ?? 0} to="?state=pending" />
           <StatCard
-            label="Scheduled"
-            value={formatCount(queue.stats?.scheduled ?? 0)}
-            title="Pending tasks due later, including ones waiting to retry"
+            label="Running"
+            value={formatCount(queue.stats?.running ?? 0)}
+            to={queue.stats?.running ? '?state=running' : undefined}
           />
-          <StatCard label="Behind" value={<Behind since={queue.stats?.oldest_due_at} />} />
+          <StatCard
+            label="Longest wait"
+            value={<LongestWait since={queue.stats?.oldest_due_at} />}
+            detail={queue.stats?.oldest_due_at ? 'oldest task past its run time' : 'nothing waiting'}
+            title={LONGEST_WAIT_TITLE}
+          />
         </div>
       </Section>
       <Activity queue={queue.name} />

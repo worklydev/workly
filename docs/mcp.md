@@ -18,12 +18,14 @@ There is nothing to install: the endpoint is part of the server, so its tools al
 claude mcp add --transport http workly http://localhost:7337/mcp
 ```
 
-For a server with `WORKLY_API_KEY` set, send the key as a bearer token:
+On [workly.run](https://workly.run), the endpoint is `https://api.workly.run/mcp`. Create an API key in the console (**API keys**) and send it as a bearer token; the agent sees that key's workspace:
 
 ```sh
-claude mcp add --transport http workly-prod https://workly.example.com/mcp \
+claude mcp add --transport http workly-prod https://api.workly.run/mcp \
   --header "Authorization: Bearer $WORKLY_API_KEY"
 ```
+
+For your own server, use its address instead (`https://<your server>/mcp`) and its `WORKLY_API_KEY`.
 
 To share the setup with your team, add it to the project's `.mcp.json` (`--scope project`) and let each person's environment provide the key:
 
@@ -33,7 +35,7 @@ To share the setup with your team, add it to the project's `.mcp.json` (`--scope
     "workly": { "type": "http", "url": "http://localhost:7337/mcp" },
     "workly-prod": {
       "type": "http",
-      "url": "https://workly.example.com/mcp",
+      "url": "https://api.workly.run/mcp",
       "headers": { "Authorization": "Bearer ${WORKLY_PROD_API_KEY}" }
     }
   }
@@ -59,7 +61,7 @@ To share the setup with your team, add it to the project's `.mcp.json` (`--scope
     "workly": { "type": "http", "url": "http://localhost:7337/mcp" },
     "workly-prod": {
       "type": "http",
-      "url": "https://workly.example.com/mcp",
+      "url": "https://api.workly.run/mcp",
       "headers": { "Authorization": "Bearer ${input:workly-key}" }
     }
   }
@@ -73,7 +75,7 @@ To share the setup with your team, add it to the project's `.mcp.json` (`--scope
 url = "http://localhost:7337/mcp"
 
 [mcp_servers.workly-prod]
-url = "https://workly.example.com/mcp"
+url = "https://api.workly.run/mcp"
 bearer_token_env_var = "WORKLY_PROD_API_KEY"
 ```
 
@@ -87,7 +89,7 @@ bearer_token_env_var = "WORKLY_PROD_API_KEY"
 | `full` | Read and write tools | `workly dev` |
 | `off` | None: `/mcp` answers 404 | |
 
-So pointing an agent at production can't enqueue, retry or cancel anything unless whoever runs the server opts in with `WORKLY_MCP=full`. The endpoint takes the same credentials as `/v1`: with `WORKLY_API_KEY` set, an agent needs the key. Anyone with the key can already do everything through the API, so `read-only` is a guard against an agent's mistakes, not an access control.
+So pointing an agent at production can't enqueue, retry or cancel anything unless whoever runs the server opts in with `WORKLY_MCP=full`. workly.run serves the full tools. The endpoint takes the same credentials as `/v1`: with `WORKLY_API_KEY` set, an agent needs the key. Anyone with the key can already do everything through the API, so `read-only` is a guard against an agent's mistakes, not an access control.
 
 ## Tools
 
