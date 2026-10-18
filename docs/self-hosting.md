@@ -47,6 +47,8 @@ What it sets up, and why:
 
 To expose the dashboard outside the cluster, add an Ingress for the `workly` Service on port 7337, and keep `WORKLY_API_KEY` set: the dashboard asks for it. The same Ingress serves `/mcp`, so developers can point their coding agents at the cluster's Workly ([MCP](mcp.md)); it's read-only unless you set `WORKLY_MCP=full`.
 
+The dashboard updates live over a long-lived stream, `GET /v1/events` (server-sent events), which replicas feed each other through Postgres `LISTEN`/`NOTIFY`. If your Ingress or proxy buffers responses or closes idle connections in under 30 seconds, the dashboard falls back to polling every few seconds; the stream sends a heartbeat every 15 seconds.
+
 Endpoints inside the cluster can be targeted directly, for example `http://billing.default.svc.cluster.local/tasks/invoice`.
 
 ## Upgrades

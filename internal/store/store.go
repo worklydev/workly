@@ -150,6 +150,21 @@ type Store interface {
 	MarkAlerted(ctx context.Context, ws workspace.ID, subjects []AlertSubject, at time.Time) error
 
 	Dispatch
+	Changes
+}
+
+// Changes carries change notices between the replicas sharing a database,
+// so each can tell the dashboards it serves that a workspace's queues,
+// tasks, schedules or runs changed. Notices are hints: they say which
+// workspaces changed, not what, and may be lost.
+type Changes interface {
+	// PublishChanges tells every replica listening, this one included, that
+	// the workspaces changed.
+	PublishChanges(ctx context.Context, ws []workspace.ID) error
+	// ListenChanges calls fn with the workspaces of each notice published
+	// from the time it is listening (it calls ready then) until ctx is done
+	// or the connection fails. fn must not block.
+	ListenChanges(ctx context.Context, ready func(), fn func([]workspace.ID)) error
 }
 
 // Dispatch holds the methods used by the dispatcher. Unlike the rest of the

@@ -39,6 +39,7 @@ Run `just test-all` before considering a change to `internal/store` done.
 - `internal/cron/`: cron expressions and next/previous times in a timezone, hand-written (no dependency). DST rules: a time in a skipped hour fires at the end of the gap, a repeated hour fires once.
 - `internal/store/`: the `Store` interface; `sqlstore/` holds the SQL shared by both databases; `postgres/` and `sqlite/` add migrations and leader election; `migrate/` is the runner and `storetest/` the conformance suite.
 - `internal/mcp/`: the MCP endpoint at `/mcp` (`docs/mcp.md`), hand-written: stateless Streamable HTTP, and tools that call the `/v1` handler in-process, so they share its validation, errors and workspace scoping. `WORKLY_MCP` picks `read-only` (default), `full` or `off`; tools with side effects are served only in `full`. When the API gains an operation agents need, add a tool and cover it in `server/mcp_test.go`.
+- `internal/live/`: live dashboard updates. API writes (`markChanges`) and the dispatcher's state changes tell the `Hub` which workspace changed; it coalesces them into change notices for every replica through the store (`store.Changes`: Postgres `LISTEN`/`NOTIFY`, in-process on SQLite), and each replica passes them to the `GET /v1/events` streams it serves. Events carry no data: the dashboard refetches its live queries (`LIVE`, `lib/live.ts`) and polls slowly while the stream is up.
 - `internal/metrics/`: Prometheus metrics on the standard library; metric names are stable API (`docs/metrics.md`).
 - `internal/signing/`: delivery signatures. The scheme is shared with the SDKs, so changes are breaking; the SDK tests reuse the test vector in `signing_test.go`.
 - `internal/id/`: prefixed ULIDs (`task_…`, `att_…`, `run_…`).
@@ -68,7 +69,7 @@ PyPI and npm uploads use trusted publishing from the `pypi` and `npm` GitHub env
 
 ## Rules
 
-1. **Spec first.** Change `api/openapi.yaml`, run `just generate`, then implement the generated `StrictServerInterface` method in `internal/api`. Only `/metrics`, `/mcp` and `/_dev/echo` live outside the spec.
+1. **Spec first.** Change `api/openapi.yaml`, run `just generate`, then implement the generated `StrictServerInterface` method in `internal/api`. Only `/metrics`, `/mcp`, `/v1/events` (the dashboard's event stream, which the generated server can't serve) and `/_dev/echo` live outside the spec.
 2. **Every store method that touches workspace data takes a `workspace.ID`.** No method may read or write across workspaces. The only exception is the dispatcher's methods (`store.Dispatch`), which find due work, sweep old tasks and report queue metrics across all workspaces. The workspace never appears in API paths; it is resolved from credentials by middleware and read with `workspace.FromContext`.
 3. **Both stores, same behaviour.** Write SQL once in `sqlstore`, portable to both databases. Any new `Store` method needs conformance tests in `internal/store/storetest` and must pass on SQLite and Postgres. Add a migration file to *both* `postgres/migrations` and `sqlite/migrations` with the same version number. Never edit a migration that has been committed; add a new one.
 4. **Timestamps are UTC.** Postgres uses `TIMESTAMPTZ`; SQLite stores Unix milliseconds as `INTEGER`. Stores return `time.Time` in UTC.

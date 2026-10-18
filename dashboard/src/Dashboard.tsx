@@ -5,6 +5,7 @@ import { client } from './api/client.gen';
 import { apiKeyAuth, type Auth } from './auth';
 import { SlotsContext, type GettingStarted, type NavItem } from './context';
 import { errorCode } from './lib/api';
+import { useLiveUpdates } from './lib/live';
 import { AppShell } from './components/AppShell';
 import { DesignPage } from './pages/DesignPage';
 import { AlertsPage } from './pages/AlertsPage';
@@ -83,6 +84,7 @@ export function Dashboard({
 
   return (
     <QueryClientProvider client={queries}>
+      <LiveUpdates />
       <SlotsContext value={{ nav, header, gettingStarted }}>
         <BrowserRouter basename={basename}>
           <Routes>
@@ -106,4 +108,9 @@ export function Dashboard({
       </SlotsContext>
     </QueryClientProvider>
   );
+}
+
+function LiveUpdates() {
+  useLiveUpdates();
+  return null;
 }

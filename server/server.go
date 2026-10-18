@@ -22,6 +22,7 @@ import (
 	"github.com/worklydev/workly/internal/api"
 	"github.com/worklydev/workly/internal/config"
 	"github.com/worklydev/workly/internal/dispatch"
+	"github.com/worklydev/workly/internal/live"
 	"github.com/worklydev/workly/internal/mcp"
 	"github.com/worklydev/workly/internal/metrics"
 	"github.com/worklydev/workly/internal/store"
@@ -211,6 +212,7 @@ type Server struct {
 	handler    http.Handler
 	dispatcher *dispatch.Dispatcher
 	metrics    *metrics.Workly
+	live       *live.Hub
 }
 
 func New(opts Options) (*Server, error) {
@@ -237,6 +239,7 @@ func New(opts Options) (*Server, error) {
 	}
 
 	m := metrics.New()
+	hub := live.New(opts.Store, opts.Logger)
 	alerts := alert.NewSender(opts.Mailer, alert.Links(opts.PublicURL))
 	apiOpts := api.Options{
 		Store:            opts.Store,
@@ -254,11 +257,12 @@ func New(opts Options) (*Server, error) {
 			userAgent(opts.Version), opts.SigningSecrets),
 		MCP:     cmp.Or(opts.MCP, MCPReadOnly),
 		Version: cmp.Or(opts.Version, "dev"),
+		Live:    hub,
 	}
 	if opts.DevEndpoints {
 		apiOpts.DevEcho = api.DevEcho([]byte(opts.SigningSecret), opts.Logger)
 	}
-	s := &Server{opts: opts, handler: api.NewHandler(apiOpts), metrics: m}
+	s := &Server{opts: opts, handler: api.NewHandler(apiOpts), metrics: m, live: hub}
 	if opts.WrapHandler != nil {
 		s.handler = opts.WrapHandler(s.handler)
 	}
@@ -276,6 +280,7 @@ func New(opts Options) (*Server, error) {
 			Metrics:               m,
 			DialControl:           opts.DeliveryDialControl,
 			Alerts:                &alert.Notifier{Store: opts.Store, Sender: alerts, Logger: opts.Logger},
+			Changed:               hub.Changed,
 		})
 	}
 	return s, nil
@@ -316,6 +321,9 @@ func (s *Server) Run(ctx context.Context) error {
 	if s.dispatcher != nil {
 		dispatcherDone.Go(func() { _ = s.dispatcher.Run(ctx) })
 	}
+	// Event streams end when the hub stops, before shutdown waits for
+	// requests to finish.
+	dispatcherDone.Go(func() { s.live.Run(ctx) })
 	// Shutdown waits for in-flight deliveries whichever way Run returns.
 	defer dispatcherDone.Wait()
 	defer cancel()

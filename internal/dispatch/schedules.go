@@ -116,6 +116,7 @@ func (s *scheduler) fireDue(ctx context.Context, now time.Time) error {
 		if !fired {
 			continue // changed since it was read; the next round sees it
 		}
+		d.opts.Changed(sc.WorkspaceID)
 		attrs := []any{"schedule", sc.Name, "run_id", run.ID, "slot", slot.Format(time.RFC3339)}
 		if sc.WorkspaceID != workspace.Default {
 			attrs = append(attrs, "workspace", sc.WorkspaceID)
@@ -148,6 +149,7 @@ func (s *scheduler) claim(ctx, deliverCtx context.Context, wg *sync.WaitGroup, d
 		return false, err
 	}
 	for _, c := range claims {
+		d.opts.Changed(c.Run.WorkspaceID)
 		s.inFlight.Add(1)
 		d.delivering.Store(c.Run.ID, struct{}{})
 		wg.Go(func() {
@@ -176,6 +178,7 @@ func (s *scheduler) finish(run store.Run, ar store.RunAttemptResult) {
 	if err != nil {
 		state = ar.NextState
 	} else {
+		d.opts.Changed(run.WorkspaceID)
 		d.metrics.ScheduleAttempts.Inc(ws, run.Schedule, string(ar.Outcome))
 		if ar.Outcome != store.OutcomeLost {
 			d.metrics.ScheduleAttemptDuration.Observe(ar.Duration().Seconds(), ws, run.Schedule)

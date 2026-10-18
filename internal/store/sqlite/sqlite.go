@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite" // registers the "sqlite" driver
@@ -17,6 +18,7 @@ import (
 	"github.com/worklydev/workly/internal/store"
 	"github.com/worklydev/workly/internal/store/migrate"
 	"github.com/worklydev/workly/internal/store/sqlstore"
+	"github.com/worklydev/workly/internal/workspace"
 )
 
 //go:embed migrations/*.sql
@@ -28,6 +30,11 @@ type Store struct {
 	migrations []migrate.Migration
 	// wake signals the in-process dispatcher when a task is enqueued.
 	wake chan struct{}
+
+	// listeners receive change notices; they're all in this process, since
+	// one process serves a SQLite database.
+	mu        sync.Mutex
+	listeners map[*func([]workspace.ID)]struct{}
 }
 
 var _ store.Store = (*Store)(nil)
@@ -64,7 +71,7 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	s := &Store{db: db, migrations: migrations, wake: make(chan struct{}, 1)}
+	s := &Store{db: db, migrations: migrations, wake: make(chan struct{}, 1), listeners: map[*func([]workspace.ID)]struct{}{}}
 	s.Store = sqlstore.New(db, sqlstore.Options{Notify: s.notify})
 	return s, nil
 }
@@ -106,6 +113,29 @@ func (s *Store) notify() {
 	case s.wake <- struct{}{}:
 	default:
 	}
+}
+
+func (s *Store) PublishChanges(ctx context.Context, ws []workspace.ID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for fn := range s.listeners {
+		(*fn)(ws)
+	}
+	return nil
+}
+
+func (s *Store) ListenChanges(ctx context.Context, ready func(), fn func([]workspace.ID)) error {
+	s.mu.Lock()
+	s.listeners[&fn] = struct{}{}
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		delete(s.listeners, &fn)
+		s.mu.Unlock()
+	}()
+	ready()
+	<-ctx.Done()
+	return ctx.Err()
 }
 
 // TryLead always succeeds: a SQLite database is served by a single process.

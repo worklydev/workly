@@ -10,6 +10,7 @@ import (
 
 	"github.com/worklydev/workly/internal/alert"
 	"github.com/worklydev/workly/internal/dispatch"
+	"github.com/worklydev/workly/internal/live"
 	"github.com/worklydev/workly/internal/mcp"
 	"github.com/worklydev/workly/internal/metrics"
 	"github.com/worklydev/workly/internal/store"
@@ -43,6 +44,9 @@ type Options struct {
 	Admission Admission
 	// Alerts sends test alerts; it defaults to one that can't send email.
 	Alerts *alert.Sender
+	// Live is told about changes and serves /v1/events; it defaults to a hub
+	// that only sees this handler's own changes, and only while it runs.
+	Live *live.Hub
 }
 
 // requestOverhead is allowed on top of MaxPayloadBytes for the rest of an
@@ -56,6 +60,9 @@ func NewHandler(opts Options) http.Handler {
 
 	if opts.Metrics == nil {
 		opts.Metrics = metrics.New()
+	}
+	if opts.Live == nil {
+		opts.Live = live.New(opts.Store, opts.Logger)
 	}
 	handlers := Handlers{
 		Store:            opts.Store,
@@ -85,12 +92,14 @@ func NewHandler(opts Options) http.Handler {
 		},
 	})
 	HandlerWithOptions(strict, StdHTTPServerOptions{
-		BaseRouter: mux,
+		BaseRouter:  mux,
+		Middlewares: []MiddlewareFunc{markChanges(opts.Live)},
 		ErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
 			writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		},
 	})
 
+	mux.Handle("GET /v1/events", serveEvents(opts.Live))
 	// Unknown API paths get a JSON 404 rather than the dashboard.
 	mux.HandleFunc("/v1/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "no such endpoint: "+r.Method+" "+r.URL.Path)

@@ -1,7 +1,14 @@
 import type { Error as ApiError } from '../api';
+import { streaming } from './live';
 
-/** Polling interval for live views. */
-export const LIVE = { refetchInterval: 3000 } as const;
+/**
+ * Options for live views: refetched on change events (see useLiveUpdates),
+ * and polled, rarely while events arrive.
+ */
+export const LIVE = {
+  meta: { live: true },
+  refetchInterval: () => (streaming() ? 30_000 : 3000),
+} as const;
 
 /** The API error's message, or `fallback` for network errors and the like. */
 export function errorMessage(error: unknown, fallback = 'Something went wrong.'): string {

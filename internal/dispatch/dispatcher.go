@@ -74,6 +74,9 @@ type Options struct {
 	// Alerts, if set, runs while this dispatcher leads, so alerts are sent
 	// from one process.
 	Alerts interface{ Run(ctx context.Context) }
+	// Changed, if set, is told when a workspace's tasks or runs change
+	// state, so dashboards can refresh. It must not block.
+	Changed func(workspace.ID)
 }
 
 type Dispatcher struct {
@@ -121,6 +124,9 @@ func New(opts Options) *Dispatcher {
 	}
 	if opts.Metrics == nil {
 		opts.Metrics = metrics.New()
+	}
+	if opts.Changed == nil {
+		opts.Changed = func(workspace.ID) {}
 	}
 	d := &Dispatcher{
 		opts:    opts,
@@ -359,6 +365,9 @@ func (d *Dispatcher) dispatch(ctx, deliverCtx context.Context, wg *sync.WaitGrou
 			return more, wait, err
 		}
 		d.unreserve(q, n-len(tasks))
+		if len(tasks) > 0 {
+			d.opts.Changed(q.WorkspaceID)
+		}
 		if len(tasks) == n {
 			if n == allot {
 				more = true
@@ -400,6 +409,7 @@ func (d *Dispatcher) finish(q store.Queue, t store.Task, ar store.AttemptResult)
 		state = ar.NextState
 	} else {
 		d.count(t, ar, state)
+		d.opts.Changed(t.WorkspaceID)
 	}
 
 	attrs := []any{

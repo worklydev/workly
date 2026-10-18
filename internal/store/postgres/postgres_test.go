@@ -2,6 +2,7 @@ package postgres_test
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -98,5 +99,37 @@ func TestLeaderWakeIgnoresOtherSchemas(t *testing.T) {
 	case <-leader.Wake():
 	case <-time.After(5 * time.Second):
 		t.Fatal("no wake-up after an enqueue in its own schema")
+	}
+}
+
+// Change notices reach every replica on the schema, in batches small enough
+// for Postgres, and no replica of another install.
+func TestChangesAcrossReplicas(t *testing.T) {
+	ctx := t.Context()
+	url := storetest.PostgresURL(t)
+	a, b, other := open(t, url), open(t, url), open(t, storetest.PostgresURL(t))
+	got, otherGot := storetest.Listen(t, b), storetest.Listen(t, other)
+
+	if err := a.PublishChanges(ctx, []workspace.ID{"one"}); err != nil {
+		t.Fatalf("PublishChanges: %v", err)
+	}
+	if ws := got.Next(t); len(ws) != 1 || ws[0] != "one" {
+		t.Fatalf("notice = %v, want [one]", ws)
+	}
+	otherGot.None(t)
+
+	var many []workspace.ID
+	for i := range 2000 {
+		many = append(many, workspace.ID(fmt.Sprintf("ws_%026d", i)))
+	}
+	if err := a.PublishChanges(ctx, many); err != nil {
+		t.Fatalf("PublishChanges(2000): %v", err)
+	}
+	var all []workspace.ID
+	for len(all) < len(many) {
+		all = append(all, got.Next(t)...)
+	}
+	if len(all) != len(many) || all[0] != many[0] || all[len(all)-1] != many[len(many)-1] {
+		t.Fatalf("got %d workspaces, want %d in order", len(all), len(many))
 	}
 }
