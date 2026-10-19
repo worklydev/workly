@@ -21,6 +21,9 @@ from ._models import (
     Delivery,
     EnqueueResult,
     FailureGroup,
+    Group,
+    GroupPage,
+    GroupStatus,
     HTTPMethod,
     MissedPolicy,
     OverlapPolicy,
@@ -62,6 +65,7 @@ class AsyncWorkly:
         self._max_retries = max_retries
         self.queues = AsyncQueues(self)
         self.tasks = AsyncTasks(self)
+        self.groups = AsyncGroups(self)
         self.schedules = AsyncSchedules(self)
         self.runs = AsyncRuns(self)
         self.alerts = AsyncAlerts(self)
@@ -210,6 +214,7 @@ class AsyncTasks:
         idempotency_key: str | None = None,
         max_attempts: int | None = None,
         timeout_seconds: float | None = None,
+        group_id: str | None = None,
         traceparent: str | None = None,
     ) -> Task:
         """Enqueue a task to deliver to `url`.
@@ -217,7 +222,8 @@ class AsyncTasks:
         `payload` is sent as JSON; `body` as raw text (use one). The queue is
         created with default settings if it doesn't exist. If
         `idempotency_key` matches a task already in the queue, that task is
-        returned and nothing is enqueued.
+        returned and nothing is enqueued. With `group_id`, the task joins
+        that group, which must be open.
         """
         spec = {
             "url": url,
@@ -231,6 +237,7 @@ class AsyncTasks:
             "idempotency_key": idempotency_key,
             "max_attempts": max_attempts,
             "timeout_seconds": timeout_seconds,
+            "group_id": group_id,
         }
         return Task._from_json(await self._client._send(r.enqueue(queue, spec, traceparent)))
 
@@ -272,6 +279,7 @@ class AsyncTasks:
         *,
         queue: str | None = None,
         state: TaskState | None = None,
+        group_id: str | None = None,
         idempotency_key: str | None = None,
         last_error: str | None = None,
         created_after: datetime | None = None,
@@ -291,6 +299,7 @@ class AsyncTasks:
             page = await self.list_page(
                 queue=queue,
                 state=state,
+                group_id=group_id,
                 idempotency_key=idempotency_key,
                 last_error=last_error,
                 created_after=created_after,
@@ -311,6 +320,7 @@ class AsyncTasks:
         *,
         queue: str | None = None,
         state: TaskState | None = None,
+        group_id: str | None = None,
         idempotency_key: str | None = None,
         last_error: str | None = None,
         created_after: datetime | None = None,
@@ -324,6 +334,7 @@ class AsyncTasks:
         req = r.search_tasks(
             queue=queue,
             state=state,
+            group_id=group_id,
             idempotency_key=idempotency_key,
             last_error=last_error,
             created_after=created_after,
@@ -341,6 +352,75 @@ class AsyncTasks:
         Buckets are 5 minutes for 1h, 1 hour for 24h and 6 hours for 7d, aligned to UTC.
         """
         return Activity._from_json(await self._client._send(r.get_activity(range)))
+
+
+class AsyncGroups:
+    """Task groups: a set of tasks, and a callback task once all have finished.
+
+    Create a group, enqueue tasks with its `group_id`, then close it. Once it
+    is closed and every task has succeeded, failed or been cancelled, it
+    completes and enqueues its `on_complete` callback, once.
+    """
+
+    def __init__(self, client: AsyncWorkly) -> None:
+        self._client = client
+
+    async def create(
+        self,
+        *,
+        name: str | None = None,
+        idempotency_key: str | None = None,
+        on_complete: r.GroupCallbackSpec | None = None,
+    ) -> Group:
+        """Create an open group.
+
+        `on_complete` is the task to enqueue when the group completes, e.g.
+        `{"queue": "jobs", "url": "https://api.example.com/done"}`; it is a
+        POST of the group's summary as JSON. If `idempotency_key` matches an
+        existing group, that group is returned and nothing is created.
+        """
+        req = r.create_group(name, idempotency_key, on_complete)
+        return Group._from_json(await self._client._send(req))
+
+    async def get(self, group_id: str) -> Group:
+        return Group._from_json(await self._client._send(r.get_group(group_id)))
+
+    async def close(self, group_id: str) -> Group:
+        """Stop the group accepting tasks, so it completes once they have finished.
+
+        A group whose tasks have all finished completes at once. Closing a
+        closed group does nothing.
+        """
+        return Group._from_json(await self._client._send(r.close_group(group_id)))
+
+    async def list(
+        self,
+        *,
+        status: GroupStatus | None = None,
+        name: str | None = None,
+        page_size: int | None = None,
+    ) -> AsyncIterator[Group]:
+        """Groups, newest first, fetching pages as needed."""
+        cursor: str | None = None
+        while True:
+            page = await self.list_page(status=status, name=name, cursor=cursor, limit=page_size)
+            for group in page.groups:
+                yield group
+            if page.next_cursor is None:
+                return
+            cursor = page.next_cursor
+
+    async def list_page(
+        self,
+        *,
+        status: GroupStatus | None = None,
+        name: str | None = None,
+        cursor: str | None = None,
+        limit: int | None = None,
+    ) -> GroupPage:
+        """One page of `list`. Pass the previous page's `next_cursor` as `cursor`."""
+        req = r.list_groups(status=status, name=name, cursor=cursor, limit=limit)
+        return GroupPage._from_json(await self._client._send(req))
 
 
 class AsyncSchedules:

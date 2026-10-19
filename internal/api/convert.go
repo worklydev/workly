@@ -57,6 +57,7 @@ func toTask(t store.Task) Task {
 		FinishedAt:    t.FinishedAt,
 		LastAttemptAt: t.LastAttemptAt,
 		RetriedAt:     t.RetriedAt,
+		GroupId:       optional(t.GroupID),
 	}
 	if t.Timeout != nil {
 		s := seconds(*t.Timeout)

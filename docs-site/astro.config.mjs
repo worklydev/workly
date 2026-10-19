@@ -37,7 +37,7 @@ export default defineConfig({
         },
         {
           label: 'Guides',
-          items: [{ slug: 'schedules' }, { slug: 'alerts' }, { slug: 'self-hosting' }, { slug: 'mcp', label: 'MCP' }],
+          items: [{ slug: 'schedules' }, { slug: 'groups' }, { slug: 'alerts' }, { slug: 'self-hosting' }, { slug: 'mcp', label: 'MCP' }],
         },
         {
           label: 'Reference',

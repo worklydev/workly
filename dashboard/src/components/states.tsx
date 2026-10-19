@@ -1,5 +1,5 @@
 import { Badge } from '../primitives/badge';
-import type { Attempt } from '../api';
+import type { Attempt, GroupStatus } from '../api';
 import { outcomeVariant, type DisplayState } from '../lib/states';
 
 const STATE = {
@@ -19,6 +19,22 @@ export function TaskStateBadge({ state }: { state: DisplayState }) {
   return (
     <Badge variant={variant} dot={dot} title={title} className={state === 'cancelled' ? 'text-faint' : undefined}>
       {state}
+    </Badge>
+  );
+}
+
+const GROUP_STATUS = {
+  open: { variant: 'neutral', dot: false, title: 'Accepting tasks' },
+  running: { variant: 'accent', dot: true, title: 'Closed, with tasks still to finish' },
+  succeeded: { variant: 'success', dot: false, title: 'Every task succeeded' },
+  failed: { variant: 'danger', dot: false, title: 'Every task finished, and some failed or were cancelled' },
+} as const;
+
+export function GroupStatusBadge({ status }: { status: GroupStatus }) {
+  const { variant, dot, title } = GROUP_STATUS[status];
+  return (
+    <Badge variant={variant} dot={dot} title={title}>
+      {status}
     </Badge>
   );
 }

@@ -248,6 +248,60 @@ describe('tasks', () => {
   });
 });
 
+describe('groups', () => {
+  const group = {
+    id: 'grp_1',
+    name: 'daily-prices',
+    status: 'open',
+    total: 0,
+    succeeded: 0,
+    failed: 0,
+    cancelled: 0,
+    remaining: 0,
+    on_complete: { queue: 'jobs', url: 'u', headers: { 'X-Job': 'prices' } },
+    callback_task_id: 'task_9',
+    created_at: '2026-10-19T10:00:00Z',
+  };
+
+  test('create, close and enqueue into a group', async () => {
+    const { fetch, sent } = fakeFetch(json(group, 201), json(group), json(task, 201), json({ tasks: [] }));
+    const workly = new Workly({ fetch });
+    const g = await workly.groups.create({
+      name: 'daily-prices',
+      onComplete: { queue: 'jobs', url: 'u', headers: { 'X-Job': 'prices' } },
+    });
+    assert.equal(g.callbackTaskId, 'task_9');
+    assert.deepEqual(g.onComplete, { queue: 'jobs', url: 'u', headers: { 'X-Job': 'prices' } });
+    await workly.groups.close(g.id);
+    await workly.tasks.enqueue('prices', { url: 'u', groupId: g.id });
+    await workly.tasks.listPage({ groupId: g.id });
+    assert.deepEqual(sent[0]?.body, {
+      name: 'daily-prices',
+      on_complete: { queue: 'jobs', url: 'u', headers: { 'X-Job': 'prices' } },
+    });
+    assert.equal(`${sent[1]?.method} ${sent[1]?.url.pathname}`, 'POST /v1/groups/grp_1/close');
+    assert.deepEqual(sent[2]?.body, { url: 'u', group_id: 'grp_1' });
+    assert.equal(sent[3]?.url.search, '?group_id=grp_1');
+  });
+
+  test('list paginates', async () => {
+    const { fetch, sent } = fakeFetch(json({ groups: [group], next_cursor: 'c1' }), json({ groups: [group] }));
+    const ids: string[] = [];
+    for await (const g of new Workly({ fetch }).groups.list({ status: 'running', pageSize: 1 })) ids.push(g.id);
+    assert.deepEqual(ids, ['grp_1', 'grp_1']);
+    assert.equal(sent[1]?.url.search, '?status=running&cursor=c1&limit=1');
+  });
+
+  test('create is retried only with a key', async () => {
+    let { fetch, sent } = fakeFetch(json({}, 503), json(group, 201));
+    await assert.rejects(new Workly({ fetch }).groups.create({ name: 'x' }));
+    assert.equal(sent.length, 1);
+    ({ fetch, sent } = fakeFetch(json({}, 503), json(group, 201)));
+    await new Workly({ fetch }).groups.create({ idempotencyKey: 'k' });
+    assert.equal(sent.length, 2);
+  });
+});
+
 describe('field names', () => {
   test('camelCase in the SDK, snake_case on the wire; payloads and headers as they are', async () => {
     const apiTask = {

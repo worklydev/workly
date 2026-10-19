@@ -42,7 +42,8 @@ export class Tasks {
    *
    * The queue is created with default settings if it doesn't exist. If
    * `idempotencyKey` matches a task already in the queue, that task is
-   * returned and nothing is enqueued.
+   * returned and nothing is enqueued. With `groupId`, the task joins that
+   * group, which must be open.
    */
   async enqueue(queue: string, spec: TaskSpec, options: EnqueueOptions = {}): Promise<Task> {
     const body = taskBody(spec);
@@ -142,6 +143,7 @@ export class Tasks {
       query: {
         queue: options.queue,
         state: options.state,
+        group_id: options.groupId,
         idempotency_key: options.idempotencyKey,
         last_error: options.lastError,
         created_after: timestamp(options.createdAfter, 'createdAfter'),

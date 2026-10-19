@@ -108,6 +108,18 @@ export function TaskPage() {
           <Property label="Timeout">
             <span className="font-mono text-xs">{task.timeout_seconds ?? queue?.timeout_seconds ?? '…'}s</span>
           </Property>
+          <Property label="Group">
+            {task.group_id ? (
+              <Link
+                to={`/groups/${task.group_id}`}
+                className="font-mono text-xs underline decoration-border underline-offset-4 hover:text-primary hover:decoration-primary"
+              >
+                {task.group_id}
+              </Link>
+            ) : (
+              <None />
+            )}
+          </Property>
           <Property label="Idempotency key">
             {task.idempotency_key ? (
               <span className="font-mono text-xs" title={task.idempotency_key}>

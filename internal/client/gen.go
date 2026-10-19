@@ -56,6 +56,30 @@ func (e AlertChannelType) Valid() bool {
 	}
 }
 
+// Defines values for GroupStatus.
+const (
+	GroupStatusFailed    GroupStatus = "failed"
+	GroupStatusOpen      GroupStatus = "open"
+	GroupStatusRunning   GroupStatus = "running"
+	GroupStatusSucceeded GroupStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the GroupStatus enum.
+func (e GroupStatus) Valid() bool {
+	switch e {
+	case GroupStatusFailed:
+		return true
+	case GroupStatusOpen:
+		return true
+	case GroupStatusRunning:
+		return true
+	case GroupStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for HTTPMethod.
 const (
 	DELETE HTTPMethod = "DELETE"
@@ -519,6 +543,11 @@ type EnqueueRequest struct {
 	// DelaySeconds Deliver after this delay. Use this or `run_at`.
 	DelaySeconds *float64 `json:"delay_seconds,omitempty"`
 
+	// GroupId Adds the task to this group, which must be open (`group_closed`
+	// otherwise). A task enqueued again with the same
+	// `idempotency_key` isn't added twice.
+	GroupId *string `json:"group_id,omitempty"`
+
 	// Headers Headers sent with every delivery. `Workly-*` headers are reserved.
 	Headers *map[string]string `json:"headers,omitempty"`
 
@@ -583,6 +612,93 @@ type FailureGroup struct {
 	StatusCode *int `json:"status_code,omitempty"`
 }
 
+// Group defines model for Group.
+type Group struct {
+	// CallbackTaskId The callback task, once the group has completed.
+	CallbackTaskId *string    `json:"callback_task_id,omitempty"`
+	Cancelled      int        `json:"cancelled"`
+	ClosedAt       *time.Time `json:"closed_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	Failed         int        `json:"failed"`
+
+	// FinishedAt When the group completed.
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+
+	// Id Example: grp_01J9ZK3M5Q8R2T4V6W8X0Y2Z4A
+	Id             string  `json:"id"`
+	IdempotencyKey *string `json:"idempotency_key,omitempty"`
+	Name           *string `json:"name,omitempty"`
+
+	// OnComplete The task a group enqueues when it completes: a `POST` whose JSON body
+	// is the group's summary (`GroupSummary`). It is delivered like any task
+	// in its queue, with the queue's retries; if the queue has been deleted
+	// by then, it is created again with default settings.
+	OnComplete *GroupCallback `json:"on_complete,omitempty"`
+
+	// Remaining Tasks still pending or running.
+	Remaining int `json:"remaining"`
+
+	// Status `open`: accepting tasks. `running`: closed, with tasks still to
+	// finish. `succeeded`: every task succeeded. `failed`: every task
+	// finished and at least one failed or was cancelled. Completed groups
+	// (`succeeded` and `failed`) don't change again, even if a task in
+	// them is retried.
+	Status    GroupStatus `json:"status"`
+	Succeeded int         `json:"succeeded"`
+
+	// Total Tasks enqueued into the group (less those whose queue was deleted).
+	Total int `json:"total"`
+}
+
+// GroupCallback The task a group enqueues when it completes: a `POST` whose JSON body
+// is the group's summary (`GroupSummary`). It is delivered like any task
+// in its queue, with the queue's retries; if the queue has been deleted
+// by then, it is created again with default settings.
+type GroupCallback struct {
+	// Headers Headers sent with the callback. `Workly-*` headers are reserved.
+	Headers *map[string]string `json:"headers,omitempty"`
+
+	// Queue The queue to enqueue the callback into.
+	Queue string `json:"queue"`
+
+	// Url The http(s) URL to deliver the callback to.
+	//
+	// Example: https://api.example.com/jobs/refresh-views
+	Url string `json:"url"`
+}
+
+// GroupList defines model for GroupList.
+type GroupList struct {
+	Groups []Group `json:"groups"`
+
+	// NextCursor Pass as `cursor` to get the next page. Absent on the last page.
+	NextCursor *string `json:"next_cursor,omitempty"`
+}
+
+// GroupStatus `open`: accepting tasks. `running`: closed, with tasks still to
+// finish. `succeeded`: every task succeeded. `failed`: every task
+// finished and at least one failed or was cancelled. Completed groups
+// (`succeeded` and `failed`) don't change again, even if a task in
+// them is retried.
+type GroupStatus string
+
+// GroupSummary The body of a group's callback.
+type GroupSummary struct {
+	Cancelled int     `json:"cancelled"`
+	Failed    int     `json:"failed"`
+	GroupId   string  `json:"group_id"`
+	Name      *string `json:"name,omitempty"`
+
+	// Status `open`: accepting tasks. `running`: closed, with tasks still to
+	// finish. `succeeded`: every task succeeded. `failed`: every task
+	// finished and at least one failed or was cancelled. Completed groups
+	// (`succeeded` and `failed`) don't change again, even if a task in
+	// them is retried.
+	Status    GroupStatus `json:"status"`
+	Succeeded int         `json:"succeeded"`
+	Total     int         `json:"total"`
+}
+
 // HTTPMethod defines model for HTTPMethod.
 type HTTPMethod string
 
@@ -621,6 +737,23 @@ type NewAlertChannel struct {
 	// Example: oncall@example.com
 	Target string           `json:"target"`
 	Type   AlertChannelType `json:"type"`
+}
+
+// NewGroup defines model for NewGroup.
+type NewGroup struct {
+	// IdempotencyKey Deduplicates group creation within the workspace.
+	IdempotencyKey *string `json:"idempotency_key,omitempty"`
+
+	// Name A label, e.g. the job the group is one run of. Names needn't be unique.
+	//
+	// Example: daily-stock-prices
+	Name *string `json:"name,omitempty"`
+
+	// OnComplete The task a group enqueues when it completes: a `POST` whose JSON body
+	// is the group's summary (`GroupSummary`). It is delivered like any task
+	// in its queue, with the queue's retries; if the queue has been deleted
+	// by then, it is created again with default settings.
+	OnComplete *GroupCallback `json:"on_complete,omitempty"`
 }
 
 // Outcome How a delivery attempt ended. `lost` means the result is unknown: the
@@ -946,8 +1079,11 @@ type Task struct {
 	CreatedAt time.Time `json:"created_at"`
 
 	// FinishedAt When the task succeeded, failed or was cancelled.
-	FinishedAt *time.Time        `json:"finished_at,omitempty"`
-	Headers    map[string]string `json:"headers"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+
+	// GroupId The group the task belongs to, if any.
+	GroupId *string           `json:"group_id,omitempty"`
+	Headers map[string]string `json:"headers"`
 
 	// Id Example: task_01J9ZK3M5Q8R2T4V6W8X0Y2Z4A
 	Id             string  `json:"id"`
@@ -1007,6 +1143,9 @@ type AlertChannelID = string
 // Cursor defines model for Cursor.
 type Cursor = string
 
+// GroupID defines model for GroupID.
+type GroupID = string
+
 // LastError defines model for LastError.
 type LastError = string
 
@@ -1045,6 +1184,17 @@ type PreviewCronParams struct {
 
 	// Timezone IANA name. Defaults to UTC.
 	Timezone *string `form:"timezone,omitempty" json:"timezone,omitempty"`
+}
+
+// ListGroupsParams defines parameters for ListGroups.
+type ListGroupsParams struct {
+	Status *GroupStatus `form:"status,omitempty" json:"status,omitempty"`
+	Name   *string      `form:"name,omitempty" json:"name,omitempty"`
+
+	// Cursor The `next_cursor` of the previous page, requested with the same
+	// filters and order.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // GetQueueActivityParams defines parameters for GetQueueActivity.
@@ -1128,6 +1278,9 @@ type SearchTasksParams struct {
 	State          *TaskState `form:"state,omitempty" json:"state,omitempty"`
 	IdempotencyKey *string    `form:"idempotency_key,omitempty" json:"idempotency_key,omitempty"`
 
+	// GroupId Only the tasks of this group.
+	GroupId *string `form:"group_id,omitempty" json:"group_id,omitempty"`
+
 	// LastError Only tasks whose latest error is exactly this.
 	LastError *LastError `form:"last_error,omitempty" json:"last_error,omitempty"`
 
@@ -1167,6 +1320,9 @@ type SearchTasksParamsOrder string
 
 // CreateAlertChannelJSONRequestBody defines body for CreateAlertChannel for application/json ContentType.
 type CreateAlertChannelJSONRequestBody = NewAlertChannel
+
+// CreateGroupJSONRequestBody defines body for CreateGroup for application/json ContentType.
+type CreateGroupJSONRequestBody = NewGroup
 
 // PutQueueJSONRequestBody defines body for PutQueue for application/json ContentType.
 type PutQueueJSONRequestBody = QueueConfig
@@ -1335,6 +1491,57 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /v1/cron/preview (the `PreviewCron` operationId).
 	PreviewCron(ctx context.Context, params *PreviewCronParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListGroups List task groups
+	//
+	// Newest first. List a group's tasks with `GET /v1/tasks?group_id=`.
+	//
+	// Corresponds with GET /v1/groups (the `ListGroups` operationId).
+	ListGroups(ctx context.Context, params *ListGroupsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateGroupWithBody Create a task group
+	//
+	// Creates an open group. Enqueue tasks into it with `group_id`, then
+	// close it with `POST /v1/groups/{id}/close`. Once it is closed and
+	// every task in it has succeeded, failed or been cancelled, it
+	// completes and enqueues its `on_complete` callback, once.
+	//
+	// If `idempotency_key` matches an existing group, that group is
+	// returned with status 200 and nothing is created.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /v1/groups (the `CreateGroup` operationId).
+	CreateGroupWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateGroup Create a task group
+	//
+	// Creates an open group. Enqueue tasks into it with `group_id`, then
+	// close it with `POST /v1/groups/{id}/close`. Once it is closed and
+	// every task in it has succeeded, failed or been cancelled, it
+	// completes and enqueues its `on_complete` callback, once.
+	//
+	// If `idempotency_key` matches an existing group, that group is
+	// returned with status 200 and nothing is created.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /v1/groups (the `CreateGroup` operationId).
+	CreateGroup(ctx context.Context, body CreateGroupJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetGroup Get a task group
+	//
+	// Corresponds with GET /v1/groups/{id} (the `GetGroup` operationId).
+	GetGroup(ctx context.Context, id GroupID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CloseGroup Close a task group
+	//
+	// Stops the group from accepting tasks; enqueueing into it then fails
+	// with `group_closed`. If its tasks have all finished (or it has none),
+	// it completes at once. Closing a closed group does nothing.
+	//
+	// Corresponds with POST /v1/groups/{id}/close (the `CloseGroup` operationId).
+	CloseGroup(ctx context.Context, id GroupID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListQueues List queues
 	//
@@ -1824,6 +2031,107 @@ func (c *Client) TestAlertChannel(ctx context.Context, id AlertChannelID, reqEdi
 // Corresponds with GET /v1/cron/preview (the `PreviewCron` operationId).
 func (c *Client) PreviewCron(ctx context.Context, params *PreviewCronParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewPreviewCronRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListGroups List task groups
+//
+// Newest first. List a group's tasks with `GET /v1/tasks?group_id=`.
+//
+// Corresponds with GET /v1/groups (the `ListGroups` operationId).
+func (c *Client) ListGroups(ctx context.Context, params *ListGroupsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListGroupsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateGroupWithBody Create a task group
+//
+// Creates an open group. Enqueue tasks into it with `group_id`, then
+// close it with `POST /v1/groups/{id}/close`. Once it is closed and
+// every task in it has succeeded, failed or been cancelled, it
+// completes and enqueues its `on_complete` callback, once.
+//
+// If `idempotency_key` matches an existing group, that group is
+// returned with status 200 and nothing is created.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /v1/groups (the `CreateGroup` operationId).
+func (c *Client) CreateGroupWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateGroupRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateGroup Create a task group
+//
+// Creates an open group. Enqueue tasks into it with `group_id`, then
+// close it with `POST /v1/groups/{id}/close`. Once it is closed and
+// every task in it has succeeded, failed or been cancelled, it
+// completes and enqueues its `on_complete` callback, once.
+//
+// If `idempotency_key` matches an existing group, that group is
+// returned with status 200 and nothing is created.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /v1/groups (the `CreateGroup` operationId).
+func (c *Client) CreateGroup(ctx context.Context, body CreateGroupJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateGroupRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetGroup Get a task group
+//
+// Corresponds with GET /v1/groups/{id} (the `GetGroup` operationId).
+func (c *Client) GetGroup(ctx context.Context, id GroupID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetGroupRequest(c.Server, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CloseGroup Close a task group
+//
+// Stops the group from accepting tasks; enqueueing into it then fails
+// with `group_closed`. If its tasks have all finished (or it has none),
+// it completes at once. Closing a closed group does nothing.
+//
+// Corresponds with POST /v1/groups/{id}/close (the `CloseGroup` operationId).
+func (c *Client) CloseGroup(ctx context.Context, id GroupID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCloseGroupRequest(c.Server, id)
 	if err != nil {
 		return nil, err
 	}
@@ -2817,6 +3125,204 @@ func NewPreviewCronRequest(server string, params *PreviewCronParams) (*http.Requ
 	}
 
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListGroupsRequest constructs an http.Request for the ListGroups method
+func NewListGroupsRequest(server string, params *ListGroupsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/groups")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Status != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "status", *params.Status, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Name != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "name", *params.Name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Cursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "cursor", *params.Cursor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreateGroupRequest calls the generic CreateGroup builder with application/json body
+func NewCreateGroupRequest(server string, body CreateGroupJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateGroupRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewCreateGroupRequestWithBody constructs an http.Request for the CreateGroup method, with any body, and a specified content type
+func NewCreateGroupRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/groups")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewGetGroupRequest constructs an http.Request for the GetGroup method
+func NewGetGroupRequest(server string, id GroupID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/groups/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCloseGroupRequest constructs an http.Request for the CloseGroup method
+func NewCloseGroupRequest(server string, id GroupID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/groups/%s/close", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -4059,6 +4565,18 @@ func NewSearchTasksRequest(server string, params *SearchTasksParams) (*http.Requ
 
 		}
 
+		if params.GroupId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "group_id", *params.GroupId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
 		if params.LastError != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "last_error", *params.LastError, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
@@ -4466,6 +4984,63 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /v1/cron/preview (the `PreviewCron` operationId).
 	PreviewCronWithResponse(ctx context.Context, params *PreviewCronParams, reqEditors ...RequestEditorFn) (*PreviewCronResponse, error)
+
+	// ListGroupsWithResponse List task groups
+	//
+	// Newest first. List a group's tasks with `GET /v1/tasks?group_id=`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /v1/groups (the `ListGroups` operationId).
+	ListGroupsWithResponse(ctx context.Context, params *ListGroupsParams, reqEditors ...RequestEditorFn) (*ListGroupsResponse, error)
+
+	// CreateGroupWithBodyWithResponse Create a task group
+	//
+	// Creates an open group. Enqueue tasks into it with `group_id`, then
+	// close it with `POST /v1/groups/{id}/close`. Once it is closed and
+	// every task in it has succeeded, failed or been cancelled, it
+	// completes and enqueues its `on_complete` callback, once.
+	//
+	// If `idempotency_key` matches an existing group, that group is
+	// returned with status 200 and nothing is created.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/groups (the `CreateGroup` operationId).
+	CreateGroupWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateGroupResponse, error)
+
+	// CreateGroupWithResponse Create a task group
+	//
+	// Creates an open group. Enqueue tasks into it with `group_id`, then
+	// close it with `POST /v1/groups/{id}/close`. Once it is closed and
+	// every task in it has succeeded, failed or been cancelled, it
+	// completes and enqueues its `on_complete` callback, once.
+	//
+	// If `idempotency_key` matches an existing group, that group is
+	// returned with status 200 and nothing is created.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/groups (the `CreateGroup` operationId).
+	CreateGroupWithResponse(ctx context.Context, body CreateGroupJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateGroupResponse, error)
+
+	// GetGroupWithResponse Get a task group
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /v1/groups/{id} (the `GetGroup` operationId).
+	GetGroupWithResponse(ctx context.Context, id GroupID, reqEditors ...RequestEditorFn) (*GetGroupResponse, error)
+
+	// CloseGroupWithResponse Close a task group
+	//
+	// Stops the group from accepting tasks; enqueueing into it then fails
+	// with `group_closed`. If its tasks have all finished (or it has none),
+	// it completes at once. Closing a closed group does nothing.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/groups/{id}/close (the `CloseGroup` operationId).
+	CloseGroupWithResponse(ctx context.Context, id GroupID, reqEditors ...RequestEditorFn) (*CloseGroupResponse, error)
 
 	// ListQueuesWithResponse List queues
 	//
@@ -5206,6 +5781,205 @@ func (r PreviewCronResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r PreviewCronResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListGroupsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *GroupList
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListGroupsResponse) GetJSON200() *GroupList {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ListGroupsResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ListGroupsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListGroupsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListGroupsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListGroupsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CreateGroupResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Group
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *Group
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r CreateGroupResponse) GetJSON200() *Group {
+	return r.JSON200
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r CreateGroupResponse) GetJSON201() *Group {
+	return r.JSON201
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r CreateGroupResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r CreateGroupResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateGroupResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateGroupResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateGroupResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetGroupResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Group
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetGroupResponse) GetJSON200() *Group {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetGroupResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetGroupResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetGroupResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetGroupResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetGroupResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CloseGroupResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Group
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r CloseGroupResponse) GetJSON200() *Group {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r CloseGroupResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r CloseGroupResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CloseGroupResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CloseGroupResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CloseGroupResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -6905,6 +7679,93 @@ func (c *ClientWithResponses) PreviewCronWithResponse(ctx context.Context, param
 	return ParsePreviewCronResponse(rsp)
 }
 
+// ListGroupsWithResponse List task groups
+//
+// Newest first. List a group's tasks with `GET /v1/tasks?group_id=`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /v1/groups (the `ListGroups` operationId).
+func (c *ClientWithResponses) ListGroupsWithResponse(ctx context.Context, params *ListGroupsParams, reqEditors ...RequestEditorFn) (*ListGroupsResponse, error) {
+	rsp, err := c.ListGroups(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListGroupsResponse(rsp)
+}
+
+// CreateGroupWithBodyWithResponse Create a task group
+//
+// Creates an open group. Enqueue tasks into it with `group_id`, then
+// close it with `POST /v1/groups/{id}/close`. Once it is closed and
+// every task in it has succeeded, failed or been cancelled, it
+// completes and enqueues its `on_complete` callback, once.
+//
+// If `idempotency_key` matches an existing group, that group is
+// returned with status 200 and nothing is created.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/groups (the `CreateGroup` operationId).
+func (c *ClientWithResponses) CreateGroupWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateGroupResponse, error) {
+	rsp, err := c.CreateGroupWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateGroupResponse(rsp)
+}
+
+// CreateGroupWithResponse Create a task group
+//
+// Creates an open group. Enqueue tasks into it with `group_id`, then
+// close it with `POST /v1/groups/{id}/close`. Once it is closed and
+// every task in it has succeeded, failed or been cancelled, it
+// completes and enqueues its `on_complete` callback, once.
+//
+// If `idempotency_key` matches an existing group, that group is
+// returned with status 200 and nothing is created.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/groups (the `CreateGroup` operationId).
+func (c *ClientWithResponses) CreateGroupWithResponse(ctx context.Context, body CreateGroupJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateGroupResponse, error) {
+	rsp, err := c.CreateGroup(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateGroupResponse(rsp)
+}
+
+// GetGroupWithResponse Get a task group
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /v1/groups/{id} (the `GetGroup` operationId).
+func (c *ClientWithResponses) GetGroupWithResponse(ctx context.Context, id GroupID, reqEditors ...RequestEditorFn) (*GetGroupResponse, error) {
+	rsp, err := c.GetGroup(ctx, id, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetGroupResponse(rsp)
+}
+
+// CloseGroupWithResponse Close a task group
+//
+// Stops the group from accepting tasks; enqueueing into it then fails
+// with `group_closed`. If its tasks have all finished (or it has none),
+// it completes at once. Closing a closed group does nothing.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/groups/{id}/close (the `CloseGroup` operationId).
+func (c *ClientWithResponses) CloseGroupWithResponse(ctx context.Context, id GroupID, reqEditors ...RequestEditorFn) (*CloseGroupResponse, error) {
+	rsp, err := c.CloseGroup(ctx, id, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCloseGroupResponse(rsp)
+}
+
 // ListQueuesWithResponse List queues
 //
 // Returns a wrapper object for the known response body format(s).
@@ -7734,6 +8595,145 @@ func ParsePreviewCronResponse(rsp *http.Response) (*PreviewCronResponse, error) 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest CronPreview
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListGroupsResponse parses an HTTP response from a ListGroupsWithResponse call
+func ParseListGroupsResponse(rsp *http.Response) (*ListGroupsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListGroupsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest GroupList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateGroupResponse parses an HTTP response from a CreateGroupWithResponse call
+func ParseCreateGroupResponse(rsp *http.Response) (*CreateGroupResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateGroupResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Group
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest Group
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetGroupResponse parses an HTTP response from a GetGroupWithResponse call
+func ParseGetGroupResponse(rsp *http.Response) (*GetGroupResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetGroupResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Group
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCloseGroupResponse parses an HTTP response from a CloseGroupWithResponse call
+func ParseCloseGroupResponse(rsp *http.Response) (*CloseGroupResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CloseGroupResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Group
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

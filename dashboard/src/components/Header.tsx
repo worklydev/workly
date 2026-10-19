@@ -11,6 +11,7 @@ import { ThemeToggle } from './ThemeToggle';
 const LABELS: Record<string, string> = {
   queues: 'Queues',
   tasks: 'Tasks',
+  groups: 'Groups',
   failures: 'Failures',
   schedules: 'Schedules',
 };

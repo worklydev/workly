@@ -162,6 +162,33 @@ client.schedules.delete("nightly-report")  # with all its runs
 
 Runs are delivered with `Workly-Run-Id`, `Workly-Schedule` and `Workly-Scheduled-For` headers and the same signature, so `verify_signature` works unchanged.
 
+## Task groups
+
+A group tracks a set of tasks and enqueues a callback task once it's closed and they've all finished: a `POST` of the group's status and counts. See [Task groups](https://docs.workly.run/groups/).
+
+```python
+group = client.groups.create(
+    name="daily-stock-prices",
+    idempotency_key="stock-prices-2026-10-19",  # creating it again returns this group
+    on_complete={"queue": "jobs", "url": "https://api.example.com/jobs/refresh-views"},
+)
+for company in companies:
+    client.tasks.enqueue(
+        "stock-prices",
+        url="https://api.example.com/jobs/update-stock-price",
+        payload={"symbol": company.symbol},
+        group_id=group.id,
+    )
+client.groups.close(group.id)  # no more tasks; it completes once they've finished
+
+group = client.groups.get(group.id)
+print(group.status, group.total, group.succeeded, group.failed, group.remaining)
+for task in client.tasks.list(group_id=group.id, state="failed"):
+    print(task.id, task.last_error)
+for group in client.groups.list(name="daily-stock-prices", status="failed"):
+    print(group.id, group.finished_at)
+```
+
 ## Async
 
 `AsyncWorkly` has the same methods, as coroutines:

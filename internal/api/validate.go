@@ -199,6 +199,12 @@ func newTask(queue string, req EnqueueRequest, traceparent string, maxBody int64
 		}
 		nt.IdempotencyKey = *req.IdempotencyKey
 	}
+	if req.GroupId != nil {
+		if *req.GroupId == "" || len(*req.GroupId) > maxIdempotencyKeyLength {
+			return nt, invalid("group_id must be a group's ID")
+		}
+		nt.GroupID = *req.GroupId
+	}
 	// Only keep a well-formed traceparent; it's forwarded verbatim.
 	if validHeaderValue(traceparent) && len(traceparent) <= 512 {
 		nt.TraceContext = traceparent

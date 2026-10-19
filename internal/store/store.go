@@ -9,7 +9,9 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/worklydev/workly/internal/workspace"
@@ -31,7 +33,23 @@ var (
 	// ErrInvalidCursor is returned by ListTasks for a cursor it didn't
 	// issue, or issued for another sort.
 	ErrInvalidCursor = errors.New("invalid cursor")
+	// ErrGroupNotFound is returned, in a GroupError, by CreateTask and
+	// CreateTasks for a group that doesn't exist. It wraps ErrNotFound.
+	ErrGroupNotFound = fmt.Errorf("group %w", ErrNotFound)
+	// ErrGroupClosed is returned, in a GroupError, by CreateTask and
+	// CreateTasks for a group that no longer accepts tasks.
+	ErrGroupClosed = errors.New("group is closed")
 )
+
+// GroupError says which group a task couldn't join, and why: Err is
+// ErrGroupNotFound or ErrGroupClosed.
+type GroupError struct {
+	GroupID string
+	Err     error
+}
+
+func (e *GroupError) Error() string { return e.GroupID + ": " + e.Err.Error() }
+func (e *GroupError) Unwrap() error { return e.Err }
 
 type Store interface {
 	// Ping checks that the database is reachable.
@@ -82,7 +100,9 @@ type Store interface {
 	// CreateTask enqueues a task. If t.IdempotencyKey matches an existing
 	// task in the same queue, that task is returned with created = false.
 	// If the queue doesn't exist it is created with defaults when
-	// autoCreateQueue is set, and ErrNotFound is returned otherwise.
+	// autoCreateQueue is set, and ErrNotFound is returned otherwise. A task
+	// with a GroupID joins that group, which must be open (ErrGroupNotFound,
+	// ErrGroupClosed).
 	CreateTask(ctx context.Context, ws workspace.ID, t NewTask, autoCreateQueue bool) (task Task, created bool, err error)
 	// CreateTasks enqueues tasks atomically, as CreateTask does one.
 	CreateTasks(ctx context.Context, ws workspace.ID, ts []NewTask, autoCreateQueue bool) (tasks []Task, created []bool, err error)
@@ -107,6 +127,18 @@ type Store interface {
 	// LastError equals it are replayed. It returns ErrNotFound if the queue
 	// doesn't exist.
 	RetryFailedTasks(ctx context.Context, ws workspace.ID, queue, lastError string) (int, error)
+
+	// CreateGroup creates an open group. If g.IdempotencyKey matches an
+	// existing group, that group is returned with created = false.
+	CreateGroup(ctx context.Context, ws workspace.ID, g NewGroup) (group Group, created bool, err error)
+	GetGroup(ctx context.Context, ws workspace.ID, id string) (Group, error)
+	// ListGroups returns groups matching the filter, newest first, paged
+	// like ListRuns.
+	ListGroups(ctx context.Context, ws workspace.ID, f GroupFilter) (groups []Group, cursor string, err error)
+	// CloseGroup stops a group from accepting tasks. A group whose tasks
+	// are all finished (or that has none) completes at once; closing a
+	// closed group changes nothing.
+	CloseGroup(ctx context.Context, ws workspace.ID, id string) (Group, error)
 
 	// PutSchedule creates the schedule or replaces its settings, and sets
 	// when it next fires unless it is paused. created reports whether it was
@@ -209,6 +241,10 @@ type Dispatch interface {
 	// tasks that finished before the given time, with their attempts. It
 	// returns how many it deleted.
 	DeleteFinishedTasks(ctx context.Context, before time.Time, limit int) (int, error)
+
+	// DeleteFinishedGroups deletes up to limit groups that completed before
+	// the given time. It returns how many it deleted.
+	DeleteFinishedGroups(ctx context.Context, before time.Time, limit int) (int, error)
 
 	// DueSchedules returns unpaused schedules whose next slot is at or
 	// before now.
@@ -386,6 +422,7 @@ type NewTask struct {
 	IdempotencyKey string
 	// TraceContext is the W3C traceparent captured at enqueue.
 	TraceContext string
+	GroupID      string
 }
 
 type Task struct {
@@ -419,6 +456,8 @@ type Task struct {
 	// RetriedAt is when the task was last retried by hand (RetryTask or
 	// RetryFailedTasks).
 	RetriedAt *time.Time
+	// GroupID is the group the task belongs to, if any.
+	GroupID string
 }
 
 // EffectiveMaxAttempts applies the queue default.
@@ -443,6 +482,7 @@ func (t Task) EffectiveTimeout(q QueueConfig) time.Duration {
 // TaskFilter selects tasks. Zero fields match everything.
 type TaskFilter struct {
 	Queue          string
+	GroupID        string
 	State          TaskState
 	IdempotencyKey string
 	LastError      string
@@ -519,4 +559,85 @@ type FinishedAttempt struct {
 type FinishOutcome struct {
 	State TaskState
 	Err   error
+}
+
+// GroupStatus is where a group is in its lifecycle: open (accepting tasks),
+// running (closed, tasks unfinished), then succeeded or failed for good.
+type GroupStatus string
+
+const (
+	GroupOpen      GroupStatus = "open"
+	GroupRunning   GroupStatus = "running"
+	GroupSucceeded GroupStatus = "succeeded"
+	GroupFailed    GroupStatus = "failed"
+)
+
+// Finished reports whether the group has completed.
+func (s GroupStatus) Finished() bool { return s == GroupSucceeded || s == GroupFailed }
+
+// GroupCallback is the task a group enqueues when it completes: a POST with
+// the group's summary (GroupSummary) as its JSON body.
+type GroupCallback struct {
+	Queue   string
+	URL     string
+	Headers map[string]string
+}
+
+type NewGroup struct {
+	Name           string
+	IdempotencyKey string
+	OnComplete     *GroupCallback
+}
+
+// Group is a set of tasks tracked together. Its counts cover its tasks'
+// current states while it is open or running, and are frozen once it
+// completes: retrying a task of a completed group doesn't change them.
+type Group struct {
+	ID             string
+	WorkspaceID    workspace.ID
+	Name           string
+	Status         GroupStatus
+	IdempotencyKey string
+	Total          int
+	Succeeded      int
+	Failed         int
+	Cancelled      int
+	OnComplete     *GroupCallback
+	// CallbackTaskID is the task enqueued for OnComplete when the group
+	// completed.
+	CallbackTaskID string
+	CreatedAt      time.Time
+	ClosedAt       *time.Time
+	FinishedAt     *time.Time
+}
+
+// Remaining counts the tasks not yet succeeded, failed or cancelled.
+func (g Group) Remaining() int { return g.Total - g.Succeeded - g.Failed - g.Cancelled }
+
+// GroupSummary is the body of a group's callback.
+type GroupSummary struct {
+	GroupID   string      `json:"group_id"`
+	Name      string      `json:"name,omitempty"`
+	Status    GroupStatus `json:"status"`
+	Total     int         `json:"total"`
+	Succeeded int         `json:"succeeded"`
+	Failed    int         `json:"failed"`
+	Cancelled int         `json:"cancelled"`
+}
+
+// CallbackBody is the JSON body of g's callback.
+func (g Group) CallbackBody() []byte {
+	b, _ := json.Marshal(GroupSummary{
+		GroupID: g.ID, Name: g.Name, Status: g.Status,
+		Total: g.Total, Succeeded: g.Succeeded, Failed: g.Failed, Cancelled: g.Cancelled,
+	})
+	return b
+}
+
+// GroupFilter selects groups. Zero fields match everything.
+type GroupFilter struct {
+	Status GroupStatus
+	Name   string
+	Cursor string
+	Limit  int
 }

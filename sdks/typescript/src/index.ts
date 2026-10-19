@@ -1,5 +1,6 @@
 export { Workly, DEFAULT_URL, type WorklyOptions, type RequestOptions } from './client.ts';
 export { Alerts } from './alerts.ts';
+export { Groups, type GroupsOptions, type GroupsPageOptions } from './groups.ts';
 export { Queues } from './queues.ts';
 export { Schedules, Runs, type RunsOptions, type RunsPageOptions } from './schedules.ts';
 export { Tasks, type EnqueueOptions, type ListOptions, type ListPageOptions } from './tasks.ts';

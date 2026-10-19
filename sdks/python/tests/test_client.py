@@ -533,3 +533,75 @@ def test_alert_channels() -> None:
         "type": "slack",
         "target": "https://hooks.slack.com/services/T0/B0/abcd",
     }
+
+
+GROUP: dict[str, Any] = {
+    "id": "grp_1",
+    "name": "daily-prices",
+    "status": "running",
+    "total": 3,
+    "succeeded": 1,
+    "failed": 0,
+    "cancelled": 0,
+    "remaining": 2,
+    "on_complete": {"queue": "jobs", "url": "https://example.com/done"},
+    "created_at": "2026-10-19T10:00:00Z",
+    "closed_at": "2026-10-19T10:00:01Z",
+}
+
+
+def test_groups() -> None:
+    requests, handler = recorder(
+        httpx.Response(201, json=GROUP),
+        httpx.Response(200, json=GROUP),
+        httpx.Response(201, json=TASK),
+        httpx.Response(200, json={"tasks": []}),
+    )
+    c = client(handler)
+    group = c.groups.create(
+        name="daily-prices",
+        on_complete={"queue": "jobs", "url": "https://example.com/done", "headers": {"X-A": "1"}},
+    )
+    assert (requests[0].method, requests[0].url.path) == ("POST", "/v1/groups")
+    assert json.loads(requests[0].content) == {
+        "name": "daily-prices",
+        "on_complete": {
+            "queue": "jobs",
+            "url": "https://example.com/done",
+            "headers": {"X-A": "1"},
+        },
+    }
+    assert group.remaining == 2 and group.on_complete is not None
+    assert group.on_complete.headers == {} and group.finished_at is None
+
+    c.groups.close("grp_1")
+    c.tasks.enqueue("prices", url="https://example.com/p", group_id="grp_1")
+    list(c.tasks.list(group_id="grp_1"))
+    assert (requests[1].method, requests[1].url.path) == ("POST", "/v1/groups/grp_1/close")
+    assert json.loads(requests[2].content)["group_id"] == "grp_1"
+    assert requests[3].url.params["group_id"] == "grp_1"
+
+
+def test_groups_list_paginates() -> None:
+    pages = {None: {"groups": [GROUP], "next_cursor": "c1"}, "c1": {"groups": [GROUP]}}
+    seen: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(req)
+        return httpx.Response(200, json=pages[req.url.params.get("cursor")])
+
+    groups = list(client(handler).groups.list(status="running", name="daily-prices"))
+    assert [g.id for g in groups] == ["grp_1", "grp_1"]
+    assert (
+        seen[0].url.params["status"] == "running" and seen[0].url.params["name"] == "daily-prices"
+    )
+
+
+def test_group_create_is_retried_only_with_key() -> None:
+    requests, handler = recorder(httpx.Response(503), httpx.Response(201, json=GROUP))
+    with pytest.raises(workly.APIError):
+        client(handler).groups.create(name="x")
+    assert len(requests) == 1
+    requests, handler = recorder(httpx.Response(503), httpx.Response(201, json=GROUP))
+    client(handler).groups.create(idempotency_key="k")
+    assert len(requests) == 2

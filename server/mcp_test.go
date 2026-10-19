@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/worklydev/workly/internal/store"
 	"github.com/worklydev/workly/server"
 )
 
@@ -122,7 +123,7 @@ func (c mcpClient) toolNames() []string {
 }
 
 var readTools = []string{"list_queues", "get_queue", "list_tasks", "get_task", "get_task_delivery", "wait_for_task",
-	"list_schedules", "get_schedule", "list_runs", "get_run", "get_run_delivery", "wait_for_run"}
+	"list_groups", "get_group", "list_schedules", "get_schedule", "list_runs", "get_run", "get_run_delivery", "wait_for_run"}
 
 func TestMCPProtocol(t *testing.T) {
 	c := mcpClient{t: t, h: newServer(t, server.Options{DisableDispatcher: true, Version: "1.2.3"}).Handler()}
@@ -478,6 +479,59 @@ func TestMCPSchedules(t *testing.T) {
 				t.Errorf("%s = %v %q, want an error containing %q", tc.tool, isError, text, tc.want)
 			}
 		})
+	}
+}
+
+func TestMCPGroups(t *testing.T) {
+	st := newStore(t, true)
+	h := newServer(t, server.Options{Store: st, DisableDispatcher: true, MCP: server.MCPFull}).Handler()
+	c := mcpClient{t: t, h: h}
+
+	res := doBody(t, h, "POST", "/v1/groups", "", `{"name": "prices", "on_complete": {"queue": "callbacks", "url": "https://example.test/done"}}`)
+	id := res.json["id"].(string)
+	ok := c.call("enqueue_task", map[string]any{"queue": "prices", "url": "https://example.test/ok", "group_id": id})
+	bad := c.call("enqueue_task", map[string]any{"queue": "prices", "url": "https://example.test/bad", "group_id": id})
+	if ok["group_id"] != id {
+		t.Fatalf("enqueue_task = %v", ok)
+	}
+	do(t, h, "POST", "/v1/groups/"+id+"/close", "")
+
+	q, err := st.GetQueue(t.Context(), server.DefaultWorkspace, "prices")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := st.ClaimTasks(t.Context(), q, 10, time.Now(), time.Minute)
+	if err != nil || len(claimed) != 2 {
+		t.Fatalf("ClaimTasks = %d, %v", len(claimed), err)
+	}
+	for _, task := range claimed {
+		r := store.AttemptResult{
+			Attempt:   store.Attempt{TaskID: task.ID, Number: 1, StartedAt: time.Now(), FinishedAt: time.Now(), Outcome: store.OutcomeSuccess},
+			NextState: store.TaskSucceeded,
+		}
+		if task.ID == bad["id"] {
+			status := 400
+			r.Outcome, r.StatusCode, r.Error, r.NextState = store.OutcomeHTTPError, &status, "HTTP 400", store.TaskFailed
+		}
+		if _, err := st.FinishAttempt(t.Context(), server.DefaultWorkspace, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if got := c.call("list_groups", map[string]any{"status": "failed"}); len(got["groups"].([]any)) != 1 {
+		t.Errorf("list_groups = %v", got)
+	}
+	got := c.call("get_group", map[string]any{"id": id})
+	failed := got["failed_tasks"].([]any)
+	if got["group"].(map[string]any)["status"] != "failed" || len(failed) != 1 || failed[0].(map[string]any)["id"] != bad["id"] ||
+		got["callback_task"].(map[string]any)["queue"] != "callbacks" {
+		t.Errorf("get_group = %v", got)
+	}
+	if got := c.call("list_tasks", map[string]any{"group_id": id}); len(got["tasks"].([]any)) != 2 {
+		t.Errorf("list_tasks(group_id) = %v", got)
+	}
+	if text, isError := c.callRaw("get_group", map[string]any{"id": "grp_nope"}); !isError || !strings.Contains(text, "group_not_found") {
+		t.Errorf("get_group(unknown) = %q", text)
 	}
 }
 

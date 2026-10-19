@@ -20,6 +20,8 @@ RunTrigger = Literal["schedule", "manual"]
 SkipReason = Literal["overlap", "missed"]
 OverlapPolicy = Literal["skip", "allow"]
 MissedPolicy = Literal["skip", "catch_up"]
+GroupStatus = Literal["open", "running", "succeeded", "failed"]
+"""`open` accepts tasks; `running` is closed with tasks unfinished; the other two are final."""
 
 
 def _time(value: str) -> datetime:
@@ -221,6 +223,8 @@ class Task:
     """When the latest attempt finished."""
     retried_at: datetime | None
     """When the task was last retried by hand."""
+    group_id: str | None = None
+    """The group the task belongs to, if any."""
 
     @classmethod
     def _from_json(cls, d: dict[str, Any]) -> Task:
@@ -246,6 +250,7 @@ class Task:
             finished_at=_opt_time(d.get("finished_at")),
             last_attempt_at=_opt_time(d.get("last_attempt_at")),
             retried_at=_opt_time(d.get("retried_at")),
+            group_id=d.get("group_id"),
         )
 
 
@@ -502,4 +507,74 @@ class AlertChannelList:
         return cls(
             channels=[AlertChannel._from_json(c) for c in d["channels"]],
             email_enabled=d["email_enabled"],
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class GroupCallback:
+    """The task a group enqueues when it completes: a POST of the group's summary as JSON."""
+
+    queue: str
+    url: str
+    headers: dict[str, str]
+
+    @classmethod
+    def _from_json(cls, d: dict[str, Any]) -> GroupCallback:
+        return cls(queue=d["queue"], url=d["url"], headers=d.get("headers") or {})
+
+
+@dataclass(frozen=True, slots=True)
+class Group:
+    """A set of tasks tracked together, with a callback once all have finished."""
+
+    id: str
+    name: str | None
+    status: GroupStatus
+    idempotency_key: str | None
+    total: int
+    succeeded: int
+    failed: int
+    cancelled: int
+    remaining: int
+    """Tasks still pending or running."""
+    on_complete: GroupCallback | None
+    callback_task_id: str | None
+    """The callback task, once the group has completed."""
+    created_at: datetime
+    closed_at: datetime | None
+    finished_at: datetime | None
+    """When the group completed."""
+
+    @classmethod
+    def _from_json(cls, d: dict[str, Any]) -> Group:
+        cb = d.get("on_complete")
+        return cls(
+            id=d["id"],
+            name=d.get("name"),
+            status=d["status"],
+            idempotency_key=d.get("idempotency_key"),
+            total=d["total"],
+            succeeded=d["succeeded"],
+            failed=d["failed"],
+            cancelled=d["cancelled"],
+            remaining=d["remaining"],
+            on_complete=None if cb is None else GroupCallback._from_json(cb),
+            callback_task_id=d.get("callback_task_id"),
+            created_at=_time(d["created_at"]),
+            closed_at=_opt_time(d.get("closed_at")),
+            finished_at=_opt_time(d.get("finished_at")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class GroupPage:
+    groups: list[Group]
+    next_cursor: str | None
+    """Pass as `cursor` to get the next page. None on the last page."""
+
+    @classmethod
+    def _from_json(cls, d: dict[str, Any]) -> GroupPage:
+        return cls(
+            groups=[Group._from_json(g) for g in d["groups"]],
+            next_cursor=d.get("next_cursor"),
         )

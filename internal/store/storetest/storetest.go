@@ -64,6 +64,12 @@ func Run(t *testing.T, factory Factory) {
 		{"AlertChannels", testAlertChannels},
 		{"FailuresToAlert", testFailuresToAlert},
 		{"Changes", testChanges},
+		{"Groups", testGroups},
+		{"GroupLifecycle", testGroupLifecycle},
+		{"GroupControls", testGroupControls},
+		{"GroupDeleteQueue", testGroupDeleteQueue},
+		{"GroupConcurrency", testGroupConcurrency},
+		{"DeleteFinishedGroups", testDeleteFinishedGroups},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

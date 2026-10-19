@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { CancelPendingTasksData, CancelPendingTasksErrors, CancelPendingTasksResponses, CancelRunData, CancelRunErrors, CancelRunResponses, CancelTaskData, CancelTaskErrors, CancelTaskResponses, CreateAlertChannelData, CreateAlertChannelErrors, CreateAlertChannelResponses, CreateTaskData, CreateTaskErrors, CreateTaskResponses, CreateTasksData, CreateTasksErrors, CreateTasksResponses, DeleteAlertChannelData, DeleteAlertChannelErrors, DeleteAlertChannelResponses, DeleteQueueData, DeleteQueueErrors, DeleteQueueResponses, DeleteScheduleData, DeleteScheduleErrors, DeleteScheduleResponses, GetActivityData, GetActivityErrors, GetActivityResponses, GetHealthzData, GetHealthzResponses, GetQueueActivityData, GetQueueActivityErrors, GetQueueActivityResponses, GetQueueData, GetQueueErrors, GetQueueFailuresData, GetQueueFailuresErrors, GetQueueFailuresResponses, GetQueueResponses, GetReadyzData, GetReadyzErrors, GetReadyzResponses, GetRunData, GetRunDeliveryData, GetRunDeliveryErrors, GetRunDeliveryResponses, GetRunErrors, GetRunResponses, GetScheduleData, GetScheduleErrors, GetScheduleResponses, GetTaskData, GetTaskDeliveryData, GetTaskDeliveryErrors, GetTaskDeliveryResponses, GetTaskErrors, GetTaskResponses, ListAlertChannelsData, ListAlertChannelsErrors, ListAlertChannelsResponses, ListAttemptsData, ListAttemptsErrors, ListAttemptsResponses, ListQueuesData, ListQueuesErrors, ListQueuesResponses, ListRunAttemptsData, ListRunAttemptsErrors, ListRunAttemptsResponses, ListRunsData, ListRunsErrors, ListRunsResponses, ListSchedulesData, ListSchedulesErrors, ListSchedulesResponses, ListTasksData, ListTasksErrors, ListTasksResponses, PauseQueueData, PauseQueueErrors, PauseQueueResponses, PauseScheduleData, PauseScheduleErrors, PauseScheduleResponses, PreviewCronData, PreviewCronErrors, PreviewCronResponses, PutQueueData, PutQueueErrors, PutQueueResponses, PutScheduleData, PutScheduleErrors, PutScheduleResponses, ResumeQueueData, ResumeQueueErrors, ResumeQueueResponses, ResumeScheduleData, ResumeScheduleErrors, ResumeScheduleResponses, RetryFailedTasksData, RetryFailedTasksErrors, RetryFailedTasksResponses, RetryRunData, RetryRunErrors, RetryRunResponses, RetryTaskData, RetryTaskErrors, RetryTaskResponses, SearchTasksData, SearchTasksErrors, SearchTasksResponses, TestAlertChannelData, TestAlertChannelErrors, TestAlertChannelResponses, TriggerScheduleData, TriggerScheduleErrors, TriggerScheduleResponses } from './types.gen';
+import type { CancelPendingTasksData, CancelPendingTasksErrors, CancelPendingTasksResponses, CancelRunData, CancelRunErrors, CancelRunResponses, CancelTaskData, CancelTaskErrors, CancelTaskResponses, CloseGroupData, CloseGroupErrors, CloseGroupResponses, CreateAlertChannelData, CreateAlertChannelErrors, CreateAlertChannelResponses, CreateGroupData, CreateGroupErrors, CreateGroupResponses, CreateTaskData, CreateTaskErrors, CreateTaskResponses, CreateTasksData, CreateTasksErrors, CreateTasksResponses, DeleteAlertChannelData, DeleteAlertChannelErrors, DeleteAlertChannelResponses, DeleteQueueData, DeleteQueueErrors, DeleteQueueResponses, DeleteScheduleData, DeleteScheduleErrors, DeleteScheduleResponses, GetActivityData, GetActivityErrors, GetActivityResponses, GetGroupData, GetGroupErrors, GetGroupResponses, GetHealthzData, GetHealthzResponses, GetQueueActivityData, GetQueueActivityErrors, GetQueueActivityResponses, GetQueueData, GetQueueErrors, GetQueueFailuresData, GetQueueFailuresErrors, GetQueueFailuresResponses, GetQueueResponses, GetReadyzData, GetReadyzErrors, GetReadyzResponses, GetRunData, GetRunDeliveryData, GetRunDeliveryErrors, GetRunDeliveryResponses, GetRunErrors, GetRunResponses, GetScheduleData, GetScheduleErrors, GetScheduleResponses, GetTaskData, GetTaskDeliveryData, GetTaskDeliveryErrors, GetTaskDeliveryResponses, GetTaskErrors, GetTaskResponses, ListAlertChannelsData, ListAlertChannelsErrors, ListAlertChannelsResponses, ListAttemptsData, ListAttemptsErrors, ListAttemptsResponses, ListGroupsData, ListGroupsErrors, ListGroupsResponses, ListQueuesData, ListQueuesErrors, ListQueuesResponses, ListRunAttemptsData, ListRunAttemptsErrors, ListRunAttemptsResponses, ListRunsData, ListRunsErrors, ListRunsResponses, ListSchedulesData, ListSchedulesErrors, ListSchedulesResponses, ListTasksData, ListTasksErrors, ListTasksResponses, PauseQueueData, PauseQueueErrors, PauseQueueResponses, PauseScheduleData, PauseScheduleErrors, PauseScheduleResponses, PreviewCronData, PreviewCronErrors, PreviewCronResponses, PutQueueData, PutQueueErrors, PutQueueResponses, PutScheduleData, PutScheduleErrors, PutScheduleResponses, ResumeQueueData, ResumeQueueErrors, ResumeQueueResponses, ResumeScheduleData, ResumeScheduleErrors, ResumeScheduleResponses, RetryFailedTasksData, RetryFailedTasksErrors, RetryFailedTasksResponses, RetryRunData, RetryRunErrors, RetryRunResponses, RetryTaskData, RetryTaskErrors, RetryTaskResponses, SearchTasksData, SearchTasksErrors, SearchTasksResponses, TestAlertChannelData, TestAlertChannelErrors, TestAlertChannelResponses, TriggerScheduleData, TriggerScheduleErrors, TriggerScheduleResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -308,6 +308,62 @@ export const cancelTask = <ThrowOnError extends boolean = false>(options: Option
 export const retryTask = <ThrowOnError extends boolean = false>(options: Options<RetryTaskData, ThrowOnError>): RequestResult<RetryTaskResponses, RetryTaskErrors, ThrowOnError> => (options.client ?? client).post<RetryTaskResponses, RetryTaskErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/v1/tasks/{id}/retry',
+    ...options
+});
+
+/**
+ * List task groups
+ *
+ * Newest first. List a group's tasks with `GET /v1/tasks?group_id=`.
+ */
+export const listGroups = <ThrowOnError extends boolean = false>(options?: Options<ListGroupsData, ThrowOnError>): RequestResult<ListGroupsResponses, ListGroupsErrors, ThrowOnError> => (options?.client ?? client).get<ListGroupsResponses, ListGroupsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/groups',
+    ...options
+});
+
+/**
+ * Create a task group
+ *
+ * Creates an open group. Enqueue tasks into it with `group_id`, then
+ * close it with `POST /v1/groups/{id}/close`. Once it is closed and
+ * every task in it has succeeded, failed or been cancelled, it
+ * completes and enqueues its `on_complete` callback, once.
+ *
+ * If `idempotency_key` matches an existing group, that group is
+ * returned with status 200 and nothing is created.
+ *
+ */
+export const createGroup = <ThrowOnError extends boolean = false>(options: Options<CreateGroupData, ThrowOnError>): RequestResult<CreateGroupResponses, CreateGroupErrors, ThrowOnError> => (options.client ?? client).post<CreateGroupResponses, CreateGroupErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/groups',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Get a task group
+ */
+export const getGroup = <ThrowOnError extends boolean = false>(options: Options<GetGroupData, ThrowOnError>): RequestResult<GetGroupResponses, GetGroupErrors, ThrowOnError> => (options.client ?? client).get<GetGroupResponses, GetGroupErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/groups/{id}',
+    ...options
+});
+
+/**
+ * Close a task group
+ *
+ * Stops the group from accepting tasks; enqueueing into it then fails
+ * with `group_closed`. If its tasks have all finished (or it has none),
+ * it completes at once. Closing a closed group does nothing.
+ *
+ */
+export const closeGroup = <ThrowOnError extends boolean = false>(options: Options<CloseGroupData, ThrowOnError>): RequestResult<CloseGroupResponses, CloseGroupErrors, ThrowOnError> => (options.client ?? client).post<CloseGroupResponses, CloseGroupErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/groups/{id}/close',
     ...options
 });
 

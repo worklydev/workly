@@ -81,6 +81,16 @@ curl -X PUT localhost:7337/v1/schedules/nightly -d '{"cron": "0 3 * * *", "timez
 curl -X POST localhost:7337/v1/schedules/nightly/trigger   # run it now
 ```
 
+Fan out with a [task group](docs/groups.md): enqueue tasks into a group, close it, and Workly enqueues one callback, with how they went, once they've all finished:
+
+```python
+workly = Workly()
+group = workly.groups.create(name="daily-stock-prices", on_complete={"queue": "jobs", "url": "https://api.example.com/jobs/refresh-views"})
+for company in companies:
+    workly.tasks.enqueue("stock-prices", url="https://api.example.com/jobs/update-stock-price", payload={"symbol": company.symbol}, group_id=group.id)
+workly.groups.close(group.id)
+```
+
 From your coding agent, over [MCP](docs/mcp.md): every server serves `/mcp`, so an agent can enqueue test tasks, see why deliveries fail and retry them once the handler is fixed. For Claude Code:
 
 ```sh
@@ -97,6 +107,7 @@ workly queues failures demo       # the queue's failed tasks, grouped by error
 workly queues retry-failed demo   # after an outage: replay the queue's failed tasks
 workly schedules ls               # schedules with their next and last run
 workly schedules runs nightly     # a schedule's runs, newest first
+workly groups ls                  # task groups with their progress
 ```
 
 Prometheus metrics are at `/metrics` (see [docs/metrics.md](docs/metrics.md)).

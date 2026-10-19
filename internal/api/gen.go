@@ -56,6 +56,30 @@ func (e AlertChannelType) Valid() bool {
 	}
 }
 
+// Defines values for GroupStatus.
+const (
+	GroupStatusFailed    GroupStatus = "failed"
+	GroupStatusOpen      GroupStatus = "open"
+	GroupStatusRunning   GroupStatus = "running"
+	GroupStatusSucceeded GroupStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the GroupStatus enum.
+func (e GroupStatus) Valid() bool {
+	switch e {
+	case GroupStatusFailed:
+		return true
+	case GroupStatusOpen:
+		return true
+	case GroupStatusRunning:
+		return true
+	case GroupStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for HTTPMethod.
 const (
 	DELETE HTTPMethod = "DELETE"
@@ -519,6 +543,11 @@ type EnqueueRequest struct {
 	// DelaySeconds Deliver after this delay. Use this or `run_at`.
 	DelaySeconds *float64 `json:"delay_seconds,omitempty"`
 
+	// GroupId Adds the task to this group, which must be open (`group_closed`
+	// otherwise). A task enqueued again with the same
+	// `idempotency_key` isn't added twice.
+	GroupId *string `json:"group_id,omitempty"`
+
 	// Headers Headers sent with every delivery. `Workly-*` headers are reserved.
 	Headers *map[string]string `json:"headers,omitempty"`
 
@@ -583,6 +612,76 @@ type FailureGroup struct {
 	StatusCode *int `json:"status_code,omitempty"`
 }
 
+// Group defines model for Group.
+type Group struct {
+	// CallbackTaskId The callback task, once the group has completed.
+	CallbackTaskId *string    `json:"callback_task_id,omitempty"`
+	Cancelled      int        `json:"cancelled"`
+	ClosedAt       *time.Time `json:"closed_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	Failed         int        `json:"failed"`
+
+	// FinishedAt When the group completed.
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+
+	// Id Example: grp_01J9ZK3M5Q8R2T4V6W8X0Y2Z4A
+	Id             string  `json:"id"`
+	IdempotencyKey *string `json:"idempotency_key,omitempty"`
+	Name           *string `json:"name,omitempty"`
+
+	// OnComplete The task a group enqueues when it completes: a `POST` whose JSON body
+	// is the group's summary (`GroupSummary`). It is delivered like any task
+	// in its queue, with the queue's retries; if the queue has been deleted
+	// by then, it is created again with default settings.
+	OnComplete *GroupCallback `json:"on_complete,omitempty"`
+
+	// Remaining Tasks still pending or running.
+	Remaining int `json:"remaining"`
+
+	// Status `open`: accepting tasks. `running`: closed, with tasks still to
+	// finish. `succeeded`: every task succeeded. `failed`: every task
+	// finished and at least one failed or was cancelled. Completed groups
+	// (`succeeded` and `failed`) don't change again, even if a task in
+	// them is retried.
+	Status    GroupStatus `json:"status"`
+	Succeeded int         `json:"succeeded"`
+
+	// Total Tasks enqueued into the group (less those whose queue was deleted).
+	Total int `json:"total"`
+}
+
+// GroupCallback The task a group enqueues when it completes: a `POST` whose JSON body
+// is the group's summary (`GroupSummary`). It is delivered like any task
+// in its queue, with the queue's retries; if the queue has been deleted
+// by then, it is created again with default settings.
+type GroupCallback struct {
+	// Headers Headers sent with the callback. `Workly-*` headers are reserved.
+	Headers *map[string]string `json:"headers,omitempty"`
+
+	// Queue The queue to enqueue the callback into.
+	Queue string `json:"queue"`
+
+	// Url The http(s) URL to deliver the callback to.
+	//
+	// Example: https://api.example.com/jobs/refresh-views
+	Url string `json:"url"`
+}
+
+// GroupList defines model for GroupList.
+type GroupList struct {
+	Groups []Group `json:"groups"`
+
+	// NextCursor Pass as `cursor` to get the next page. Absent on the last page.
+	NextCursor *string `json:"next_cursor,omitempty"`
+}
+
+// GroupStatus `open`: accepting tasks. `running`: closed, with tasks still to
+// finish. `succeeded`: every task succeeded. `failed`: every task
+// finished and at least one failed or was cancelled. Completed groups
+// (`succeeded` and `failed`) don't change again, even if a task in
+// them is retried.
+type GroupStatus string
+
 // HTTPMethod defines model for HTTPMethod.
 type HTTPMethod string
 
@@ -621,6 +720,23 @@ type NewAlertChannel struct {
 	// Example: oncall@example.com
 	Target string           `json:"target"`
 	Type   AlertChannelType `json:"type"`
+}
+
+// NewGroup defines model for NewGroup.
+type NewGroup struct {
+	// IdempotencyKey Deduplicates group creation within the workspace.
+	IdempotencyKey *string `json:"idempotency_key,omitempty"`
+
+	// Name A label, e.g. the job the group is one run of. Names needn't be unique.
+	//
+	// Example: daily-stock-prices
+	Name *string `json:"name,omitempty"`
+
+	// OnComplete The task a group enqueues when it completes: a `POST` whose JSON body
+	// is the group's summary (`GroupSummary`). It is delivered like any task
+	// in its queue, with the queue's retries; if the queue has been deleted
+	// by then, it is created again with default settings.
+	OnComplete *GroupCallback `json:"on_complete,omitempty"`
 }
 
 // Outcome How a delivery attempt ended. `lost` means the result is unknown: the
@@ -946,8 +1062,11 @@ type Task struct {
 	CreatedAt time.Time `json:"created_at"`
 
 	// FinishedAt When the task succeeded, failed or was cancelled.
-	FinishedAt *time.Time        `json:"finished_at,omitempty"`
-	Headers    map[string]string `json:"headers"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+
+	// GroupId The group the task belongs to, if any.
+	GroupId *string           `json:"group_id,omitempty"`
+	Headers map[string]string `json:"headers"`
 
 	// Id Example: task_01J9ZK3M5Q8R2T4V6W8X0Y2Z4A
 	Id             string  `json:"id"`
@@ -1007,6 +1126,9 @@ type AlertChannelID = string
 // Cursor defines model for Cursor.
 type Cursor = string
 
+// GroupID defines model for GroupID.
+type GroupID = string
+
 // LastError defines model for LastError.
 type LastError = string
 
@@ -1045,6 +1167,17 @@ type PreviewCronParams struct {
 
 	// Timezone IANA name. Defaults to UTC.
 	Timezone *string `form:"timezone,omitempty" json:"timezone,omitempty"`
+}
+
+// ListGroupsParams defines parameters for ListGroups.
+type ListGroupsParams struct {
+	Status *GroupStatus `form:"status,omitempty" json:"status,omitempty"`
+	Name   *string      `form:"name,omitempty" json:"name,omitempty"`
+
+	// Cursor The `next_cursor` of the previous page, requested with the same
+	// filters and order.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // GetQueueActivityParams defines parameters for GetQueueActivity.
@@ -1128,6 +1261,9 @@ type SearchTasksParams struct {
 	State          *TaskState `form:"state,omitempty" json:"state,omitempty"`
 	IdempotencyKey *string    `form:"idempotency_key,omitempty" json:"idempotency_key,omitempty"`
 
+	// GroupId Only the tasks of this group.
+	GroupId *string `form:"group_id,omitempty" json:"group_id,omitempty"`
+
 	// LastError Only tasks whose latest error is exactly this.
 	LastError *LastError `form:"last_error,omitempty" json:"last_error,omitempty"`
 
@@ -1168,6 +1304,9 @@ type SearchTasksParamsOrder string
 // CreateAlertChannelJSONRequestBody defines body for CreateAlertChannel for application/json ContentType.
 type CreateAlertChannelJSONRequestBody = NewAlertChannel
 
+// CreateGroupJSONRequestBody defines body for CreateGroup for application/json ContentType.
+type CreateGroupJSONRequestBody = NewGroup
+
 // PutQueueJSONRequestBody defines body for PutQueue for application/json ContentType.
 type PutQueueJSONRequestBody = QueueConfig
 
@@ -1206,6 +1345,18 @@ type ServerInterface interface {
 	// PreviewCron Preview a cron timetable
 	// (GET /v1/cron/preview)
 	PreviewCron(w http.ResponseWriter, r *http.Request, params PreviewCronParams)
+	// ListGroups List task groups
+	// (GET /v1/groups)
+	ListGroups(w http.ResponseWriter, r *http.Request, params ListGroupsParams)
+	// CreateGroup Create a task group
+	// (POST /v1/groups)
+	CreateGroup(w http.ResponseWriter, r *http.Request)
+	// GetGroup Get a task group
+	// (GET /v1/groups/{id})
+	GetGroup(w http.ResponseWriter, r *http.Request, id GroupID)
+	// CloseGroup Close a task group
+	// (POST /v1/groups/{id}/close)
+	CloseGroup(w http.ResponseWriter, r *http.Request, id GroupID)
 	// ListQueues List queues
 	// (GET /v1/queues)
 	ListQueues(w http.ResponseWriter, r *http.Request)
@@ -1491,6 +1642,144 @@ func (siw *ServerInterfaceWrapper) PreviewCron(w http.ResponseWriter, r *http.Re
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PreviewCron(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListGroups operation middleware
+func (siw *ServerInterfaceWrapper) ListGroups(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListGroupsParams
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "name" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "name", r.URL.Query(), &params.Name, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "name"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListGroups(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateGroup operation middleware
+func (siw *ServerInterfaceWrapper) CreateGroup(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateGroup(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetGroup operation middleware
+func (siw *ServerInterfaceWrapper) GetGroup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id GroupID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetGroup(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CloseGroup operation middleware
+func (siw *ServerInterfaceWrapper) CloseGroup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id GroupID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CloseGroup(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2419,6 +2708,19 @@ func (siw *ServerInterfaceWrapper) SearchTasks(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// ------------- Optional query parameter "group_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "group_id", r.URL.Query(), &params.GroupId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "group_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "group_id", Err: err})
+		}
+		return
+	}
+
 	// ------------- Optional query parameter "last_error" -------------
 
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "last_error", r.URL.Query(), &params.LastError, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
@@ -2793,6 +3095,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tasks/{id}/delivery", wrapper.GetTaskDelivery)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/tasks/{id}/cancel", wrapper.CancelTask)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/tasks/{id}/retry", wrapper.RetryTask)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/groups", wrapper.ListGroups)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/groups", wrapper.CreateGroup)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/groups/{id}", wrapper.GetGroup)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/groups/{id}/close", wrapper.CloseGroup)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/schedules", wrapper.ListSchedules)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/schedules/{schedule}", wrapper.DeleteSchedule)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/schedules/{schedule}", wrapper.GetSchedule)
@@ -3083,6 +3389,176 @@ type PreviewCrondefaultJSONResponse struct {
 }
 
 func (response PreviewCrondefaultJSONResponse) VisitPreviewCronResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListGroupsRequestObject struct {
+	Params ListGroupsParams
+}
+
+type ListGroupsResponseObject interface {
+	VisitListGroupsResponse(w http.ResponseWriter) error
+}
+
+type ListGroups200JSONResponse GroupList
+
+func (response ListGroups200JSONResponse) VisitListGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListGroupsdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListGroupsdefaultJSONResponse) VisitListGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateGroupRequestObject struct {
+	Body *CreateGroupJSONRequestBody
+}
+
+type CreateGroupResponseObject interface {
+	VisitCreateGroupResponse(w http.ResponseWriter) error
+}
+
+type CreateGroup200JSONResponse Group
+
+func (response CreateGroup200JSONResponse) VisitCreateGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateGroup201JSONResponse Group
+
+func (response CreateGroup201JSONResponse) VisitCreateGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateGroupdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response CreateGroupdefaultJSONResponse) VisitCreateGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetGroupRequestObject struct {
+	Id GroupID `json:"id"`
+}
+
+type GetGroupResponseObject interface {
+	VisitGetGroupResponse(w http.ResponseWriter) error
+}
+
+type GetGroup200JSONResponse Group
+
+func (response GetGroup200JSONResponse) VisitGetGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetGroupdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetGroupdefaultJSONResponse) VisitGetGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CloseGroupRequestObject struct {
+	Id GroupID `json:"id"`
+}
+
+type CloseGroupResponseObject interface {
+	VisitCloseGroupResponse(w http.ResponseWriter) error
+}
+
+type CloseGroup200JSONResponse Group
+
+func (response CloseGroup200JSONResponse) VisitCloseGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CloseGroupdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response CloseGroupdefaultJSONResponse) VisitCloseGroupResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -4407,6 +4883,18 @@ type StrictServerInterface interface {
 	// PreviewCron Preview a cron timetable
 	// (GET /v1/cron/preview)
 	PreviewCron(ctx context.Context, request PreviewCronRequestObject) (PreviewCronResponseObject, error)
+	// ListGroups List task groups
+	// (GET /v1/groups)
+	ListGroups(ctx context.Context, request ListGroupsRequestObject) (ListGroupsResponseObject, error)
+	// CreateGroup Create a task group
+	// (POST /v1/groups)
+	CreateGroup(ctx context.Context, request CreateGroupRequestObject) (CreateGroupResponseObject, error)
+	// GetGroup Get a task group
+	// (GET /v1/groups/{id})
+	GetGroup(ctx context.Context, request GetGroupRequestObject) (GetGroupResponseObject, error)
+	// CloseGroup Close a task group
+	// (POST /v1/groups/{id}/close)
+	CloseGroup(ctx context.Context, request CloseGroupRequestObject) (CloseGroupResponseObject, error)
 	// ListQueues List queues
 	// (GET /v1/queues)
 	ListQueues(ctx context.Context, request ListQueuesRequestObject) (ListQueuesResponseObject, error)
@@ -4744,6 +5232,115 @@ func (sh *strictHandler) PreviewCron(w http.ResponseWriter, r *http.Request, par
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(PreviewCronResponseObject); ok {
 		if err := validResponse.VisitPreviewCronResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListGroups operation middleware
+func (sh *strictHandler) ListGroups(w http.ResponseWriter, r *http.Request, params ListGroupsParams) {
+	var request ListGroupsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListGroups(ctx, request.(ListGroupsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListGroups")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListGroupsResponseObject); ok {
+		if err := validResponse.VisitListGroupsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateGroup operation middleware
+func (sh *strictHandler) CreateGroup(w http.ResponseWriter, r *http.Request) {
+	var request CreateGroupRequestObject
+
+	var body CreateGroupJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateGroup(ctx, request.(CreateGroupRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateGroup")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateGroupResponseObject); ok {
+		if err := validResponse.VisitCreateGroupResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetGroup operation middleware
+func (sh *strictHandler) GetGroup(w http.ResponseWriter, r *http.Request, id GroupID) {
+	var request GetGroupRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetGroup(ctx, request.(GetGroupRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetGroup")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetGroupResponseObject); ok {
+		if err := validResponse.VisitGetGroupResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CloseGroup operation middleware
+func (sh *strictHandler) CloseGroup(w http.ResponseWriter, r *http.Request, id GroupID) {
+	var request CloseGroupRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CloseGroup(ctx, request.(CloseGroupRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CloseGroup")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CloseGroupResponseObject); ok {
+		if err := validResponse.VisitCloseGroupResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

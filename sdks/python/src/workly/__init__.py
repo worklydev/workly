@@ -2,13 +2,14 @@
 
 from ._async_client import (
     AsyncAlerts,
+    AsyncGroups,
     AsyncQueues,
     AsyncRuns,
     AsyncSchedules,
     AsyncTasks,
     AsyncWorkly,
 )
-from ._client import Alerts, Queues, Runs, Schedules, Tasks, Workly
+from ._client import Alerts, Groups, Queues, Runs, Schedules, Tasks, Workly
 from ._errors import (
     APIConnectionError,
     APIError,
@@ -35,6 +36,10 @@ from ._models import (
     Delivery,
     EnqueueResult,
     FailureGroup,
+    Group,
+    GroupCallback,
+    GroupPage,
+    GroupStatus,
     HTTPMethod,
     LastRun,
     MissedPolicy,
@@ -54,7 +59,7 @@ from ._models import (
     TaskSort,
     TaskState,
 )
-from ._requests import TaskSpec, __version__
+from ._requests import GroupCallbackSpec, TaskSpec, __version__
 from ._signing import sign, verify_signature
 
 __all__ = [
@@ -68,6 +73,7 @@ __all__ = [
     "AlertChannelType",
     "Alerts",
     "AsyncAlerts",
+    "AsyncGroups",
     "AsyncQueues",
     "AsyncRuns",
     "AsyncSchedules",
@@ -82,6 +88,12 @@ __all__ = [
     "Delivery",
     "EnqueueResult",
     "FailureGroup",
+    "Group",
+    "GroupCallback",
+    "GroupCallbackSpec",
+    "GroupPage",
+    "GroupStatus",
+    "Groups",
     "HTTPMethod",
     "LastRun",
     "MissedPolicy",

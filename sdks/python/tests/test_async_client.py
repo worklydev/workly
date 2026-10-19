@@ -117,3 +117,27 @@ async def test_schedules() -> None:
         assert s.name == "nightly"
         assert (await c.schedules.trigger("nightly")).id == "run_1"
         assert [r.id async for r in c.schedules.runs("nightly")] == ["run_1"]
+
+
+async def test_groups() -> None:
+    group = {
+        "id": "grp_1",
+        "status": "open",
+        "total": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "cancelled": 0,
+        "remaining": 0,
+        "created_at": "2026-10-19T10:00:00Z",
+    }
+    pages = {None: {"groups": [group], "next_cursor": "c1"}, "c1": {"groups": [group]}}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "GET":
+            return httpx.Response(200, json=pages[req.url.params.get("cursor")])
+        return httpx.Response(200, json=group)
+
+    c = client(handler)
+    assert (await c.groups.create(name="x")).id == "grp_1"
+    assert (await c.groups.close("grp_1")).status == "open"
+    assert [g.id async for g in c.groups.list()] == ["grp_1", "grp_1"]

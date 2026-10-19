@@ -69,6 +69,7 @@ The queue is created with default settings if it doesn't exist.
 	f.StringP("idempotency-key", "k", "", "don't enqueue if the queue already has a task with this key")
 	f.Int("max-attempts", 0, "override the queue's max attempts")
 	f.Duration("timeout", 0, "override the queue's response timeout")
+	f.String("group", "", "add the task to this open group (see workly groups)")
 	cmd.MarkFlagsMutuallyExclusive("delay", "at")
 	return cmd
 }
@@ -92,6 +93,7 @@ func enqueueRequest(cmd *cobra.Command, url string) (client.EnqueueRequest, erro
 	setIf(f.Changed("idempotency-key"), &req.IdempotencyKey, must(f.GetString("idempotency-key")))
 	setIf(f.Changed("max-attempts"), &req.MaxAttempts, must(f.GetInt("max-attempts")))
 	setIf(f.Changed("timeout"), &req.TimeoutSeconds, must(f.GetDuration("timeout")).Seconds())
+	setIf(f.Changed("group"), &req.GroupId, must(f.GetString("group")))
 	return req, nil
 }
 
@@ -208,6 +210,7 @@ func tasksListCmd() *cobra.Command {
 			setIf(f.Changed("queue"), &params.Queue, must(f.GetString("queue")))
 			setIf(f.Changed("state"), &params.State, client.TaskState(must(f.GetString("state"))))
 			setIf(f.Changed("idempotency-key"), &params.IdempotencyKey, must(f.GetString("idempotency-key")))
+			setIf(f.Changed("group"), &params.GroupId, must(f.GetString("group")))
 			setIf(f.Changed("error"), &params.LastError, must(f.GetString("error")))
 			setIf(f.Changed("cursor"), &params.Cursor, must(f.GetString("cursor")))
 			setIf(true, &params.Limit, must(f.GetInt("limit")))
@@ -237,6 +240,7 @@ func tasksListCmd() *cobra.Command {
 	f.String("queue", "", "only this queue's tasks")
 	f.String("state", "", "only tasks in this state: pending, running, succeeded, failed or cancelled")
 	f.StringP("idempotency-key", "k", "", "only tasks with this idempotency key")
+	f.String("group", "", "only this group's tasks")
 	f.String("error", "", "only tasks whose last error is exactly this (see queues failures)")
 	f.Int("limit", 20, "tasks per page (at most 200)")
 	f.String("cursor", "", "continue from a previous page")
@@ -291,6 +295,9 @@ func printTask(w io.Writer, t *client.Task, attempts []client.Attempt) {
 	rows = append(rows, []string{"Attempts", attemptCount(t)})
 	if t.IdempotencyKey != nil {
 		rows = append(rows, []string{"Idempotency key", *t.IdempotencyKey})
+	}
+	if t.GroupId != nil {
+		rows = append(rows, []string{"Group", *t.GroupId})
 	}
 	if t.LastError != nil {
 		rows = append(rows, []string{"Last error", *t.LastError})

@@ -140,7 +140,7 @@ var (
 
 func allTools() []*tool {
 	return []*tool{
-		listQueues, getQueue, listTasks, getTask, getTaskDelivery, waitForTask,
+		listQueues, getQueue, listTasks, getTask, getTaskDelivery, waitForTask, listGroups, getGroup,
 		listSchedules, getSchedule, listRuns, getRun, getRunDelivery, waitForRun,
 		enqueueTask, retryTask, cancelTask, retryFailedTasks, cancelPendingTasks, pauseQueue, resumeQueue,
 		updateQueuePolicy,
@@ -187,10 +187,11 @@ var getQueue = newTool("get_queue", "Get queue",
 	})
 
 var listTasks = newTool("list_tasks", "List tasks",
-	`Tasks, newest first unless sorted otherwise, filtered by any of queue, state, idempotency key, last error and creation time. To see what runs next, list pending tasks sorted by run_at. Returns summaries (state, URL, attempts, last status and error); use get_task for payloads and attempt details. Pass next_cursor as cursor for the next page. A "pending" task whose run_at is in the future is scheduled or waiting to retry.`,
+	`Tasks, newest first unless sorted otherwise, filtered by any of queue, state, group, idempotency key, last error and creation time. To see what runs next, list pending tasks sorted by run_at. Returns summaries (state, URL, attempts, last status and error); use get_task for payloads and attempt details. Pass next_cursor as cursor for the next page. A "pending" task whose run_at is in the future is scheduled or waiting to retry.`,
 	object(map[string]any{
 		"queue":           queueProp,
 		"state":           prop("string", "Only tasks in this state.", "enum", taskStates),
+		"group_id":        prop("string", "Only the tasks of this group."),
 		"idempotency_key": prop("string", "Only the task with this idempotency key."),
 		"last_error":      prop("string", "Only tasks whose last_error is exactly this, e.g. an error from get_queue's failures."),
 		"created_after":   timeProp("Only tasks created at or after this time."),
@@ -203,6 +204,7 @@ var listTasks = newTool("list_tasks", "List tasks",
 	func(ctx context.Context, api apiClient, args struct {
 		Queue          string `json:"queue"`
 		State          string `json:"state"`
+		GroupID        string `json:"group_id"`
 		IdempotencyKey string `json:"idempotency_key"`
 		LastError      string `json:"last_error"`
 		CreatedAfter   string `json:"created_after"`
@@ -214,7 +216,7 @@ var listTasks = newTool("list_tasks", "List tasks",
 	}) (any, error) {
 		q := url.Values{}
 		for k, v := range map[string]string{
-			"queue": args.Queue, "state": args.State, "idempotency_key": args.IdempotencyKey, "last_error": args.LastError,
+			"queue": args.Queue, "state": args.State, "group_id": args.GroupID, "idempotency_key": args.IdempotencyKey, "last_error": args.LastError,
 			"created_after": args.CreatedAfter, "created_before": args.CreatedBefore, "sort": args.Sort, "order": args.Order,
 			"cursor": args.Cursor,
 		} {
@@ -378,6 +380,7 @@ var enqueueTask = newTool("enqueue_task", "Enqueue task",
 		"idempotency_key": prop("string", "If a task in the queue has this key, it is returned and nothing is enqueued."),
 		"max_attempts":    prop("integer", "Overrides the queue's max_attempts.", "minimum", 1, "maximum", 1000),
 		"timeout_seconds": prop("number", "Overrides the queue's response timeout.", "minimum", 1, "maximum", 1800),
+		"group_id":        prop("string", "Adds the task to this task group, which must be open."),
 	}, "queue", "url"),
 	annotations{OpenWorldHint: true},
 	func(ctx context.Context, api apiClient, args enqueueArgs) (any, error) {
@@ -407,6 +410,7 @@ type enqueueRequest struct {
 	IdempotencyKey string            `json:"idempotency_key,omitempty"`
 	MaxAttempts    *int              `json:"max_attempts,omitempty"`
 	TimeoutSeconds *float64          `json:"timeout_seconds,omitempty"`
+	GroupID        string            `json:"group_id,omitempty"`
 }
 
 var retryTask = newTool("retry_task", "Retry task",
@@ -568,7 +572,7 @@ func summary(t map[string]any) map[string]any {
 	out := map[string]any{}
 	for _, k := range []string{
 		"id", "queue", "state", "method", "url", "run_at", "attempt_count", "max_attempts", "last_status",
-		"last_outcome", "last_error", "idempotency_key", "created_at", "finished_at", "last_attempt_at", "retried_at",
+		"last_outcome", "last_error", "idempotency_key", "group_id", "created_at", "finished_at", "last_attempt_at", "retried_at",
 	} {
 		if v, ok := t[k]; ok {
 			out[k] = v

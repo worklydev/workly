@@ -14,7 +14,15 @@ from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Required, TypedDict
 from urllib.parse import quote
 
-from ._models import AlertChannelType, HTTPMethod, RunState, SortOrder, TaskSort, TaskState
+from ._models import (
+    AlertChannelType,
+    GroupStatus,
+    HTTPMethod,
+    RunState,
+    SortOrder,
+    TaskSort,
+    TaskState,
+)
 
 DEFAULT_URL = "http://localhost:7337"
 
@@ -64,6 +72,15 @@ class TaskSpec(TypedDict, total=False):
     idempotency_key: str
     max_attempts: int
     timeout_seconds: float
+    group_id: str
+
+
+class GroupCallbackSpec(TypedDict, total=False):
+    """The `on_complete` callback of `groups.create`: a task to enqueue when the group completes."""
+
+    queue: Required[str]
+    url: Required[str]
+    headers: Mapping[str, str]
 
 
 def task_body(spec: Mapping[str, Any]) -> dict[str, Any]:
@@ -178,6 +195,7 @@ def search_tasks(
     *,
     queue: str | None,
     state: TaskState | None,
+    group_id: str | None,
     idempotency_key: str | None,
     last_error: str | None,
     created_after: datetime | None,
@@ -192,6 +210,8 @@ def search_tasks(
         params["queue"] = queue
     if state is not None:
         params["state"] = state
+    if group_id is not None:
+        params["group_id"] = group_id
     if idempotency_key is not None:
         params["idempotency_key"] = idempotency_key
     if last_error is not None:
@@ -230,6 +250,48 @@ def cancel_task(task_id: str) -> Request:
 def retry_task(task_id: str) -> Request:
     # Not idempotent: resending could replay a task that already finished again.
     return Request("POST", f"/v1/tasks/{_q(task_id)}/retry")
+
+
+# Groups
+
+
+def create_group(
+    name: str | None, idempotency_key: str | None, on_complete: GroupCallbackSpec | None
+) -> Request:
+    body: dict[str, Any] = {}
+    if name is not None:
+        body["name"] = name
+    if idempotency_key is not None:
+        body["idempotency_key"] = idempotency_key
+    if on_complete is not None:
+        callback: dict[str, Any] = {"queue": on_complete["queue"], "url": on_complete["url"]}
+        if "headers" in on_complete:
+            callback["headers"] = dict(on_complete["headers"])
+        body["on_complete"] = callback
+    return Request("POST", "/v1/groups", json=body, idempotent=idempotency_key is not None)
+
+
+def get_group(group_id: str) -> Request:
+    return Request("GET", f"/v1/groups/{_q(group_id)}", idempotent=True)
+
+
+def list_groups(
+    *, status: GroupStatus | None, name: str | None, cursor: str | None, limit: int | None
+) -> Request:
+    params: dict[str, str] = {}
+    if status is not None:
+        params["status"] = status
+    if name is not None:
+        params["name"] = name
+    if cursor is not None:
+        params["cursor"] = cursor
+    if limit is not None:
+        params["limit"] = str(limit)
+    return Request("GET", "/v1/groups", params=params, idempotent=True)
+
+
+def close_group(group_id: str) -> Request:
+    return Request("POST", f"/v1/groups/{_q(group_id)}/close", idempotent=True)
 
 
 # Schedules and runs

@@ -28,11 +28,8 @@ func (h Handlers) CreateTask(ctx context.Context, req CreateTaskRequestObject) (
 		}
 	}
 	task, created, err := h.Store.CreateTask(ctx, ws, nt, h.AutoCreateQueues)
-	if errors.Is(err, store.ErrNotFound) {
-		return nil, queueNotFound(req.Queue)
-	}
 	if err != nil {
-		return nil, err
+		return nil, enqueueError(err, req.Queue)
 	}
 	if created && h.Admission != nil {
 		h.Admission.TasksCreated(ctx, ws, 1)
@@ -74,11 +71,8 @@ func (h Handlers) CreateTasks(ctx context.Context, req CreateTasksRequestObject)
 		}
 	}
 	tasks, created, err := h.Store.CreateTasks(ctx, ws, nts, h.AutoCreateQueues)
-	if errors.Is(err, store.ErrNotFound) {
-		return nil, queueNotFound(req.Queue)
-	}
 	if err != nil {
-		return nil, err
+		return nil, enqueueError(err, req.Queue)
 	}
 	out := CreateTasks200JSONResponse{Results: make([]BatchEnqueueResult, len(tasks))}
 	n := 0
@@ -93,6 +87,20 @@ func (h Handlers) CreateTasks(ctx context.Context, req CreateTasksRequestObject)
 		h.Admission.TasksCreated(ctx, ws, n)
 	}
 	return out, nil
+}
+
+// enqueueError translates the store's errors for an enqueue.
+func enqueueError(err error, queue string) error {
+	var groupErr *store.GroupError
+	switch {
+	case errors.As(err, &groupErr) && errors.Is(err, store.ErrGroupClosed):
+		return groupClosed(groupErr.GroupID)
+	case errors.As(err, &groupErr):
+		return groupNotFound(groupErr.GroupID)
+	case errors.Is(err, store.ErrNotFound):
+		return queueNotFound(queue)
+	}
+	return err
 }
 
 func (h Handlers) ListTasks(ctx context.Context, req ListTasksRequestObject) (ListTasksResponseObject, error) {
@@ -132,6 +140,7 @@ func (h Handlers) SearchTasks(ctx context.Context, req SearchTasksRequestObject)
 	if p.IdempotencyKey != nil {
 		f.IdempotencyKey = *p.IdempotencyKey
 	}
+	f.GroupID = deref(p.GroupId)
 	f.LastError = deref(p.LastError)
 	if p.CreatedAfter != nil {
 		f.CreatedAfter = *p.CreatedAfter

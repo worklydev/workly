@@ -6,7 +6,7 @@ Workly is an open-source HTTP task queue and scheduler. You enqueue a task with 
 enqueue → queue → HTTP delivery → retry → success/failure
 ```
 
-Next to queues, [schedules](schedules.md) call an endpoint on a cron timetable, with the same retries, signing and history.
+Next to queues, [schedules](schedules.md) call an endpoint on a cron timetable, with the same retries, signing and history, and [task groups](groups.md) call you back once a set of tasks has finished.
 
 The same binary runs everywhere: `workly dev` on your laptop (SQLite, no configuration), `workly serve` with Postgres in your own infrastructure, or hosted at [workly.run](https://workly.run). Moving between them means changing environment variables, not code.
 
@@ -14,6 +14,7 @@ The same binary runs everywhere: `workly dev` on your laptop (SQLite, no configu
 
 - [Quickstart](quickstart.md): run Workly locally, enqueue a task and handle it.
 - [Schedules](schedules.md): call an endpoint on a cron timetable.
+- [Task groups](groups.md): fan out tasks and get one callback when they've all finished.
 - [Alerts](alerts.md): hear about failed tasks and runs by email or in Slack.
 - [Self-hosting](self-hosting.md): run it in production on Docker, Compose or Kubernetes.
 - [MCP](mcp.md): let coding agents see inside your queues and act on them.

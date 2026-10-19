@@ -1,5 +1,6 @@
 import { Alerts } from './alerts.ts';
 import { APIConnectionError, APIError, apiError } from './errors.ts';
+import { Groups } from './groups.ts';
 import { Queues } from './queues.ts';
 import { Runs, Schedules } from './schedules.ts';
 import { Tasks } from './tasks.ts';
@@ -59,6 +60,7 @@ export class Workly {
   readonly url: string;
   readonly queues: Queues;
   readonly tasks: Tasks;
+  readonly groups: Groups;
   readonly schedules: Schedules;
   readonly runs: Runs;
   readonly alerts: Alerts;
@@ -78,6 +80,7 @@ export class Workly {
     this.#fetch = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.queues = new Queues(this);
     this.tasks = new Tasks(this);
+    this.groups = new Groups(this);
     this.schedules = new Schedules(this);
     this.runs = new Runs(this);
     this.alerts = new Alerts(this);

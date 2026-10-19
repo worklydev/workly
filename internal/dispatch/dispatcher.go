@@ -529,6 +529,20 @@ func (d *Dispatcher) sweepTasks(ctx context.Context) {
 	if total > 0 {
 		d.log.Info("deleted finished tasks past retention", "count", total, "retention", d.opts.Retention.String())
 	}
+	// A completed group's tasks finished before it did, so they are gone by
+	// the time it is.
+	for {
+		n, err := d.store.DeleteFinishedGroups(ctx, before, sweepBatch)
+		if err != nil {
+			if ctx.Err() == nil {
+				d.log.Warn("retention sweep of groups failed", "err", err)
+			}
+			break
+		}
+		if n < sweepBatch || ctx.Err() != nil {
+			break
+		}
+	}
 }
 
 // drain waits for in-flight deliveries, interrupting them after

@@ -165,6 +165,34 @@ await workly.schedules.delete('nightly-report'); // with all its runs
 
 Runs are delivered with `Workly-Run-Id`, `Workly-Schedule` and `Workly-Scheduled-For` headers and the same signature, so `verifySignature` works unchanged.
 
+## Task groups
+
+A group tracks a set of tasks and enqueues a callback task once it's closed and they've all finished: a `POST` of the group's status and counts. See [Task groups](https://docs.workly.run/groups/).
+
+```ts
+const group = await workly.groups.create({
+  name: 'daily-stock-prices',
+  idempotencyKey: 'stock-prices-2026-10-19', // creating it again returns this group
+  onComplete: { queue: 'jobs', url: 'https://api.example.com/jobs/refresh-views' },
+});
+for (const company of companies) {
+  await workly.tasks.enqueue('stock-prices', {
+    url: 'https://api.example.com/jobs/update-stock-price',
+    payload: { symbol: company.symbol },
+    groupId: group.id,
+  });
+}
+await workly.groups.close(group.id); // no more tasks; it completes once they've finished
+
+const g = await workly.groups.get(group.id);
+console.log(g.status, g.total, g.succeeded, g.failed, g.remaining);
+for await (const task of workly.tasks.list({ groupId: group.id, state: 'failed' })) {
+  console.log(task.id, task.lastError);
+}
+```
+
+The callback's body is a `GroupSummary`. It arrives as the task's payload, so its fields are snake_case: `group_id`, `status`, `total`, `succeeded`, `failed`, `cancelled`.
+
 ## Errors
 
 | Error                   | When                                                                    |

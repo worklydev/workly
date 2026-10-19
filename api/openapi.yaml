@@ -7,7 +7,8 @@ info:
 
     Queues deliver tasks you enqueue. Schedules are separate: they call an
     endpoint on a cron schedule, and each call is a run with its own
-    attempts. Schedules never create tasks or use queues.
+    attempts. Schedules never create tasks or use queues. Groups track a set
+    of tasks and enqueue a callback task once they have all finished.
 
     Requests under `/v1` are scoped to a workspace, resolved from the
     `Authorization: Bearer <key>` header. The workspace never appears in paths.
@@ -417,6 +418,11 @@ paths:
           in: query
           schema:
             type: string
+        - name: group_id
+          in: query
+          description: Only the tasks of this group.
+          schema:
+            type: string
         - $ref: "#/components/parameters/LastError"
         - name: created_after
           in: query
@@ -545,6 +551,105 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Task"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/groups:
+    post:
+      operationId: createGroup
+      summary: Create a task group
+      description: |
+        Creates an open group. Enqueue tasks into it with `group_id`, then
+        close it with `POST /v1/groups/{id}/close`. Once it is closed and
+        every task in it has succeeded, failed or been cancelled, it
+        completes and enqueues its `on_complete` callback, once.
+
+        If `idempotency_key` matches an existing group, that group is
+        returned with status 200 and nothing is created.
+      tags: [groups]
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewGroup"
+      responses:
+        "201":
+          description: Group created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Group"
+        "200":
+          description: A group with this idempotency key already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Group"
+        default:
+          $ref: "#/components/responses/Error"
+    get:
+      operationId: listGroups
+      summary: List task groups
+      description: Newest first. List a group's tasks with `GET /v1/tasks?group_id=`.
+      tags: [groups]
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/GroupStatus"
+        - name: name
+          in: query
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: A page of groups
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GroupList"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/groups/{id}:
+    parameters:
+      - $ref: "#/components/parameters/GroupID"
+    get:
+      operationId: getGroup
+      summary: Get a task group
+      tags: [groups]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: The group
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Group"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/groups/{id}/close:
+    parameters:
+      - $ref: "#/components/parameters/GroupID"
+    post:
+      operationId: closeGroup
+      summary: Close a task group
+      description: |
+        Stops the group from accepting tasks; enqueueing into it then fails
+        with `group_closed`. If its tasks have all finished (or it has none),
+        it completes at once. Closing a closed group does nothing.
+      tags: [groups]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: The group, now running or completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Group"
         default:
           $ref: "#/components/responses/Error"
   /v1/schedules:
@@ -984,6 +1089,12 @@ components:
       description: Schedule name. Lowercase letters, digits, `-` and `_`; at most 64 characters.
       schema:
         type: string
+    GroupID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
     RunID:
       name: id
       in: path
@@ -1000,8 +1111,9 @@ components:
     Error:
       description: |
         An error. Codes include `invalid_request`, `unauthorized`,
-        `queue_not_found`, `task_not_found`, `schedule_not_found`,
-        `run_not_found`, `alert_channel_not_found`,
+        `queue_not_found`, `task_not_found`, `group_not_found`,
+        `group_closed` (409), `schedule_not_found`, `run_not_found`,
+        `alert_channel_not_found`,
         `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
         `invalid_state` (409), `payload_too_large` and
         `internal`.
@@ -1310,6 +1422,12 @@ components:
           minimum: 1
           maximum: 1800
           description: Overrides the queue's `timeout_seconds`.
+        group_id:
+          type: string
+          description: |
+            Adds the task to this group, which must be open (`group_closed`
+            otherwise). A task enqueued again with the same
+            `idempotency_key` isn't added twice.
     BatchEnqueueRequest:
       type: object
       required: [tasks]
@@ -1404,6 +1522,9 @@ components:
           description: |
             When the task was last retried by hand (`POST /v1/tasks/{id}/retry`
             or `POST /v1/queues/{queue}/retry-failed`). Absent if never.
+        group_id:
+          type: string
+          description: The group the task belongs to, if any.
     Delivery:
       type: object
       required: [method, url, headers, body]
@@ -1477,6 +1598,120 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Attempt"
+    GroupStatus:
+      type: string
+      enum: [open, running, succeeded, failed]
+      description: |
+        `open`: accepting tasks. `running`: closed, with tasks still to
+        finish. `succeeded`: every task succeeded. `failed`: every task
+        finished and at least one failed or was cancelled. Completed groups
+        (`succeeded` and `failed`) don't change again, even if a task in
+        them is retried.
+    GroupCallback:
+      type: object
+      required: [queue, url]
+      description: |
+        The task a group enqueues when it completes: a `POST` whose JSON body
+        is the group's summary (`GroupSummary`). It is delivered like any task
+        in its queue, with the queue's retries; if the queue has been deleted
+        by then, it is created again with default settings.
+      properties:
+        queue:
+          type: string
+          description: The queue to enqueue the callback into.
+        url:
+          type: string
+          description: The http(s) URL to deliver the callback to.
+          example: https://api.example.com/jobs/refresh-views
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+          description: Headers sent with the callback. `Workly-*` headers are reserved.
+    GroupSummary:
+      type: object
+      description: The body of a group's callback.
+      required: [group_id, status, total, succeeded, failed, cancelled]
+      properties:
+        group_id:
+          type: string
+        name:
+          type: string
+        status:
+          $ref: "#/components/schemas/GroupStatus"
+        total:
+          type: integer
+        succeeded:
+          type: integer
+        failed:
+          type: integer
+        cancelled:
+          type: integer
+    NewGroup:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 256
+          description: A label, e.g. the job the group is one run of. Names needn't be unique.
+          example: daily-stock-prices
+        idempotency_key:
+          type: string
+          maxLength: 256
+          description: Deduplicates group creation within the workspace.
+        on_complete:
+          $ref: "#/components/schemas/GroupCallback"
+    Group:
+      type: object
+      required: [id, status, total, succeeded, failed, cancelled, remaining, created_at]
+      properties:
+        id:
+          type: string
+          example: grp_01J9ZK3M5Q8R2T4V6W8X0Y2Z4A
+        name:
+          type: string
+        status:
+          $ref: "#/components/schemas/GroupStatus"
+        idempotency_key:
+          type: string
+        total:
+          type: integer
+          description: Tasks enqueued into the group (less those whose queue was deleted).
+        succeeded:
+          type: integer
+        failed:
+          type: integer
+        cancelled:
+          type: integer
+        remaining:
+          type: integer
+          description: Tasks still pending or running.
+        on_complete:
+          $ref: "#/components/schemas/GroupCallback"
+        callback_task_id:
+          type: string
+          description: The callback task, once the group has completed.
+        created_at:
+          type: string
+          format: date-time
+        closed_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+          description: When the group completed.
+    GroupList:
+      type: object
+      required: [groups]
+      properties:
+        groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/Group"
+        next_cursor:
+          type: string
+          description: Pass as `cursor` to get the next page. Absent on the last page.
     ScheduleConfig:
       type: object
       description: |

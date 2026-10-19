@@ -3,8 +3,8 @@
 import { type DefaultError, type InfiniteData, infiniteQueryOptions, queryOptions, type UseMutationOptions } from '@tanstack/react-query';
 
 import { client } from '../client.gen';
-import { cancelPendingTasks, cancelRun, cancelTask, createAlertChannel, createTask, createTasks, deleteAlertChannel, deleteQueue, deleteSchedule, getActivity, getHealthz, getQueue, getQueueActivity, getQueueFailures, getReadyz, getRun, getRunDelivery, getSchedule, getTask, getTaskDelivery, listAlertChannels, listAttempts, listQueues, listRunAttempts, listRuns, listSchedules, listTasks, type Options, pauseQueue, pauseSchedule, previewCron, putQueue, putSchedule, resumeQueue, resumeSchedule, retryFailedTasks, retryRun, retryTask, searchTasks, testAlertChannel, triggerSchedule } from '../sdk.gen';
-import type { CancelPendingTasksData, CancelPendingTasksError, CancelPendingTasksResponse, CancelRunData, CancelRunError, CancelRunResponse, CancelTaskData, CancelTaskError, CancelTaskResponse, CreateAlertChannelData, CreateAlertChannelError, CreateAlertChannelResponse, CreateTaskData, CreateTaskError, CreateTaskResponse, CreateTasksData, CreateTasksError, CreateTasksResponse, DeleteAlertChannelData, DeleteAlertChannelError, DeleteAlertChannelResponse, DeleteQueueData, DeleteQueueError, DeleteQueueResponse, DeleteScheduleData, DeleteScheduleError, DeleteScheduleResponse, GetActivityData, GetActivityError, GetActivityResponse, GetHealthzData, GetHealthzResponse, GetQueueActivityData, GetQueueActivityError, GetQueueActivityResponse, GetQueueData, GetQueueError, GetQueueFailuresData, GetQueueFailuresError, GetQueueFailuresResponse, GetQueueResponse, GetReadyzData, GetReadyzError, GetReadyzResponse, GetRunData, GetRunDeliveryData, GetRunDeliveryError, GetRunDeliveryResponse, GetRunError, GetRunResponse, GetScheduleData, GetScheduleError, GetScheduleResponse, GetTaskData, GetTaskDeliveryData, GetTaskDeliveryError, GetTaskDeliveryResponse, GetTaskError, GetTaskResponse, ListAlertChannelsData, ListAlertChannelsError, ListAlertChannelsResponse, ListAttemptsData, ListAttemptsError, ListAttemptsResponse, ListQueuesData, ListQueuesError, ListQueuesResponse, ListRunAttemptsData, ListRunAttemptsError, ListRunAttemptsResponse, ListRunsData, ListRunsError, ListRunsResponse, ListSchedulesData, ListSchedulesError, ListSchedulesResponse, ListTasksData, ListTasksError, ListTasksResponse, PauseQueueData, PauseQueueError, PauseQueueResponse, PauseScheduleData, PauseScheduleError, PauseScheduleResponse, PreviewCronData, PreviewCronError, PreviewCronResponse, PutQueueData, PutQueueError, PutQueueResponse, PutScheduleData, PutScheduleError, PutScheduleResponse, ResumeQueueData, ResumeQueueError, ResumeQueueResponse, ResumeScheduleData, ResumeScheduleError, ResumeScheduleResponse, RetryFailedTasksData, RetryFailedTasksError, RetryFailedTasksResponse, RetryRunData, RetryRunError, RetryRunResponse, RetryTaskData, RetryTaskError, RetryTaskResponse, SearchTasksData, SearchTasksError, SearchTasksResponse, TestAlertChannelData, TestAlertChannelError, TestAlertChannelResponse, TriggerScheduleData, TriggerScheduleError, TriggerScheduleResponse } from '../types.gen';
+import { cancelPendingTasks, cancelRun, cancelTask, closeGroup, createAlertChannel, createGroup, createTask, createTasks, deleteAlertChannel, deleteQueue, deleteSchedule, getActivity, getGroup, getHealthz, getQueue, getQueueActivity, getQueueFailures, getReadyz, getRun, getRunDelivery, getSchedule, getTask, getTaskDelivery, listAlertChannels, listAttempts, listGroups, listQueues, listRunAttempts, listRuns, listSchedules, listTasks, type Options, pauseQueue, pauseSchedule, previewCron, putQueue, putSchedule, resumeQueue, resumeSchedule, retryFailedTasks, retryRun, retryTask, searchTasks, testAlertChannel, triggerSchedule } from '../sdk.gen';
+import type { CancelPendingTasksData, CancelPendingTasksError, CancelPendingTasksResponse, CancelRunData, CancelRunError, CancelRunResponse, CancelTaskData, CancelTaskError, CancelTaskResponse, CloseGroupData, CloseGroupError, CloseGroupResponse, CreateAlertChannelData, CreateAlertChannelError, CreateAlertChannelResponse, CreateGroupData, CreateGroupError, CreateGroupResponse, CreateTaskData, CreateTaskError, CreateTaskResponse, CreateTasksData, CreateTasksError, CreateTasksResponse, DeleteAlertChannelData, DeleteAlertChannelError, DeleteAlertChannelResponse, DeleteQueueData, DeleteQueueError, DeleteQueueResponse, DeleteScheduleData, DeleteScheduleError, DeleteScheduleResponse, GetActivityData, GetActivityError, GetActivityResponse, GetGroupData, GetGroupError, GetGroupResponse, GetHealthzData, GetHealthzResponse, GetQueueActivityData, GetQueueActivityError, GetQueueActivityResponse, GetQueueData, GetQueueError, GetQueueFailuresData, GetQueueFailuresError, GetQueueFailuresResponse, GetQueueResponse, GetReadyzData, GetReadyzError, GetReadyzResponse, GetRunData, GetRunDeliveryData, GetRunDeliveryError, GetRunDeliveryResponse, GetRunError, GetRunResponse, GetScheduleData, GetScheduleError, GetScheduleResponse, GetTaskData, GetTaskDeliveryData, GetTaskDeliveryError, GetTaskDeliveryResponse, GetTaskError, GetTaskResponse, ListAlertChannelsData, ListAlertChannelsError, ListAlertChannelsResponse, ListAttemptsData, ListAttemptsError, ListAttemptsResponse, ListGroupsData, ListGroupsError, ListGroupsResponse, ListQueuesData, ListQueuesError, ListQueuesResponse, ListRunAttemptsData, ListRunAttemptsError, ListRunAttemptsResponse, ListRunsData, ListRunsError, ListRunsResponse, ListSchedulesData, ListSchedulesError, ListSchedulesResponse, ListTasksData, ListTasksError, ListTasksResponse, PauseQueueData, PauseQueueError, PauseQueueResponse, PauseScheduleData, PauseScheduleError, PauseScheduleResponse, PreviewCronData, PreviewCronError, PreviewCronResponse, PutQueueData, PutQueueError, PutQueueResponse, PutScheduleData, PutScheduleError, PutScheduleResponse, ResumeQueueData, ResumeQueueError, ResumeQueueResponse, ResumeScheduleData, ResumeScheduleError, ResumeScheduleResponse, RetryFailedTasksData, RetryFailedTasksError, RetryFailedTasksResponse, RetryRunData, RetryRunError, RetryRunResponse, RetryTaskData, RetryTaskError, RetryTaskResponse, SearchTasksData, SearchTasksError, SearchTasksResponse, TestAlertChannelData, TestAlertChannelError, TestAlertChannelResponse, TriggerScheduleData, TriggerScheduleError, TriggerScheduleResponse } from '../types.gen';
 
 export type QueryKey<TOptions extends Options> = [
     Pick<TOptions, 'baseUrl' | 'body' | 'headers' | 'path' | 'query'> & {
@@ -602,6 +602,124 @@ export const retryTaskMutation = (options?: Partial<Options<RetryTaskData>>): Us
     const mutationOptions: UseMutationOptions<RetryTaskResponse, RetryTaskError, Options<RetryTaskData>> = {
         mutationFn: async (fnOptions) => {
             const { data } = await retryTask({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+export const listGroupsQueryKey = (options?: Options<ListGroupsData>) => createQueryKey('listGroups', options);
+
+/**
+ * List task groups
+ *
+ * Newest first. List a group's tasks with `GET /v1/tasks?group_id=`.
+ */
+export const listGroupsOptions = (options?: Options<ListGroupsData>) => queryOptions<ListGroupsResponse, ListGroupsError, ListGroupsResponse, ReturnType<typeof listGroupsQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await listGroups({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: listGroupsQueryKey(options)
+});
+
+export const listGroupsInfiniteQueryKey = (options?: Options<ListGroupsData>): QueryKey<Options<ListGroupsData>> => createQueryKey('listGroups', options, true);
+
+/**
+ * List task groups
+ *
+ * Newest first. List a group's tasks with `GET /v1/tasks?group_id=`.
+ */
+export const listGroupsInfiniteOptions = (options?: Options<ListGroupsData>) => {
+    const opts = infiniteQueryOptions<ListGroupsResponse, ListGroupsError, InfiniteData<ListGroupsResponse>, QueryKey<Options<ListGroupsData>>, string | Pick<QueryKey<Options<ListGroupsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<ListGroupsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    cursor: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await listGroups({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: listGroupsInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
+
+/**
+ * Create a task group
+ *
+ * Creates an open group. Enqueue tasks into it with `group_id`, then
+ * close it with `POST /v1/groups/{id}/close`. Once it is closed and
+ * every task in it has succeeded, failed or been cancelled, it
+ * completes and enqueues its `on_complete` callback, once.
+ *
+ * If `idempotency_key` matches an existing group, that group is
+ * returned with status 200 and nothing is created.
+ *
+ */
+export const createGroupMutation = (options?: Partial<Options<CreateGroupData>>): UseMutationOptions<CreateGroupResponse, CreateGroupError, Options<CreateGroupData>> => {
+    const mutationOptions: UseMutationOptions<CreateGroupResponse, CreateGroupError, Options<CreateGroupData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await createGroup({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+export const getGroupQueryKey = (options: Options<GetGroupData>) => createQueryKey('getGroup', options);
+
+/**
+ * Get a task group
+ */
+export const getGroupOptions = (options: Options<GetGroupData>) => queryOptions<GetGroupResponse, GetGroupError, GetGroupResponse, ReturnType<typeof getGroupQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await getGroup({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: getGroupQueryKey(options)
+});
+
+/**
+ * Close a task group
+ *
+ * Stops the group from accepting tasks; enqueueing into it then fails
+ * with `group_closed`. If its tasks have all finished (or it has none),
+ * it completes at once. Closing a closed group does nothing.
+ *
+ */
+export const closeGroupMutation = (options?: Partial<Options<CloseGroupData>>): UseMutationOptions<CloseGroupResponse, CloseGroupError, Options<CloseGroupData>> => {
+    const mutationOptions: UseMutationOptions<CloseGroupResponse, CloseGroupError, Options<CloseGroupData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await closeGroup({
                 ...options,
                 ...fnOptions,
                 throwOnError: true

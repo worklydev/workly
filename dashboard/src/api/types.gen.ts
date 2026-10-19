@@ -251,6 +251,13 @@ export type EnqueueRequest = {
      * Overrides the queue's `timeout_seconds`.
      */
     timeout_seconds?: number;
+    /**
+     * Adds the task to this group, which must be open (`group_closed`
+     * otherwise). A task enqueued again with the same
+     * `idempotency_key` isn't added twice.
+     *
+     */
+    group_id?: string;
 };
 
 export type BatchEnqueueRequest = {
@@ -322,6 +329,10 @@ export type Task = {
      *
      */
     retried_at?: string;
+    /**
+     * The group the task belongs to, if any.
+     */
+    group_id?: string;
 };
 
 export type Delivery = {
@@ -380,6 +391,102 @@ export type Attempt = {
 
 export type AttemptList = {
     attempts: Array<Attempt>;
+};
+
+/**
+ * `open`: accepting tasks. `running`: closed, with tasks still to
+ * finish. `succeeded`: every task succeeded. `failed`: every task
+ * finished and at least one failed or was cancelled. Completed groups
+ * (`succeeded` and `failed`) don't change again, even if a task in
+ * them is retried.
+ *
+ */
+export type GroupStatus = 'open' | 'running' | 'succeeded' | 'failed';
+
+/**
+ * The task a group enqueues when it completes: a `POST` whose JSON body
+ * is the group's summary (`GroupSummary`). It is delivered like any task
+ * in its queue, with the queue's retries; if the queue has been deleted
+ * by then, it is created again with default settings.
+ *
+ */
+export type GroupCallback = {
+    /**
+     * The queue to enqueue the callback into.
+     */
+    queue: string;
+    /**
+     * The http(s) URL to deliver the callback to.
+     */
+    url: string;
+    /**
+     * Headers sent with the callback. `Workly-*` headers are reserved.
+     */
+    headers?: {
+        [key: string]: string;
+    };
+};
+
+/**
+ * The body of a group's callback.
+ */
+export type GroupSummary = {
+    group_id: string;
+    name?: string;
+    status: GroupStatus;
+    total: number;
+    succeeded: number;
+    failed: number;
+    cancelled: number;
+};
+
+export type NewGroup = {
+    /**
+     * A label, e.g. the job the group is one run of. Names needn't be unique.
+     */
+    name?: string;
+    /**
+     * Deduplicates group creation within the workspace.
+     */
+    idempotency_key?: string;
+    on_complete?: GroupCallback;
+};
+
+export type Group = {
+    id: string;
+    name?: string;
+    status: GroupStatus;
+    idempotency_key?: string;
+    /**
+     * Tasks enqueued into the group (less those whose queue was deleted).
+     */
+    total: number;
+    succeeded: number;
+    failed: number;
+    cancelled: number;
+    /**
+     * Tasks still pending or running.
+     */
+    remaining: number;
+    on_complete?: GroupCallback;
+    /**
+     * The callback task, once the group has completed.
+     */
+    callback_task_id?: string;
+    created_at: string;
+    closed_at?: string;
+    /**
+     * When the group completed.
+     */
+    finished_at?: string;
+};
+
+export type GroupList = {
+    groups: Array<Group>;
+    /**
+     * Pass as `cursor` to get the next page. Absent on the last page.
+     */
+    next_cursor?: string;
 };
 
 /**
@@ -690,6 +797,8 @@ export type TaskId = string;
  */
 export type ScheduleName = string;
 
+export type GroupId = string;
+
 export type RunId = string;
 
 export type AlertChannelId = string;
@@ -745,8 +854,9 @@ export type ListQueuesData = {
 export type ListQueuesErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -781,8 +891,9 @@ export type DeleteQueueData = {
 export type DeleteQueueErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -817,8 +928,9 @@ export type GetQueueData = {
 export type GetQueueErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -853,8 +965,9 @@ export type PutQueueData = {
 export type PutQueueErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -893,8 +1006,9 @@ export type PauseQueueData = {
 export type PauseQueueErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -929,8 +1043,9 @@ export type ResumeQueueData = {
 export type ResumeQueueErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -965,8 +1080,9 @@ export type CancelPendingTasksData = {
 export type CancelPendingTasksErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -1006,8 +1122,9 @@ export type RetryFailedTasksData = {
 export type RetryFailedTasksErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -1047,8 +1164,9 @@ export type GetQueueFailuresData = {
 export type GetQueueFailuresErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -1088,8 +1206,9 @@ export type GetQueueActivityData = {
 export type GetQueueActivityErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -1121,8 +1240,9 @@ export type GetActivityData = {
 export type GetActivityErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -1190,8 +1310,9 @@ export type ListTasksData = {
 export type ListTasksErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -1232,8 +1353,9 @@ export type CreateTaskData = {
 export type CreateTaskErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -1278,8 +1400,9 @@ export type CreateTasksData = {
 export type CreateTasksErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -1306,6 +1429,10 @@ export type SearchTasksData = {
         queue?: string;
         state?: TaskState;
         idempotency_key?: string;
+        /**
+         * Only the tasks of this group.
+         */
+        group_id?: string;
         /**
          * Only tasks whose latest error is exactly this.
          */
@@ -1352,8 +1479,9 @@ export type SearchTasksData = {
 export type SearchTasksErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -1385,8 +1513,9 @@ export type GetTaskData = {
 export type GetTaskErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -1418,8 +1547,9 @@ export type ListAttemptsData = {
 export type ListAttemptsErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -1451,8 +1581,9 @@ export type GetTaskDeliveryData = {
 export type GetTaskDeliveryErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -1484,8 +1615,9 @@ export type CancelTaskData = {
 export type CancelTaskErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -1517,8 +1649,9 @@ export type RetryTaskData = {
 export type RetryTaskErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -1538,6 +1671,152 @@ export type RetryTaskResponses = {
 
 export type RetryTaskResponse = RetryTaskResponses[keyof RetryTaskResponses];
 
+export type ListGroupsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        status?: GroupStatus;
+        name?: string;
+        /**
+         * The `next_cursor` of the previous page, requested with the same
+         * filters and order.
+         *
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/v1/groups';
+};
+
+export type ListGroupsErrors = {
+    /**
+     * An error. Codes include `invalid_request`, `unauthorized`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
+     * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
+     * `invalid_state` (409), `payload_too_large` and
+     * `internal`.
+     *
+     */
+    default: Error;
+};
+
+export type ListGroupsError = ListGroupsErrors[keyof ListGroupsErrors];
+
+export type ListGroupsResponses = {
+    /**
+     * A page of groups
+     */
+    200: GroupList;
+};
+
+export type ListGroupsResponse = ListGroupsResponses[keyof ListGroupsResponses];
+
+export type CreateGroupData = {
+    body: NewGroup;
+    path?: never;
+    query?: never;
+    url: '/v1/groups';
+};
+
+export type CreateGroupErrors = {
+    /**
+     * An error. Codes include `invalid_request`, `unauthorized`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
+     * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
+     * `invalid_state` (409), `payload_too_large` and
+     * `internal`.
+     *
+     */
+    default: Error;
+};
+
+export type CreateGroupError = CreateGroupErrors[keyof CreateGroupErrors];
+
+export type CreateGroupResponses = {
+    /**
+     * A group with this idempotency key already exists
+     */
+    200: Group;
+    /**
+     * Group created
+     */
+    201: Group;
+};
+
+export type CreateGroupResponse = CreateGroupResponses[keyof CreateGroupResponses];
+
+export type GetGroupData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/v1/groups/{id}';
+};
+
+export type GetGroupErrors = {
+    /**
+     * An error. Codes include `invalid_request`, `unauthorized`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
+     * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
+     * `invalid_state` (409), `payload_too_large` and
+     * `internal`.
+     *
+     */
+    default: Error;
+};
+
+export type GetGroupError = GetGroupErrors[keyof GetGroupErrors];
+
+export type GetGroupResponses = {
+    /**
+     * The group
+     */
+    200: Group;
+};
+
+export type GetGroupResponse = GetGroupResponses[keyof GetGroupResponses];
+
+export type CloseGroupData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/v1/groups/{id}/close';
+};
+
+export type CloseGroupErrors = {
+    /**
+     * An error. Codes include `invalid_request`, `unauthorized`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
+     * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
+     * `invalid_state` (409), `payload_too_large` and
+     * `internal`.
+     *
+     */
+    default: Error;
+};
+
+export type CloseGroupError = CloseGroupErrors[keyof CloseGroupErrors];
+
+export type CloseGroupResponses = {
+    /**
+     * The group, now running or completed
+     */
+    200: Group;
+};
+
+export type CloseGroupResponse = CloseGroupResponses[keyof CloseGroupResponses];
+
 export type ListSchedulesData = {
     body?: never;
     path?: never;
@@ -1548,8 +1827,9 @@ export type ListSchedulesData = {
 export type ListSchedulesErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -1584,8 +1864,9 @@ export type DeleteScheduleData = {
 export type DeleteScheduleErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -1620,8 +1901,9 @@ export type GetScheduleData = {
 export type GetScheduleErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -1656,8 +1938,9 @@ export type PutScheduleData = {
 export type PutScheduleErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -1697,8 +1980,9 @@ export type PreviewCronData = {
 export type PreviewCronErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -1733,8 +2017,9 @@ export type PauseScheduleData = {
 export type PauseScheduleErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -1769,8 +2054,9 @@ export type ResumeScheduleData = {
 export type ResumeScheduleErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -1805,8 +2091,9 @@ export type TriggerScheduleData = {
 export type TriggerScheduleErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -1850,8 +2137,9 @@ export type ListRunsData = {
 export type ListRunsErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -1883,8 +2171,9 @@ export type GetRunData = {
 export type GetRunErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -1916,8 +2205,9 @@ export type ListRunAttemptsData = {
 export type ListRunAttemptsErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -1949,8 +2239,9 @@ export type GetRunDeliveryData = {
 export type GetRunDeliveryErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -1982,8 +2273,9 @@ export type CancelRunData = {
 export type CancelRunErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -2015,8 +2307,9 @@ export type RetryRunData = {
 export type RetryRunErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -2046,8 +2339,9 @@ export type ListAlertChannelsData = {
 export type ListAlertChannelsErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -2077,8 +2371,9 @@ export type CreateAlertChannelData = {
 export type CreateAlertChannelErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -2110,8 +2405,9 @@ export type DeleteAlertChannelData = {
 export type DeleteAlertChannelErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.
@@ -2143,8 +2439,9 @@ export type TestAlertChannelData = {
 export type TestAlertChannelErrors = {
     /**
      * An error. Codes include `invalid_request`, `unauthorized`,
-     * `queue_not_found`, `task_not_found`, `schedule_not_found`,
-     * `run_not_found`, `alert_channel_not_found`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
      * `internal`.

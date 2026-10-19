@@ -311,3 +311,40 @@ def test_alert_channels(client: workly.Workly) -> None:
         client.alerts.delete(channel.id)
     with pytest.raises(workly.NotFoundError):
         client.alerts.delete(channel.id)
+
+
+def test_groups(client: workly.Workly, server_url: str, queue: str) -> None:
+    group = client.groups.create(
+        name="prices", on_complete={"queue": queue, "url": f"{server_url}/_dev/echo"}
+    )
+    tasks = [
+        client.tasks.enqueue(queue, url=f"{server_url}/_dev/echo", group_id=group.id)
+        for _ in range(3)
+    ]
+    assert all(t.group_id == group.id for t in tasks)
+    group = client.groups.close(group.id)
+    assert group.status in ("running", "succeeded")
+
+    with pytest.raises(workly.ConflictError) as exc:
+        client.tasks.enqueue(queue, url=f"{server_url}/_dev/echo", group_id=group.id)
+    assert exc.value.code == "group_closed"
+
+    deadline = time.monotonic() + 10
+    while (group := client.groups.get(group.id)).callback_task_id is None:
+        if time.monotonic() > deadline:
+            pytest.fail(f"group still {group.status} after 10s")
+        time.sleep(0.05)
+    assert (group.status, group.succeeded, group.remaining) == ("succeeded", 3, 0)
+    callback = wait_finished(client, group.callback_task_id)
+    assert callback.state == "succeeded"
+    assert callback.payload == {
+        "group_id": group.id,
+        "name": "prices",
+        "status": "succeeded",
+        "total": 3,
+        "succeeded": 3,
+        "failed": 0,
+        "cancelled": 0,
+    }
+    assert next(g.id for g in client.groups.list(name="prices")) == group.id
+    assert len(list(client.tasks.list(group_id=group.id))) == 3

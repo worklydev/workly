@@ -28,6 +28,14 @@ func taskNotFound(id string) error {
 	return &apiError{http.StatusNotFound, "task_not_found", fmt.Sprintf("task %q does not exist", id)}
 }
 
+func groupNotFound(id string) error {
+	return &apiError{http.StatusNotFound, "group_not_found", fmt.Sprintf("group %q does not exist", id)}
+}
+
+func groupClosed(id string) error {
+	return &apiError{http.StatusConflict, "group_closed", fmt.Sprintf("group %q is closed and accepts no more tasks", id)}
+}
+
 func invalidState(format string, args ...any) error {
 	return &apiError{http.StatusConflict, "invalid_state", fmt.Sprintf(format, args...)}
 }
@@ -37,6 +45,15 @@ func inTask(i int, err error) error {
 	var apiErr *apiError
 	if errors.As(err, &apiErr) {
 		return &apiError{apiErr.status, apiErr.code, fmt.Sprintf("tasks[%d]: %s", i, apiErr.message)}
+	}
+	return err
+}
+
+// inField prefixes an error about a nested object with its field name.
+func inField(field string, err error) error {
+	var apiErr *apiError
+	if errors.As(err, &apiErr) {
+		return &apiError{apiErr.status, apiErr.code, field + ": " + apiErr.message}
 	}
 	return err
 }

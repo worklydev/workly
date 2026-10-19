@@ -99,10 +99,12 @@ Read tools (marked read-only, so clients can run them without asking):
 |---|---|
 | `list_queues` | All queues, with policy and current work: due, scheduled, running, failed, how far behind |
 | `get_queue` | One queue, plus how many tasks succeeded, failed and were cancelled recently, and its failed tasks grouped by error |
-| `list_tasks` | Task summaries, newest first, by queue, state, idempotency key, last error and creation time |
+| `list_tasks` | Task summaries, newest first, by queue, state, group, idempotency key, last error and creation time |
 | `get_task` | A task with its attempts: outcomes, status codes, errors, response bodies, durations |
 | `get_task_delivery` | The exact signed request for a task, with a curl command to replay it against a local handler |
 | `wait_for_task` | Waits for the first attempt since the task was enqueued or retried, and returns how it went |
+| `list_groups` | [Task groups](groups.md), newest first, with their status and counts, by status and name |
+| `get_group` | One group: its counts, its most recently failed tasks and its callback task |
 | `list_schedules` | All [schedules](schedules.md), with their next run and how the last one went |
 | `get_schedule` | One schedule, its next five times and its recent runs, including skipped ones and why |
 | `list_runs` | A schedule's runs, newest first, optionally by state |
@@ -114,7 +116,7 @@ Write tools (`WORKLY_MCP=full`):
 
 | Tool | What it does |
 |---|---|
-| `enqueue_task` | Enqueues a task (creating the queue if needed) |
+| `enqueue_task` | Enqueues a task (creating the queue if needed), optionally into a group |
 | `retry_task` | Delivers a task again now; replays a finished task |
 | `cancel_task` | Cancels a pending or running task |
 | `retry_failed_tasks` | Retries every failed task in a queue, or only those with one error |

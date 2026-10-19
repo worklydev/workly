@@ -14,6 +14,8 @@ export type RunTrigger = 'schedule' | 'manual';
 export type SkipReason = 'overlap' | 'missed';
 export type OverlapPolicy = 'skip' | 'allow';
 export type MissedPolicy = 'skip' | 'catch_up';
+/** `open` accepts tasks; `running` is closed with tasks unfinished; `succeeded` and `failed` are final. */
+export type GroupStatus = 'open' | 'running' | 'succeeded' | 'failed';
 
 /** A queue's delivery policy. For `queues.put`, omitted settings take their defaults. */
 export interface QueueConfig {
@@ -143,6 +145,8 @@ export interface Task {
   lastAttemptAt?: string;
   /** When the task was last retried by hand. */
   retriedAt?: string;
+  /** The group the task belongs to, if any. */
+  groupId?: string;
 }
 
 export interface Attempt {
@@ -209,12 +213,16 @@ export interface TaskSpec {
   maxAttempts?: number | undefined;
   /** Overrides the queue's setting. */
   timeoutSeconds?: number | undefined;
+  /** Adds the task to this group, which must be open. */
+  groupId?: string | undefined;
 }
 
 /** Filters for `tasks.list`. All are optional and combine. */
 export interface TaskFilter {
   queue?: string | undefined;
   state?: TaskState | undefined;
+  /** Only the tasks of this group. */
+  groupId?: string | undefined;
   idempotencyKey?: string | undefined;
   /** Only tasks whose `lastError` is exactly this, e.g. a `FailureGroup`'s error. */
   lastError?: string | undefined;
@@ -356,4 +364,66 @@ export interface AlertChannelList {
   channels: AlertChannel[];
   /** Whether the server can send email, so email channels can be added. */
   emailEnabled: boolean;
+}
+
+/**
+ * The task a group enqueues when it completes: a `POST` whose JSON body is the
+ * group's summary (`GroupSummary`), delivered with its queue's retries.
+ */
+export interface GroupCallback {
+  queue: string;
+  /** The http(s) URL to deliver the callback to. */
+  url: string;
+  /** `Workly-*` headers are reserved. */
+  headers?: Record<string, string> | undefined;
+}
+
+/** A group to create. */
+export interface GroupSpec {
+  /** A label, e.g. the job the group is one run of. Names needn't be unique. */
+  name?: string | undefined;
+  /** If a group has this key, it is returned and nothing is created. */
+  idempotencyKey?: string | undefined;
+  onComplete?: GroupCallback | undefined;
+}
+
+/** A set of tasks tracked together, with a callback once all have finished. */
+export interface Group {
+  id: string;
+  name?: string;
+  status: GroupStatus;
+  idempotencyKey?: string;
+  total: number;
+  succeeded: number;
+  failed: number;
+  cancelled: number;
+  /** Tasks still pending or running. */
+  remaining: number;
+  onComplete?: GroupCallback;
+  /** The callback task, once the group has completed. */
+  callbackTaskId?: string;
+  createdAt: string;
+  closedAt?: string;
+  /** When the group completed. */
+  finishedAt?: string;
+}
+
+export interface GroupPage {
+  groups: Group[];
+  /** Pass as `cursor` to get the next page. Absent on the last page. */
+  nextCursor?: string;
+}
+
+/**
+ * The JSON body of a group's callback. It is the task's payload, so its
+ * field names are as sent: snake_case.
+ */
+export interface GroupSummary {
+  group_id: string;
+  name?: string;
+  status: GroupStatus;
+  total: number;
+  succeeded: number;
+  failed: number;
+  cancelled: number;
 }

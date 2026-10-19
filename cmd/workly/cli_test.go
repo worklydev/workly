@@ -284,3 +284,28 @@ func TestSchedules(t *testing.T) {
 		t.Fatalf("get a deleted schedule's run: %v", r.err)
 	}
 }
+
+func TestGroups(t *testing.T) {
+	newTestServer(t, "")
+
+	group := strings.TrimSpace(mustRun(t, "groups", "create", "--name", "daily-prices",
+		"--callback-queue", "callbacks", "--callback-url", "https://example.com/refresh", "-H", "X-Job: prices"))
+	if !strings.HasPrefix(group, "grp_") {
+		t.Fatalf("create printed %q, want a group ID", group)
+	}
+	task := strings.TrimSpace(mustRun(t, "tasks", "enqueue", "prices", "https://example.com/price", "--group", group))
+	contains(t, mustRun(t, "tasks", "get", task), "Group:     "+group)
+	contains(t, mustRun(t, "tasks", "ls", "--group", group), task)
+
+	contains(t, mustRun(t, "groups", "get", group), "Name:      daily-prices", "Status:    open", "Progress:  0/1",
+		"1 remaining", "callbacks → https://example.com/refresh")
+	contains(t, mustRun(t, "groups", "close", group), "Group "+group+" is running.")
+	contains(t, mustRun(t, "groups", "ls", "--status", "running"), group, "daily-prices", "0/1")
+
+	if r := cli(t, "", "tasks", "enqueue", "prices", "https://example.com/price", "--group", group); r.err == nil || !strings.Contains(r.err.Error(), "group_closed") {
+		t.Fatalf("enqueue into closed group = %+v", r)
+	}
+	if r := cli(t, "", "groups", "create", "--callback-url", "https://example.com"); r.err == nil {
+		t.Fatalf("create with a callback URL but no queue succeeded")
+	}
+}

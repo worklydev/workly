@@ -6,7 +6,9 @@ Conventions for coding agents (and humans) working in this repo.
 
 Workly is an open-source HTTP task queue: enqueue → queue → HTTP delivery → retry → success/failure. Next to queues, schedules call an endpoint on a cron timetable; each call is a run with its own attempts. Schedules and runs are separate from queues and tasks (own tables, API, settings, metrics and dashboard section) and share only internals: HTTP delivery, signing, backoff. The same binary runs as `workly dev` (SQLite), self-hosted (`workly serve` + Postgres, typically a Kubernetes pod) and as the hosted service at workly.run.
 
-Keep the scope narrow. Workly is not a workflow engine: no DAGs, no workflow DSLs, no running user code.
+Task groups (`docs/groups.md`) track a set of tasks and enqueue one callback task when they've all finished. A group's counts change in the same transaction as its tasks' states (`sqlstore/groups.go`: every path that changes a task's state must update them), and it completes, enqueueing its callback, in the transaction that finishes its last task or closes it.
+
+Keep the scope narrow. Workly is not a workflow engine: no DAGs, no workflow DSLs, no running user code. Groups stay one level deep: no dependencies between tasks, chains or nested groups.
 
 ## Commands
 
@@ -30,7 +32,7 @@ Run `just test-all` before considering a change to `internal/store` done.
 
 ## Layout
 
-- `cmd/workly/`: CLI entrypoint: the server (`dev`, `serve`, `migrate`, `healthcheck`) and API commands (`queues`, `tasks`, `schedules`, `runs`) built on `internal/client`. API commands print human output by default and the API's JSON with `--json`; `tasks enqueue` prints only the ID, for scripts.
+- `cmd/workly/`: CLI entrypoint: the server (`dev`, `serve`, `migrate`, `healthcheck`) and API commands (`queues`, `tasks`, `groups`, `schedules`, `runs`) built on `internal/client`. API commands print human output by default and the API's JSON with `--json`; `tasks enqueue` prints only the ID, for scripts.
 - `internal/client/`: Go API client generated from the spec (`just generate`), used by the CLI. Not public API.
 - `server/`: the only public Go package. The private hosted repo (`worklydev/workly-cloud`) builds on it through extension points: store, workspace resolver, `Dashboard`, `WrapHandler`, `LoadConfig`, metrics, `DeliveryDialControl` (vetting delivery connections), `Admission` (limits on new tasks and schedules) and `Mailer` (sending alert emails). Keep it small and treat changes as API changes; workly-cloud builds this repo from a sibling checkout pinned to a commit, so check it still builds when you change them.
 - `internal/api/`: HTTP layer. `gen.go` is generated; never edit it by hand. Handlers return `*apiError` for client errors; anything else becomes a 500.
@@ -42,7 +44,7 @@ Run `just test-all` before considering a change to `internal/store` done.
 - `internal/live/`: live dashboard updates. API writes (`markChanges`) and the dispatcher's state changes tell the `Hub` which workspace changed; it coalesces them into change notices for every replica through the store (`store.Changes`: Postgres `LISTEN`/`NOTIFY`, in-process on SQLite), and each replica passes them to the `GET /v1/events` streams it serves. Events carry no data: the dashboard refetches its live queries (`LIVE`, `lib/live.ts`) and polls slowly while the stream is up.
 - `internal/metrics/`: Prometheus metrics on the standard library; metric names are stable API (`docs/metrics.md`).
 - `internal/signing/`: delivery signatures. The scheme is shared with the SDKs, so changes are breaking; the SDK tests reuse the test vector in `signing_test.go`.
-- `internal/id/`: prefixed ULIDs (`task_…`, `att_…`, `run_…`).
+- `internal/id/`: prefixed ULIDs (`task_…`, `att_…`, `run_…`, `grp_…`).
 - `internal/workspace/`: workspace resolution.
 - `internal/config/`: `WORKLY_*` environment configuration.
 - `dashboard/`: the web UI (React, Vite, Tailwind, TanStack Query), embedded into the binary from `dist/`. `src/api/` is generated from the spec. Design rules are in `dashboard/DESIGN.md`.

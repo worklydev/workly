@@ -281,6 +281,41 @@ describe('integration', { skip: server ? false : 'set WORKLY_BIN or install Go' 
     await assert.rejects(workly.alerts.delete(channel.id), NotFoundError);
   });
 
+  test('groups', async () => {
+    let group = await workly.groups.create({ name: 'prices', onComplete: { queue, url: `${url}/_dev/echo` } });
+    for (let i = 0; i < 3; i++) {
+      const task = await workly.tasks.enqueue(queue, { url: `${url}/_dev/echo`, groupId: group.id });
+      assert.equal(task.groupId, group.id);
+    }
+    group = await workly.groups.close(group.id);
+    await assert.rejects(workly.tasks.enqueue(queue, { url: `${url}/_dev/echo`, groupId: group.id }), (err) => {
+      assert.ok(err instanceof ConflictError);
+      assert.equal(err.code, 'group_closed');
+      return true;
+    });
+
+    const deadline = Date.now() + 10_000;
+    while (!(group = await workly.groups.get(group.id)).callbackTaskId) {
+      if (Date.now() > deadline) assert.fail(`group still ${group.status} after 10s`);
+      await delay(50);
+    }
+    assert.deepEqual([group.status, group.succeeded, group.remaining], ['succeeded', 3, 0]);
+    const callback = await waitFinished(group.callbackTaskId!);
+    assert.equal(callback.state, 'succeeded');
+    assert.deepEqual(callback.payload, {
+      group_id: group.id,
+      name: 'prices',
+      status: 'succeeded',
+      total: 3,
+      succeeded: 3,
+      failed: 0,
+      cancelled: 0,
+    });
+    const members = [];
+    for await (const t of workly.tasks.list({ groupId: group.id })) members.push(t);
+    assert.equal(members.length, 3);
+  });
+
   test('validation error', async () => {
     const err = await workly.tasks.enqueue(queue, { url: 'ftp://example.com' }).catch((e: unknown) => e);
     assert.ok(err instanceof BadRequestError);
