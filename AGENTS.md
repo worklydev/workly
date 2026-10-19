@@ -32,7 +32,8 @@ Run `just test-all` before considering a change to `internal/store` done.
 
 ## Layout
 
-- `cmd/workly/`: CLI entrypoint: the server (`dev`, `serve`, `migrate`, `healthcheck`) and API commands (`queues`, `tasks`, `groups`, `schedules`, `runs`) built on `internal/client`. API commands print human output by default and the API's JSON with `--json`; `tasks enqueue` prints only the ID, for scripts.
+- `cmd/workly/`: CLI entrypoint: the server (`dev`, `serve`, `migrate`, `healthcheck`) and API commands (`queues`, `tasks`, `groups`, `schedules`, `runs`) built on `internal/client`. API commands print human output by default and the API's JSON with `--json`; `tasks enqueue` prints only the ID, for scripts. `validate`, `plan` and `deploy` apply a `workly.yaml` (`docs/deploy.md`).
+- `internal/deploy/`: reads `workly.yaml` and plans the changes that make a server match it. Its settings are the PUT bodies of the API, validated offline by the API's own code (`internal/api/settings.go`), so a new queue or schedule setting works in the file without changes here; add it to the field lists in `plan.go` so plans name it. Deploying creates and updates; it never deletes, pauses or resumes.
 - `internal/client/`: Go API client generated from the spec (`just generate`), used by the CLI. Not public API.
 - `server/`: the only public Go package. The private hosted repo (`worklydev/workly-cloud`) builds on it through extension points: store, workspace resolver, `Dashboard`, `WrapHandler`, `LoadConfig`, metrics, `DeliveryDialControl` (vetting delivery connections), `Admission` (limits on new tasks and schedules) and `Mailer` (sending alert emails). Keep it small and treat changes as API changes; workly-cloud builds this repo from a sibling checkout pinned to a commit, so check it still builds when you change them.
 - `internal/api/`: HTTP layer. `gen.go` is generated; never edit it by hand. Handlers return `*apiError` for client errors; anything else becomes a 500.

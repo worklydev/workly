@@ -50,6 +50,18 @@ workly schedules put nightly-report https://api.example.com/reports/nightly \
   --cron '0 3 * * *' --timezone Europe/Stockholm -d '{"kind": "daily"}'
 ```
 
+Or keep it in a `workly.yaml` with your code and deploy it with `workly deploy` ([configuration as code](deploy.md)):
+
+```yaml
+version: 1
+schedules:
+  nightly-report:
+    cron: "0 3 * * *"
+    timezone: Europe/Stockholm
+    url: https://api.example.com/reports/nightly
+    payload: {kind: daily}
+```
+
 ## Cron expressions
 
 Five fields: minute, hour, day of month, month and day of week.

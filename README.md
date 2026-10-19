@@ -110,6 +110,13 @@ workly schedules runs nightly     # a schedule's runs, newest first
 workly groups ls                  # task groups with their progress
 ```
 
+Keep queues and schedules in a `workly.yaml` and deploy them with your app ([configuration as code](docs/deploy.md)):
+
+```sh
+workly plan                       # what would change
+workly deploy --yes               # create and update until the server matches the file
+```
+
 Prometheus metrics are at `/metrics` (see [docs/metrics.md](docs/metrics.md)).
 
 To run Workly in production with Postgres, on Docker, Compose or Kubernetes, see [docs/self-hosting.md](docs/self-hosting.md). Every setting is in [docs/configuration.md](docs/configuration.md).

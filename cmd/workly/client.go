@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/worklydev/workly/internal/client"
 )
@@ -26,13 +27,16 @@ const defaultURL = "http://localhost:7337"
 // addClientFlags adds the connection and output flags shared by the API
 // commands (queues, tasks, schedules, runs).
 func addClientFlags(cmd *cobra.Command) {
-	f := cmd.PersistentFlags()
-	f.String("url", "", "server URL (env WORKLY_URL, default "+defaultURL+")")
-	f.String("api-key", "", "API key (env WORKLY_API_KEY)")
-	f.Bool("json", false, "print the API's JSON response")
+	addServerFlags(cmd.PersistentFlags())
+	cmd.PersistentFlags().Bool("json", false, "print the API's JSON response")
 }
 
-func newClient(cmd *cobra.Command) (*client.ClientWithResponses, error) {
+func addServerFlags(f *pflag.FlagSet) {
+	f.String("url", "", "server URL (env WORKLY_URL, default "+defaultURL+")")
+	f.String("api-key", "", "API key (env WORKLY_API_KEY)")
+}
+
+func serverURL(cmd *cobra.Command) string {
 	url, _ := cmd.Flags().GetString("url")
 	if url == "" {
 		url = os.Getenv("WORKLY_URL")
@@ -40,11 +44,15 @@ func newClient(cmd *cobra.Command) (*client.ClientWithResponses, error) {
 	if url == "" {
 		url = defaultURL
 	}
+	return strings.TrimRight(url, "/")
+}
+
+func newClient(cmd *cobra.Command) (*client.ClientWithResponses, error) {
 	key, _ := cmd.Flags().GetString("api-key")
 	if key == "" {
 		key = os.Getenv("WORKLY_API_KEY")
 	}
-	return client.NewClientWithResponses(strings.TrimRight(url, "/"),
+	return client.NewClientWithResponses(serverURL(cmd),
 		client.WithHTTPClient(&http.Client{Timeout: 30 * time.Second}),
 		client.WithRequestEditorFn(func(_ context.Context, req *http.Request) error {
 			req.Header.Set("User-Agent", "workly-cli/"+version)

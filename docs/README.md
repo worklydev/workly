@@ -16,6 +16,7 @@ The same binary runs everywhere: `workly dev` on your laptop (SQLite, no configu
 - [Schedules](schedules.md): call an endpoint on a cron timetable.
 - [Task groups](groups.md): fan out tasks and get one callback when they've all finished.
 - [Alerts](alerts.md): hear about failed tasks and runs by email or in Slack.
+- [Configuration as code](deploy.md): keep queues and schedules in a `workly.yaml` and deploy it with `workly deploy`.
 - [Self-hosting](self-hosting.md): run it in production on Docker, Compose or Kubernetes.
 - [MCP](mcp.md): let coding agents see inside your queues and act on them.
 

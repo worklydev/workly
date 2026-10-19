@@ -309,3 +309,62 @@ func TestGroups(t *testing.T) {
 		t.Fatalf("create with a callback URL but no queue succeeded")
 	}
 }
+
+func TestDeploy(t *testing.T) {
+	newTestServer(t, "")
+	t.Setenv("API_URL", "https://api.example.com")
+	t.Setenv("JOBS_TOKEN", "s3cret")
+	path := filepath.Join(t.TempDir(), "workly.yaml")
+	write := func(src string) {
+		if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(`version: 1
+queues:
+  stock-prices:
+    max_concurrency: 10
+    rate_per_second: 2
+schedules:
+  nightly:
+    cron: "0 22 * * 1-5"
+    timezone: Europe/Stockholm
+    url: ${API_URL}/jobs/nightly
+    headers: {Authorization: "Bearer ${JOBS_TOKEN}"}
+    payload: {full: true}
+`)
+	contains(t, mustRun(t, "validate", "-f", path), "is valid: 1 queue, 1 schedule.")
+	mustRun(t, "schedules", "put", "legacy", "https://example.com/legacy", "--cron", "@daily")
+
+	out := mustRun(t, "plan", "-f", path)
+	contains(t, out, "+ create queue stock-prices", "+ create schedule nightly", "2 to create",
+		"Not in "+path+", left as they are: schedule legacy.")
+	if r := cli(t, "", "deploy", "-f", path); r.err == nil || !strings.Contains(r.err.Error(), "--yes") {
+		t.Fatalf("deploy without --yes: %v", r.err)
+	}
+	contains(t, mustRun(t, "deploy", "-f", path, "--yes"), "Created queue stock-prices", "Created schedule nightly",
+		"Deployed "+path+": 2 created, 0 updated.")
+	contains(t, mustRun(t, "queues", "get", "stock-prices"), "Max concurrency:  10")
+
+	// Deploying again changes nothing.
+	contains(t, mustRun(t, "deploy", "-f", path, "--yes"), "No changes: ", "(2 unchanged)")
+
+	// A changed setting and secret: the plan names the header but not its value.
+	mustRun(t, "schedules", "pause", "nightly")
+	t.Setenv("JOBS_TOKEN", "rotated")
+	out = mustRun(t, "deploy", "-f", path, "--yes")
+	contains(t, out, "~ update schedule nightly (paused, stays paused)", "headers.Authorization: changed", "Updated schedule nightly")
+	if strings.Contains(out, "rotated") || strings.Contains(out, "s3cret") {
+		t.Errorf("deploy printed a header value:\n%s", out)
+	}
+	contains(t, mustRun(t, "schedules", "get", "nightly"), "paused")
+
+	write("version: 1\nqueues:\n  stock-prices: {max_concurency: 3}\n")
+	r := cli(t, "", "plan", "-f", path)
+	if r.err == nil || !strings.Contains(r.err.Error(), path+":3: queues.stock-prices.max_concurency: unknown field: did you mean max_concurrency?") {
+		t.Fatalf("plan with an invalid file: %v", r.err)
+	}
+	if r := cli(t, "", "validate", "-f", filepath.Join(t.TempDir(), "missing.yaml")); r.err == nil || !strings.Contains(r.err.Error(), "not found") {
+		t.Fatalf("validate a missing file: %v", r.err)
+	}
+}
