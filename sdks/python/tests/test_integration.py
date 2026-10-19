@@ -315,7 +315,7 @@ def test_alert_channels(client: workly.Workly) -> None:
 
 def test_groups(client: workly.Workly, server_url: str, queue: str) -> None:
     group = client.groups.create(
-        name="prices", on_complete={"queue": queue, "url": f"{server_url}/_dev/echo"}
+        name="prices", on_complete=workly.Callback(url=f"{server_url}/_dev/echo", queue=queue)
     )
     tasks = [
         client.tasks.enqueue(queue, url=f"{server_url}/_dev/echo", group_id=group.id)

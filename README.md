@@ -84,8 +84,10 @@ curl -X POST localhost:7337/v1/schedules/nightly/trigger   # run it now
 Fan out with a [task group](docs/groups.md): enqueue tasks into a group, close it, and Workly enqueues one callback, with how they went, once they've all finished:
 
 ```python
+from workly import Callback, Workly
+
 workly = Workly()
-group = workly.groups.create(name="daily-stock-prices", on_complete={"queue": "jobs", "url": "https://api.example.com/jobs/refresh-views"})
+group = workly.groups.create(name="daily-stock-prices", on_complete=Callback(url="https://api.example.com/jobs/refresh-views"))
 for company in companies:
     workly.tasks.enqueue("stock-prices", url="https://api.example.com/jobs/update-stock-price", payload={"symbol": company.symbol}, group_id=group.id)
 workly.groups.close(group.id)

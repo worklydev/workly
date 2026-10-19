@@ -73,8 +73,8 @@ func callbacks(t *testing.T, s store.Store, ws workspace.ID) []store.Task {
 	return tasks
 }
 
-func onComplete() *store.GroupCallback {
-	return &store.GroupCallback{Queue: "callbacks", URL: "http://example.test/done", Headers: map[string]string{"X-Job": "prices"}}
+func onComplete() *store.Callback {
+	return &store.Callback{Queue: "callbacks", URL: "http://example.test/done", Headers: map[string]string{"X-Job": "prices"}}
 }
 
 func testGroups(t *testing.T, open func() store.Store) {

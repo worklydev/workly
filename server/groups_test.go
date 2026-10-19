@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/worklydev/workly/internal/store"
 	"github.com/worklydev/workly/server"
 )
 
@@ -108,6 +109,49 @@ func TestGroupCallbackQueueMustExist(t *testing.T) {
 	res := doBody(t, h, "POST", "/v1/groups", "", `{"on_complete": {"queue": "callbacks", "url": "https://example.test"}}`)
 	if res.status != 404 || errorCode(res) != "queue_not_found" {
 		t.Fatalf("create = %d %s", res.status, res.body)
+	}
+	// _callbacks, the default, is created when it's needed.
+	res = doBody(t, h, "POST", "/v1/groups", "", `{"on_complete": {"url": "https://example.test"}}`)
+	if res.status != 201 || res.json["on_complete"].(map[string]any)["queue"] != "_callbacks" {
+		t.Fatalf("create = %d %s", res.status, res.body)
+	}
+	if res := do(t, h, "POST", "/v1/groups/"+res.json["id"].(string)+"/close", ""); res.status != 200 {
+		t.Fatalf("close = %d %s", res.status, res.body)
+	}
+	if res := do(t, h, "GET", "/v1/queues/_callbacks/tasks", ""); res.status != 200 || len(res.json["tasks"].([]any)) != 1 {
+		t.Fatalf("callbacks = %d %s", res.status, res.body)
+	}
+}
+
+// Queue names starting with '_' are Workly's: _callbacks can be configured
+// but not enqueued into, and no other new ones can be created.
+func TestReservedQueues(t *testing.T) {
+	st := newStore(t, true)
+	if _, _, err := st.PutQueue(t.Context(), server.DefaultWorkspace, "_legacy", store.DefaultQueueConfig()); err != nil {
+		t.Fatal(err)
+	}
+	h := newServer(t, server.Options{Store: st, DisableDispatcher: true}).Handler()
+	task := `{"url": "https://example.test"}`
+	for _, tt := range []struct {
+		method, path, body string
+		status             int
+	}{
+		{"POST", "/v1/queues/_callbacks/tasks", task, 400},
+		{"POST", "/v1/queues/_callbacks/tasks:batch", `{"tasks": [` + task + `]}`, 400},
+		{"POST", "/v1/queues/_new/tasks", task, 400},
+		{"POST", "/v1/queues/_new/tasks:batch", `{"tasks": [` + task + `]}`, 400},
+		{"PUT", "/v1/queues/_new", `{}`, 400},
+		{"POST", "/v1/groups", `{"on_complete": {"queue": "_new", "url": "https://example.test"}}`, 400},
+		{"PUT", "/v1/queues/_callbacks", `{"max_attempts": 10}`, 201},
+		// A queue created before the names were reserved keeps working.
+		{"POST", "/v1/queues/_legacy/tasks", task, 201},
+		{"PUT", "/v1/queues/_legacy", `{}`, 200},
+		{"POST", "/v1/groups", `{"on_complete": {"queue": "_legacy", "url": "https://example.test"}}`, 201},
+	} {
+		res := doBody(t, h, tt.method, tt.path, "", tt.body)
+		if res.status != tt.status || (tt.status == 400 && !strings.Contains(res.body, "_")) {
+			t.Errorf("%s %s = %d %s", tt.method, tt.path, res.status, res.body)
+		}
 	}
 }
 

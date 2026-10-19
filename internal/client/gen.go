@@ -506,6 +506,27 @@ type BatchEnqueueResult struct {
 	Task    Task `json:"task"`
 }
 
+// Callback A task Workly enqueues when something completes, such as a group: a
+// `POST` to `url` whose JSON body says what completed (for a group,
+// `GroupSummary`). It is delivered like any task in its queue, with the
+// queue's retries; if the queue has been deleted by then, it is created
+// again with default settings.
+type Callback struct {
+	// Headers Headers sent with the callback. `Workly-*` headers are reserved.
+	Headers *map[string]string `json:"headers,omitempty"`
+
+	// Queue The queue to enqueue the callback into. Defaults to
+	// `_callbacks`, a queue Workly creates for callbacks, whose
+	// settings can be changed like any queue's. Always set in
+	// responses.
+	Queue *string `json:"queue,omitempty"`
+
+	// Url The http(s) URL to deliver the callback to.
+	//
+	// Example: https://api.example.com/jobs/refresh-views
+	Url string `json:"url"`
+}
+
 // CancelPendingResult defines model for CancelPendingResult.
 type CancelPendingResult struct {
 	// Cancelled How many pending tasks were cancelled.
@@ -629,11 +650,12 @@ type Group struct {
 	IdempotencyKey *string `json:"idempotency_key,omitempty"`
 	Name           *string `json:"name,omitempty"`
 
-	// OnComplete The task a group enqueues when it completes: a `POST` whose JSON body
-	// is the group's summary (`GroupSummary`). It is delivered like any task
-	// in its queue, with the queue's retries; if the queue has been deleted
-	// by then, it is created again with default settings.
-	OnComplete *GroupCallback `json:"on_complete,omitempty"`
+	// OnComplete A task Workly enqueues when something completes, such as a group: a
+	// `POST` to `url` whose JSON body says what completed (for a group,
+	// `GroupSummary`). It is delivered like any task in its queue, with the
+	// queue's retries; if the queue has been deleted by then, it is created
+	// again with default settings.
+	OnComplete *Callback `json:"on_complete,omitempty"`
 
 	// Remaining Tasks still pending or running.
 	Remaining int `json:"remaining"`
@@ -648,23 +670,6 @@ type Group struct {
 
 	// Total Tasks enqueued into the group (less those whose queue was deleted).
 	Total int `json:"total"`
-}
-
-// GroupCallback The task a group enqueues when it completes: a `POST` whose JSON body
-// is the group's summary (`GroupSummary`). It is delivered like any task
-// in its queue, with the queue's retries; if the queue has been deleted
-// by then, it is created again with default settings.
-type GroupCallback struct {
-	// Headers Headers sent with the callback. `Workly-*` headers are reserved.
-	Headers *map[string]string `json:"headers,omitempty"`
-
-	// Queue The queue to enqueue the callback into.
-	Queue string `json:"queue"`
-
-	// Url The http(s) URL to deliver the callback to.
-	//
-	// Example: https://api.example.com/jobs/refresh-views
-	Url string `json:"url"`
 }
 
 // GroupList defines model for GroupList.
@@ -749,11 +754,12 @@ type NewGroup struct {
 	// Example: daily-stock-prices
 	Name *string `json:"name,omitempty"`
 
-	// OnComplete The task a group enqueues when it completes: a `POST` whose JSON body
-	// is the group's summary (`GroupSummary`). It is delivered like any task
-	// in its queue, with the queue's retries; if the queue has been deleted
-	// by then, it is created again with default settings.
-	OnComplete *GroupCallback `json:"on_complete,omitempty"`
+	// OnComplete A task Workly enqueues when something completes, such as a group: a
+	// `POST` to `url` whose JSON body says what completed (for a group,
+	// `GroupSummary`). It is delivered like any task in its queue, with the
+	// queue's retries; if the queue has been deleted by then, it is created
+	// again with default settings.
+	OnComplete *Callback `json:"on_complete,omitempty"`
 }
 
 // Outcome How a delivery attempt ended. `lost` means the result is unknown: the

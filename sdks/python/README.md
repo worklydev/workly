@@ -164,13 +164,16 @@ Runs are delivered with `Workly-Run-Id`, `Workly-Schedule` and `Workly-Scheduled
 
 ## Task groups
 
-A group tracks a set of tasks and enqueues a callback task once it's closed and they've all finished: a `POST` of the group's status and counts. See [Task groups](https://docs.workly.run/groups/).
+A group tracks a set of tasks and enqueues a callback task once it's closed and they've all finished: a `POST` of the group's status and counts. See [Task groups](https://docs.workly.run/groups/). The callback goes to Workly's `_callbacks` queue unless it names a `queue`.
 
 ```python
+from workly import Callback
+
 group = client.groups.create(
     name="daily-stock-prices",
     idempotency_key="stock-prices-2026-10-19",  # creating it again returns this group
-    on_complete={"queue": "jobs", "url": "https://api.example.com/jobs/refresh-views"},
+    # or a dict: {"url": "https://api.example.com/jobs/refresh-views"}
+    on_complete=Callback(url="https://api.example.com/jobs/refresh-views"),
 )
 for company in companies:
     client.tasks.enqueue(

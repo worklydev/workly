@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/worklydev/workly/internal/store"
+	"github.com/worklydev/workly/internal/workspace"
 )
 
 func (h Handlers) CreateTask(ctx context.Context, req CreateTaskRequestObject) (CreateTaskResponseObject, error) {
@@ -22,6 +23,9 @@ func (h Handlers) CreateTask(ctx context.Context, req CreateTaskRequestObject) (
 		return nil, err
 	}
 	ws := workspaceID(ctx)
+	if err := h.checkEnqueue(ctx, ws, req.Queue); err != nil {
+		return nil, err
+	}
 	if h.Admission != nil {
 		if err := h.Admission.AdmitTasks(ctx, ws, 1); err != nil {
 			return nil, err
@@ -65,6 +69,9 @@ func (h Handlers) CreateTasks(ctx context.Context, req CreateTasksRequestObject)
 		nts[i] = nt
 	}
 	ws := workspaceID(ctx)
+	if err := h.checkEnqueue(ctx, ws, req.Queue); err != nil {
+		return nil, err
+	}
 	if h.Admission != nil {
 		if err := h.Admission.AdmitTasks(ctx, ws, len(nts)); err != nil {
 			return nil, err
@@ -87,6 +94,27 @@ func (h Handlers) CreateTasks(ctx context.Context, req CreateTasksRequestObject)
 		h.Admission.TasksCreated(ctx, ws, n)
 	}
 	return out, nil
+}
+
+// checkEnqueue rejects enqueueing into Workly's own queues, and into new
+// queues with reserved names.
+func (h Handlers) checkEnqueue(ctx context.Context, ws workspace.ID, queue string) error {
+	if queue == CallbackQueue {
+		return reservedQueue(queue)
+	}
+	return h.checkReserved(ctx, ws, queue)
+}
+
+// checkReserved rejects a reserved queue name unless the queue exists.
+func (h Handlers) checkReserved(ctx context.Context, ws workspace.ID, queue string) error {
+	if !Reserved(queue) {
+		return nil
+	}
+	_, err := h.Store.GetQueue(ctx, ws, queue)
+	if errors.Is(err, store.ErrNotFound) {
+		return reservedQueue(queue)
+	}
+	return err
 }
 
 // enqueueError translates the store's errors for an enqueue.

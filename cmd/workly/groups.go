@@ -31,7 +31,7 @@ func groupsCreateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create an open group and print its ID",
-		Example: `  group=$(workly groups create --name daily-prices --callback-queue callbacks --callback-url https://api.example.com/refresh)
+		Example: `  group=$(workly groups create --name daily-prices --callback-url https://api.example.com/refresh)
   workly tasks enqueue prices https://api.example.com/price -d '{"symbol": "NET"}' --group $group
   workly groups close $group`,
 		Args: cobra.NoArgs,
@@ -41,7 +41,8 @@ func groupsCreateCmd() *cobra.Command {
 			setIf(f.Changed("name"), &req.Name, must(f.GetString("name")))
 			setIf(f.Changed("idempotency-key"), &req.IdempotencyKey, must(f.GetString("idempotency-key")))
 			if f.Changed("callback-url") {
-				req.OnComplete = &client.GroupCallback{Queue: must(f.GetString("callback-queue")), Url: must(f.GetString("callback-url"))}
+				req.OnComplete = &client.Callback{Url: must(f.GetString("callback-url"))}
+				setIf(f.Changed("callback-queue"), &req.OnComplete.Queue, must(f.GetString("callback-queue")))
 				if hs := must(f.GetStringArray("header")); len(hs) > 0 {
 					headers := map[string]string{}
 					for _, h := range hs {
@@ -53,8 +54,8 @@ func groupsCreateCmd() *cobra.Command {
 					}
 					req.OnComplete.Headers = &headers
 				}
-			} else if f.Changed("header") {
-				return errors.New("--header applies to the callback: add --callback-url")
+			} else if f.Changed("header") || f.Changed("callback-queue") {
+				return errors.New("--header and --callback-queue apply to the callback: add --callback-url")
 			}
 			c, err := newClient(cmd)
 			if err != nil {
@@ -77,9 +78,8 @@ func groupsCreateCmd() *cobra.Command {
 	f.String("name", "", "a label, e.g. the job this group is one run of")
 	f.StringP("idempotency-key", "k", "", "return the existing group with this key instead of creating one")
 	f.String("callback-url", "", "URL of the callback task, enqueued when the group completes")
-	f.String("callback-queue", "", "queue of the callback task")
+	f.String("callback-queue", "", "queue of the callback task (default _callbacks)")
 	f.StringArrayP("header", "H", nil, `header sent with the callback, "Name: value" (repeatable)`)
-	cmd.MarkFlagsRequiredTogether("callback-url", "callback-queue")
 	return cmd
 }
 
@@ -178,7 +178,7 @@ func printGroup(w io.Writer, g *client.Group) {
 		{"Tasks", fmt.Sprintf("%d succeeded, %d failed, %d cancelled, %d remaining", g.Succeeded, g.Failed, g.Cancelled, g.Remaining)},
 	}
 	if cb := g.OnComplete; cb != nil {
-		callback := cb.Queue + " → " + cb.Url
+		callback := deref(cb.Queue, "-") + " → " + cb.Url
 		if g.CallbackTaskId != nil {
 			callback += " (task " + *g.CallbackTaskId + ")"
 		}

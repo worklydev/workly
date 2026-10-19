@@ -16,7 +16,7 @@ In Python, with Flask:
 
 ```python
 from flask import Flask, abort, request
-from workly import SignatureVerificationError, Workly, verify_signature
+from workly import Callback, SignatureVerificationError, Workly, verify_signature
 
 app = Flask(__name__)
 workly = Workly()
@@ -40,7 +40,7 @@ def start_price_update():
     group = workly.groups.create(
         name="daily-stock-prices",
         idempotency_key=f"stock-prices-{day}",
-        on_complete={"queue": "jobs", "url": f"{API}/jobs/refresh-views"},
+        on_complete=Callback(url=f"{API}/jobs/refresh-views"),
     )
     if group.status == "open":
         for start in range(0, len(SYMBOLS), 100):
@@ -91,7 +91,7 @@ export async function startPriceUpdate(day: string, symbols: string[]) {
   const group = await workly.groups.create({
     name: 'daily-stock-prices',
     idempotencyKey: `stock-prices-${day}`,
-    onComplete: { queue: 'jobs', url: `${API}/jobs/refresh-views` },
+    onComplete: { url: `${API}/jobs/refresh-views` },
   });
   if (group.status !== 'open') return; // already started
   for (let i = 0; i < symbols.length; i += 100) {
@@ -114,7 +114,7 @@ Over HTTP:
 ```sh
 curl -X POST localhost:7337/v1/groups -d '{
   "name": "daily-stock-prices",
-  "on_complete": {"queue": "jobs", "url": "https://api.example.com/jobs/refresh-views"}
+  "on_complete": {"url": "https://api.example.com/jobs/refresh-views"}
 }'
 # {"id": "grp_01J9…", "status": "open", "total": 0, …}
 
@@ -156,7 +156,7 @@ To try it locally, point the URLs at `http://localhost:7337/_dev/echo`.
 
 ## The callback
 
-`on_complete` names a queue and a URL. When the group completes, Workly enqueues a task there: a `POST` with the group's summary as its JSON body.
+`on_complete` is a callback: a URL, and optionally a queue and headers. When the group completes, Workly enqueues a task: a `POST` to the URL with the group's summary as its JSON body.
 
 ```json
 {
@@ -172,7 +172,18 @@ To try it locally, point the URLs at `http://localhost:7337/_dev/echo`.
 
 It is enqueued once per group, and only once: the group completes in the same database transaction that finishes its last task (or closes it), and that transaction enqueues the callback. A crash can't leave a completed group without its callback, and two completions racing each other can't enqueue two.
 
-From there it is a normal task: it is delivered with its queue's retries, signed, and recorded, and the group's `callback_task_id` points to it. As with every task, delivery is at least once, so make the handler safe to run twice; `group_id` identifies the group. `headers` in `on_complete` are sent with the callback. If the callback's queue has been deleted by the time the group completes, it is created again with default settings.
+From there it is a normal task: it is delivered with its queue's retries, signed, and recorded, and the group's `callback_task_id` points to it. As with every task, delivery is at least once, so make the handler safe to run twice; `group_id` identifies the group. `headers` in `on_complete` are sent with the callback.
+
+Callbacks go to the `_callbacks` queue unless they name another. Workly creates it when a group first needs it, and only Workly enqueues into it, so everything in it is a callback. It has the default settings; to give callbacks more retries or a longer timeout, configure it like any queue, e.g. in [`workly.yaml`](deploy.md):
+
+```yaml
+queues:
+  _callbacks:
+    max_attempts: 10
+    timeout_seconds: 300
+```
+
+To keep a callback with the rest of a job's tasks, name their queue: `Callback(url=…, queue="jobs")`. If the callback's queue has been deleted by the time the group completes, it is created again with default settings.
 
 The callback fires whether the group succeeded or failed: check `status`. A group without `on_complete` still completes, and you can poll it instead.
 

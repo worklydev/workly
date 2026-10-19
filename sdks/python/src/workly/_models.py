@@ -5,7 +5,8 @@ Unknown fields are ignored, so newer servers don't break older SDKs.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
 
@@ -510,17 +511,33 @@ class AlertChannelList:
         )
 
 
-@dataclass(frozen=True, slots=True)
-class GroupCallback:
-    """The task a group enqueues when it completes: a POST of the group's summary as JSON."""
+CALLBACK_QUEUE = "_callbacks"
 
-    queue: str
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Callback:
+    """A task Workly enqueues when something completes: a POST to `url` saying what completed.
+
+    A group's callback has the group's summary as its JSON body. It is
+    delivered like any task in its queue, with that queue's retries.
+    """
+
     url: str
-    headers: dict[str, str]
+    queue: str = CALLBACK_QUEUE
+    """The queue to enqueue the callback into. `_callbacks`, the default, is
+    created by Workly; configure it like any queue to change its retries."""
+    headers: Mapping[str, str] = field(default_factory=dict[str, str])
+    """Headers sent with the callback. `Workly-*` headers are reserved."""
 
     @classmethod
-    def _from_json(cls, d: dict[str, Any]) -> GroupCallback:
-        return cls(queue=d["queue"], url=d["url"], headers=d.get("headers") or {})
+    def _from_json(cls, d: dict[str, Any]) -> Callback:
+        return cls(
+            url=d["url"], queue=d.get("queue") or CALLBACK_QUEUE, headers=d.get("headers") or {}
+        )
+
+
+GroupCallback = Callback
+"""Deprecated: use `Callback`."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -537,7 +554,7 @@ class Group:
     cancelled: int
     remaining: int
     """Tasks still pending or running."""
-    on_complete: GroupCallback | None
+    on_complete: Callback | None
     callback_task_id: str | None
     """The callback task, once the group has completed."""
     created_at: datetime
@@ -558,7 +575,7 @@ class Group:
             failed=d["failed"],
             cancelled=d["cancelled"],
             remaining=d["remaining"],
-            on_complete=None if cb is None else GroupCallback._from_json(cb),
+            on_complete=None if cb is None else Callback._from_json(cb),
             callback_task_id=d.get("callback_task_id"),
             created_at=_time(d["created_at"]),
             closed_at=_opt_time(d.get("closed_at")),

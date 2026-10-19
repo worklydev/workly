@@ -186,6 +186,14 @@ schedules:
 		t.Errorf("counts = %d %d %d", plan.Count(Create), plan.Count(Update), plan.Count(Unchanged))
 	}
 
+	// Workly's own queues can be configured, but no new reserved ones created.
+	if _, err := parse(t, "version: 1\nqueues:\n  _callbacks: {max_attempts: 10}").Plan(nil, nil); err != nil {
+		t.Errorf("_callbacks: %v", err)
+	}
+	if _, err := parse(t, "version: 1\nqueues:\n  _mine: {}").Plan(nil, nil); err == nil || !strings.Contains(err.Error(), "reserved") {
+		t.Errorf("_mine: %v", err)
+	}
+
 	// Without a schedules section, the server's schedules aren't the file's business.
 	plan, _ = parse(t, "version: 1\nqueues: {}").Plan(queues, schedules)
 	if len(plan.Changes) != 0 || plan.Undeclared != nil {

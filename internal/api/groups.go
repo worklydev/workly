@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"errors"
 
@@ -20,7 +21,8 @@ func (h Handlers) CreateGroup(ctx context.Context, req CreateGroupRequestObject)
 	}
 	ws := workspaceID(ctx)
 	if cb := in.OnComplete; cb != nil {
-		if err := validateName("on_complete queue", cb.Queue); err != nil {
+		queue := cmp.Or(deref(cb.Queue), CallbackQueue)
+		if err := validateName("on_complete queue", queue); err != nil {
 			return nil, err
 		}
 		r, err := validateRequest(request{url: cb.Url, headers: cb.Headers}, h.MaxPayloadBytes)
@@ -28,15 +30,20 @@ func (h Handlers) CreateGroup(ctx context.Context, req CreateGroupRequestObject)
 			return nil, inField("on_complete", err)
 		}
 		// Checked now rather than when the group completes, when there is
-		// no one to tell.
-		if !h.AutoCreateQueues {
-			if _, err := h.Store.GetQueue(ctx, ws, cb.Queue); errors.Is(err, store.ErrNotFound) {
-				return nil, queueNotFound(cb.Queue)
-			} else if err != nil {
-				return nil, err
+		// no one to tell. The callback queue is created whenever it's needed.
+		if queue != CallbackQueue {
+			if err := h.checkReserved(ctx, ws, queue); err != nil {
+				return nil, inField("on_complete", err)
+			}
+			if !h.AutoCreateQueues {
+				if _, err := h.Store.GetQueue(ctx, ws, queue); errors.Is(err, store.ErrNotFound) {
+					return nil, queueNotFound(queue)
+				} else if err != nil {
+					return nil, err
+				}
 			}
 		}
-		ng.OnComplete = &store.GroupCallback{Queue: cb.Queue, URL: r.url, Headers: r.headers}
+		ng.OnComplete = &store.Callback{Queue: queue, URL: r.url, Headers: r.headers}
 	}
 	g, created, err := h.Store.CreateGroup(ctx, ws, ng)
 	if err != nil {
@@ -115,7 +122,7 @@ func toGroup(g store.Group) Group {
 		FinishedAt:     g.FinishedAt,
 	}
 	if cb := g.OnComplete; cb != nil {
-		out.OnComplete = &GroupCallback{Queue: cb.Queue, Url: cb.URL}
+		out.OnComplete = &Callback{Queue: &cb.Queue, Url: cb.URL}
 		if len(cb.Headers) > 0 {
 			out.OnComplete.Headers = &cb.Headers
 		}

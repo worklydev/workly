@@ -36,7 +36,7 @@ func scanGroup(row interface{ Scan(...any) error }) (store.Group, error) {
 	}
 	g.Name, g.IdempotencyKey, g.CallbackTaskID = name.String, idemKey.String, cbTask.String
 	if cbURL.Valid {
-		g.OnComplete = &store.GroupCallback{Queue: cbQueue.String, URL: cbURL.String}
+		g.OnComplete = &store.Callback{Queue: cbQueue.String, URL: cbURL.String}
 		if g.OnComplete.Headers, err = unmarshalHeaders(cbHeaders); err != nil {
 			return g, err
 		}

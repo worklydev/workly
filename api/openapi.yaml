@@ -1025,7 +1025,11 @@ components:
       name: queue
       in: path
       required: true
-      description: Queue name. Lowercase letters, digits, `-` and `_`; at most 64 characters.
+      description: |
+        Queue name. Lowercase letters, digits, `-` and `_`; at most 64
+        characters. Names starting with `_` are reserved for Workly's own
+        queues, such as `_callbacks`: they can be configured and their tasks
+        listed, but not enqueued into.
       schema:
         type: string
     Cursor:
@@ -1607,18 +1611,23 @@ components:
         finished and at least one failed or was cancelled. Completed groups
         (`succeeded` and `failed`) don't change again, even if a task in
         them is retried.
-    GroupCallback:
+    Callback:
       type: object
-      required: [queue, url]
+      required: [url]
       description: |
-        The task a group enqueues when it completes: a `POST` whose JSON body
-        is the group's summary (`GroupSummary`). It is delivered like any task
-        in its queue, with the queue's retries; if the queue has been deleted
-        by then, it is created again with default settings.
+        A task Workly enqueues when something completes, such as a group: a
+        `POST` to `url` whose JSON body says what completed (for a group,
+        `GroupSummary`). It is delivered like any task in its queue, with the
+        queue's retries; if the queue has been deleted by then, it is created
+        again with default settings.
       properties:
         queue:
           type: string
-          description: The queue to enqueue the callback into.
+          description: |
+            The queue to enqueue the callback into. Defaults to
+            `_callbacks`, a queue Workly creates for callbacks, whose
+            settings can be changed like any queue's. Always set in
+            responses.
         url:
           type: string
           description: The http(s) URL to deliver the callback to.
@@ -1660,7 +1669,7 @@ components:
           maxLength: 256
           description: Deduplicates group creation within the workspace.
         on_complete:
-          $ref: "#/components/schemas/GroupCallback"
+          $ref: "#/components/schemas/Callback"
     Group:
       type: object
       required: [id, status, total, succeeded, failed, cancelled, remaining, created_at]
@@ -1687,7 +1696,7 @@ components:
           type: integer
           description: Tasks still pending or running.
         on_complete:
-          $ref: "#/components/schemas/GroupCallback"
+          $ref: "#/components/schemas/Callback"
         callback_task_id:
           type: string
           description: The callback task, once the group has completed.

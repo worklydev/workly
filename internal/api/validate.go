@@ -17,6 +17,15 @@ func validateQueueName(name string) error { return validateName("queue", name) }
 
 func validateScheduleName(name string) error { return validateName("schedule", name) }
 
+// CallbackQueue is the queue callbacks go to unless they name one. Only
+// Workly enqueues into it.
+const CallbackQueue = "_callbacks"
+
+// Reserved reports whether a queue name is reserved for Workly's own queues.
+// Queues with such names that users created before they were reserved keep
+// working, but no new ones can be created.
+func Reserved(queue string) bool { return strings.HasPrefix(queue, "_") }
+
 func validateName(kind, name string) error {
 	if !nameRE.MatchString(name) {
 		return invalid("%s name %q must be 1-64 lowercase letters, digits, '-' or '_'", kind, name)

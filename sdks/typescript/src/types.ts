@@ -367,16 +367,24 @@ export interface AlertChannelList {
 }
 
 /**
- * The task a group enqueues when it completes: a `POST` whose JSON body is the
- * group's summary (`GroupSummary`), delivered with its queue's retries.
+ * A task Workly enqueues when something completes: a `POST` to `url` saying
+ * what completed. A group's callback has the group's summary as its JSON body.
+ * It is delivered like any task in its queue, with that queue's retries.
  */
-export interface GroupCallback {
-  queue: string;
+export interface Callback {
   /** The http(s) URL to deliver the callback to. */
   url: string;
-  /** `Workly-*` headers are reserved. */
+  /**
+   * The queue to enqueue the callback into. `_callbacks`, the default, is
+   * created by Workly; configure it like any queue to change its retries.
+   */
+  queue?: string | undefined;
+  /** Headers sent with the callback. `Workly-*` headers are reserved. */
   headers?: Record<string, string> | undefined;
 }
+
+/** @deprecated Use `Callback`. */
+export type GroupCallback = Callback;
 
 /** A group to create. */
 export interface GroupSpec {
@@ -384,7 +392,7 @@ export interface GroupSpec {
   name?: string | undefined;
   /** If a group has this key, it is returned and nothing is created. */
   idempotencyKey?: string | undefined;
-  onComplete?: GroupCallback | undefined;
+  onComplete?: Callback | undefined;
 }
 
 /** A set of tasks tracked together, with a callback once all have finished. */
@@ -399,7 +407,8 @@ export interface Group {
   cancelled: number;
   /** Tasks still pending or running. */
   remaining: number;
-  onComplete?: GroupCallback;
+  /** Its `queue` is always set. */
+  onComplete?: Callback & { queue: string };
   /** The callback task, once the group has completed. */
   callbackTaskId?: string;
   createdAt: string;

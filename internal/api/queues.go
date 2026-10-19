@@ -57,7 +57,13 @@ func (h Handlers) PutQueue(ctx context.Context, req PutQueueRequestObject) (PutQ
 	if err != nil {
 		return nil, err
 	}
-	q, created, err := h.Store.PutQueue(ctx, workspaceID(ctx), req.Queue, cfg)
+	ws := workspaceID(ctx)
+	if req.Queue != CallbackQueue {
+		if err := h.checkReserved(ctx, ws, req.Queue); err != nil {
+			return nil, err
+		}
+	}
+	q, created, err := h.Store.PutQueue(ctx, ws, req.Queue, cfg)
 	if err != nil {
 		return nil, err
 	}

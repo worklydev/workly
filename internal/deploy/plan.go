@@ -81,6 +81,8 @@ func (f *File) Plan(queues []api.Queue, schedules []api.Schedule) (Plan, error) 
 			}
 			c.Diffs = queueDiffs(settings, q.settings)
 			c.Action, c.Paused = action(c.Diffs), cur.Paused
+		} else if api.Reserved(q.Name) && q.Name != api.CallbackQueue {
+			return plan, fmt.Errorf("queue %s: names starting with '_' are reserved for Workly's own queues", q.Name)
 		}
 		plan.Changes = append(plan.Changes, c)
 	}

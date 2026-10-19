@@ -575,9 +575,9 @@ const (
 // Finished reports whether the group has completed.
 func (s GroupStatus) Finished() bool { return s == GroupSucceeded || s == GroupFailed }
 
-// GroupCallback is the task a group enqueues when it completes: a POST with
-// the group's summary (GroupSummary) as its JSON body.
-type GroupCallback struct {
+// Callback is a task enqueued when something completes: a POST saying what
+// completed. A group's has its summary (GroupSummary) as its JSON body.
+type Callback struct {
 	Queue   string
 	URL     string
 	Headers map[string]string
@@ -586,7 +586,7 @@ type GroupCallback struct {
 type NewGroup struct {
 	Name           string
 	IdempotencyKey string
-	OnComplete     *GroupCallback
+	OnComplete     *Callback
 }
 
 // Group is a set of tasks tracked together. Its counts cover its tasks'
@@ -602,7 +602,7 @@ type Group struct {
 	Succeeded      int
 	Failed         int
 	Cancelled      int
-	OnComplete     *GroupCallback
+	OnComplete     *Callback
 	// CallbackTaskID is the task enqueued for OnComplete when the group
 	// completed.
 	CallbackTaskID string

@@ -284,6 +284,12 @@ describe('groups', () => {
     assert.equal(sent[3]?.url.search, '?group_id=grp_1');
   });
 
+  test('the callback queue defaults on the server', async () => {
+    const { fetch, sent } = fakeFetch(json(group, 201));
+    await new Workly({ fetch }).groups.create({ onComplete: { url: 'u' } });
+    assert.deepEqual(sent[0]?.body, { on_complete: { url: 'u' } });
+  });
+
   test('list paginates', async () => {
     const { fetch, sent } = fakeFetch(json({ groups: [group], next_cursor: 'c1' }), json({ groups: [group] }));
     const ids: string[] = [];

@@ -24,6 +24,13 @@ func queueNotFound(name string) error {
 	return &apiError{http.StatusNotFound, "queue_not_found", fmt.Sprintf("queue %q does not exist", name)}
 }
 
+func reservedQueue(name string) error {
+	if name == CallbackQueue {
+		return invalid("queue %q is Workly's own: only Workly enqueues into it", name)
+	}
+	return invalid("queue name %q is reserved: names starting with '_' are for Workly's own queues", name)
+}
+
 func taskNotFound(id string) error {
 	return &apiError{http.StatusNotFound, "task_not_found", fmt.Sprintf("task %q does not exist", id)}
 }

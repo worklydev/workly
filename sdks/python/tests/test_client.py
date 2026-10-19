@@ -571,8 +571,8 @@ def test_groups() -> None:
             "headers": {"X-A": "1"},
         },
     }
-    assert group.remaining == 2 and group.on_complete is not None
-    assert group.on_complete.headers == {} and group.finished_at is None
+    assert group.remaining == 2 and group.finished_at is None
+    assert group.on_complete == workly.Callback(url="https://example.com/done", queue="jobs")
 
     c.groups.close("grp_1")
     c.tasks.enqueue("prices", url="https://example.com/p", group_id="grp_1")
@@ -580,6 +580,29 @@ def test_groups() -> None:
     assert (requests[1].method, requests[1].url.path) == ("POST", "/v1/groups/grp_1/close")
     assert json.loads(requests[2].content)["group_id"] == "grp_1"
     assert requests[3].url.params["group_id"] == "grp_1"
+
+
+def test_group_callback_forms() -> None:
+    requests, handler = recorder(*[httpx.Response(201, json=GROUP)] * 4)
+    c = client(handler)
+    c.groups.create(on_complete=workly.Callback(url="https://example.com/done"))
+    c.groups.create(on_complete={"url": "https://example.com/done"})
+    c.groups.create(
+        on_complete=workly.Callback(
+            url="https://example.com/done", queue="jobs", headers={"X-A": "1"}
+        )
+    )
+    c.groups.create(on_complete={"url": "https://example.com/done", "queue": "_callbacks"})
+    bodies = [json.loads(r.content)["on_complete"] for r in requests]
+    # The server fills in the default queue.
+    assert bodies == [
+        {"url": "https://example.com/done"},
+        {"url": "https://example.com/done"},
+        {"url": "https://example.com/done", "queue": "jobs", "headers": {"X-A": "1"}},
+        {"url": "https://example.com/done"},
+    ]
+    with pytest.raises(TypeError):
+        workly.Callback("https://example.com/done")  # type: ignore[misc]
 
 
 def test_groups_list_paginates() -> None:

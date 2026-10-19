@@ -305,8 +305,11 @@ func TestGroups(t *testing.T) {
 	if r := cli(t, "", "tasks", "enqueue", "prices", "https://example.com/price", "--group", group); r.err == nil || !strings.Contains(r.err.Error(), "group_closed") {
 		t.Fatalf("enqueue into closed group = %+v", r)
 	}
-	if r := cli(t, "", "groups", "create", "--callback-url", "https://example.com"); r.err == nil {
-		t.Fatalf("create with a callback URL but no queue succeeded")
+	// Without --callback-queue, the callback goes to _callbacks.
+	group = strings.TrimSpace(mustRun(t, "groups", "create", "--callback-url", "https://example.com/refresh"))
+	contains(t, mustRun(t, "groups", "get", group), "_callbacks → https://example.com/refresh")
+	if r := cli(t, "", "groups", "create", "--callback-queue", "callbacks"); r.err == nil {
+		t.Fatalf("create with a callback queue but no URL succeeded")
 	}
 }
 

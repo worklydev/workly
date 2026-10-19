@@ -138,7 +138,7 @@ function GettingStarted() {
       </p>
       <CodePanel title="Terminal">
         {`group=$(curl -s -X POST ${origin}/v1/groups -H 'Content-Type: application/json' \\
-  -d '{"name": "hello", "on_complete": {"queue": "callbacks", "url": "${origin}/_dev/echo"}}' | jq -r .id)
+  -d '{"name": "hello", "on_complete": {"url": "${origin}/_dev/echo"}}' | jq -r .id)
 curl -X POST ${origin}/v1/queues/hello/tasks -H 'Content-Type: application/json' \\
   -d "{\\"url\\": \\"${origin}/_dev/echo\\", \\"group_id\\": \\"$group\\"}"
 curl -X POST ${origin}/v1/groups/$group/close`}

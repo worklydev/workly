@@ -29,7 +29,7 @@ curl -X POST localhost:7337/v1/queues/demo/tasks \
   -d '{"url": "http://localhost:7337/_dev/echo?fail_rate=0.5", "payload": {"hello": "world"}}'
 ```
 
-The queue `demo` is created on first use. Open the dashboard to see the task's attempts, or ask the API:
+The queue `demo` is created on first use. Queue names are lowercase letters, digits, `-` and `_`; names starting with `_` are reserved for Workly's own queues. Open the dashboard to see the task's attempts, or ask the API:
 
 ```sh
 curl localhost:7337/v1/tasks/<id>

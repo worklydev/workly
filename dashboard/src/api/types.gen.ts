@@ -404,17 +404,22 @@ export type AttemptList = {
 export type GroupStatus = 'open' | 'running' | 'succeeded' | 'failed';
 
 /**
- * The task a group enqueues when it completes: a `POST` whose JSON body
- * is the group's summary (`GroupSummary`). It is delivered like any task
- * in its queue, with the queue's retries; if the queue has been deleted
- * by then, it is created again with default settings.
+ * A task Workly enqueues when something completes, such as a group: a
+ * `POST` to `url` whose JSON body says what completed (for a group,
+ * `GroupSummary`). It is delivered like any task in its queue, with the
+ * queue's retries; if the queue has been deleted by then, it is created
+ * again with default settings.
  *
  */
-export type GroupCallback = {
+export type Callback = {
     /**
-     * The queue to enqueue the callback into.
+     * The queue to enqueue the callback into. Defaults to
+     * `_callbacks`, a queue Workly creates for callbacks, whose
+     * settings can be changed like any queue's. Always set in
+     * responses.
+     *
      */
-    queue: string;
+    queue?: string;
     /**
      * The http(s) URL to deliver the callback to.
      */
@@ -449,7 +454,7 @@ export type NewGroup = {
      * Deduplicates group creation within the workspace.
      */
     idempotency_key?: string;
-    on_complete?: GroupCallback;
+    on_complete?: Callback;
 };
 
 export type Group = {
@@ -468,7 +473,7 @@ export type Group = {
      * Tasks still pending or running.
      */
     remaining: number;
-    on_complete?: GroupCallback;
+    on_complete?: Callback;
     /**
      * The callback task, once the group has completed.
      */
@@ -750,7 +755,11 @@ export type ErrorBody = {
 };
 
 /**
- * Queue name. Lowercase letters, digits, `-` and `_`; at most 64 characters.
+ * Queue name. Lowercase letters, digits, `-` and `_`; at most 64
+ * characters. Names starting with `_` are reserved for Workly's own
+ * queues, such as `_callbacks`: they can be configured and their tasks
+ * listed, but not enqueued into.
+ *
  */
 export type QueueName = string;
 
@@ -880,7 +889,11 @@ export type DeleteQueueData = {
     body?: never;
     path: {
         /**
-         * Queue name. Lowercase letters, digits, `-` and `_`; at most 64 characters.
+         * Queue name. Lowercase letters, digits, `-` and `_`; at most 64
+         * characters. Names starting with `_` are reserved for Workly's own
+         * queues, such as `_callbacks`: they can be configured and their tasks
+         * listed, but not enqueued into.
+         *
          */
         queue: string;
     };
@@ -917,7 +930,11 @@ export type GetQueueData = {
     body?: never;
     path: {
         /**
-         * Queue name. Lowercase letters, digits, `-` and `_`; at most 64 characters.
+         * Queue name. Lowercase letters, digits, `-` and `_`; at most 64
+         * characters. Names starting with `_` are reserved for Workly's own
+         * queues, such as `_callbacks`: they can be configured and their tasks
+         * listed, but not enqueued into.
+         *
          */
         queue: string;
     };
@@ -954,7 +971,11 @@ export type PutQueueData = {
     body: QueueConfig;
     path: {
         /**
-         * Queue name. Lowercase letters, digits, `-` and `_`; at most 64 characters.
+         * Queue name. Lowercase letters, digits, `-` and `_`; at most 64
+         * characters. Names starting with `_` are reserved for Workly's own
+         * queues, such as `_callbacks`: they can be configured and their tasks
+         * listed, but not enqueued into.
+         *
          */
         queue: string;
     };
@@ -995,7 +1016,11 @@ export type PauseQueueData = {
     body?: never;
     path: {
         /**
-         * Queue name. Lowercase letters, digits, `-` and `_`; at most 64 characters.
+         * Queue name. Lowercase letters, digits, `-` and `_`; at most 64
+         * characters. Names starting with `_` are reserved for Workly's own
+         * queues, such as `_callbacks`: they can be configured and their tasks
+         * listed, but not enqueued into.
+         *
          */
         queue: string;
     };
@@ -1032,7 +1057,11 @@ export type ResumeQueueData = {
     body?: never;
     path: {
         /**
-         * Queue name. Lowercase letters, digits, `-` and `_`; at most 64 characters.
+         * Queue name. Lowercase letters, digits, `-` and `_`; at most 64
+         * characters. Names starting with `_` are reserved for Workly's own
+         * queues, such as `_callbacks`: they can be configured and their tasks
+         * listed, but not enqueued into.
+         *
          */
         queue: string;
     };
@@ -1069,7 +1098,11 @@ export type CancelPendingTasksData = {
     body?: never;
     path: {
         /**
-         * Queue name. Lowercase letters, digits, `-` and `_`; at most 64 characters.
+         * Queue name. Lowercase letters, digits, `-` and `_`; at most 64
+         * characters. Names starting with `_` are reserved for Workly's own
+         * queues, such as `_callbacks`: they can be configured and their tasks
+         * listed, but not enqueued into.
+         *
          */
         queue: string;
     };
@@ -1106,7 +1139,11 @@ export type RetryFailedTasksData = {
     body?: never;
     path: {
         /**
-         * Queue name. Lowercase letters, digits, `-` and `_`; at most 64 characters.
+         * Queue name. Lowercase letters, digits, `-` and `_`; at most 64
+         * characters. Names starting with `_` are reserved for Workly's own
+         * queues, such as `_callbacks`: they can be configured and their tasks
+         * listed, but not enqueued into.
+         *
          */
         queue: string;
     };
@@ -1148,7 +1185,11 @@ export type GetQueueFailuresData = {
     body?: never;
     path: {
         /**
-         * Queue name. Lowercase letters, digits, `-` and `_`; at most 64 characters.
+         * Queue name. Lowercase letters, digits, `-` and `_`; at most 64
+         * characters. Names starting with `_` are reserved for Workly's own
+         * queues, such as `_callbacks`: they can be configured and their tasks
+         * listed, but not enqueued into.
+         *
          */
         queue: string;
     };
@@ -1190,7 +1231,11 @@ export type GetQueueActivityData = {
     body?: never;
     path: {
         /**
-         * Queue name. Lowercase letters, digits, `-` and `_`; at most 64 characters.
+         * Queue name. Lowercase letters, digits, `-` and `_`; at most 64
+         * characters. Names starting with `_` are reserved for Workly's own
+         * queues, such as `_callbacks`: they can be configured and their tasks
+         * listed, but not enqueued into.
+         *
          */
         queue: string;
     };
@@ -1266,7 +1311,11 @@ export type ListTasksData = {
     body?: never;
     path: {
         /**
-         * Queue name. Lowercase letters, digits, `-` and `_`; at most 64 characters.
+         * Queue name. Lowercase letters, digits, `-` and `_`; at most 64
+         * characters. Names starting with `_` are reserved for Workly's own
+         * queues, such as `_callbacks`: they can be configured and their tasks
+         * listed, but not enqueued into.
+         *
          */
         queue: string;
     };
@@ -1342,7 +1391,11 @@ export type CreateTaskData = {
     };
     path: {
         /**
-         * Queue name. Lowercase letters, digits, `-` and `_`; at most 64 characters.
+         * Queue name. Lowercase letters, digits, `-` and `_`; at most 64
+         * characters. Names starting with `_` are reserved for Workly's own
+         * queues, such as `_callbacks`: they can be configured and their tasks
+         * listed, but not enqueued into.
+         *
          */
         queue: string;
     };
@@ -1389,7 +1442,11 @@ export type CreateTasksData = {
     };
     path: {
         /**
-         * Queue name. Lowercase letters, digits, `-` and `_`; at most 64 characters.
+         * Queue name. Lowercase letters, digits, `-` and `_`; at most 64
+         * characters. Names starting with `_` are reserved for Workly's own
+         * queues, such as `_callbacks`: they can be configured and their tasks
+         * listed, but not enqueued into.
+         *
          */
         queue: string;
     };

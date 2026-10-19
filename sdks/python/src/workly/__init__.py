@@ -32,6 +32,7 @@ from ._models import (
     AlertChannelType,
     Attempt,
     AttemptOutcome,
+    Callback,
     CronPreview,
     Delivery,
     EnqueueResult,
@@ -59,7 +60,7 @@ from ._models import (
     TaskSort,
     TaskState,
 )
-from ._requests import GroupCallbackSpec, TaskSpec, __version__
+from ._requests import CallbackDict, GroupCallbackSpec, TaskSpec, __version__
 from ._signing import sign, verify_signature
 
 __all__ = [
@@ -83,6 +84,8 @@ __all__ = [
     "AttemptOutcome",
     "AuthenticationError",
     "BadRequestError",
+    "Callback",
+    "CallbackDict",
     "ConflictError",
     "CronPreview",
     "Delivery",

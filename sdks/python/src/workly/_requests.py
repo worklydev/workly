@@ -15,7 +15,9 @@ from typing import Any, Required, TypedDict
 from urllib.parse import quote
 
 from ._models import (
+    CALLBACK_QUEUE,
     AlertChannelType,
+    Callback,
     GroupStatus,
     HTTPMethod,
     RunState,
@@ -75,12 +77,29 @@ class TaskSpec(TypedDict, total=False):
     group_id: str
 
 
-class GroupCallbackSpec(TypedDict, total=False):
-    """The `on_complete` callback of `groups.create`: a task to enqueue when the group completes."""
+class CallbackDict(TypedDict, total=False):
+    """A `Callback` as a dict, with the same fields."""
 
-    queue: Required[str]
     url: Required[str]
+    queue: str
     headers: Mapping[str, str]
+
+
+GroupCallbackSpec = CallbackDict
+"""Deprecated: use `Callback` or `CallbackDict`."""
+
+
+def callback_body(cb: Callback | CallbackDict) -> dict[str, Any]:
+    if isinstance(cb, Callback):
+        url, queue, headers = cb.url, cb.queue, cb.headers
+    else:
+        url, queue, headers = cb["url"], cb.get("queue", CALLBACK_QUEUE), cb.get("headers", {})
+    body: dict[str, Any] = {"url": url}
+    if queue != CALLBACK_QUEUE:
+        body["queue"] = queue
+    if headers:
+        body["headers"] = dict(headers)
+    return body
 
 
 def task_body(spec: Mapping[str, Any]) -> dict[str, Any]:
@@ -256,7 +275,7 @@ def retry_task(task_id: str) -> Request:
 
 
 def create_group(
-    name: str | None, idempotency_key: str | None, on_complete: GroupCallbackSpec | None
+    name: str | None, idempotency_key: str | None, on_complete: Callback | CallbackDict | None
 ) -> Request:
     body: dict[str, Any] = {}
     if name is not None:
@@ -264,10 +283,7 @@ def create_group(
     if idempotency_key is not None:
         body["idempotency_key"] = idempotency_key
     if on_complete is not None:
-        callback: dict[str, Any] = {"queue": on_complete["queue"], "url": on_complete["url"]}
-        if "headers" in on_complete:
-            callback["headers"] = dict(on_complete["headers"])
-        body["on_complete"] = callback
+        body["on_complete"] = callback_body(on_complete)
     return Request("POST", "/v1/groups", json=body, idempotent=idempotency_key is not None)
 
 

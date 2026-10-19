@@ -17,6 +17,7 @@ from ._models import (
     AlertChannelList,
     AlertChannelType,
     Attempt,
+    Callback,
     CronPreview,
     Delivery,
     EnqueueResult,
@@ -369,13 +370,13 @@ class Groups:
         *,
         name: str | None = None,
         idempotency_key: str | None = None,
-        on_complete: r.GroupCallbackSpec | None = None,
+        on_complete: Callback | r.CallbackDict | None = None,
     ) -> Group:
         """Create an open group.
 
         `on_complete` is the task to enqueue when the group completes, e.g.
-        `{"queue": "jobs", "url": "https://api.example.com/done"}`; it is a
-        POST of the group's summary as JSON. If `idempotency_key` matches an
+        `Callback(url="https://api.example.com/done")` or the same as a dict;
+        it is a POST of the group's summary as JSON. If `idempotency_key` matches an
         existing group, that group is returned and nothing is created.
         """
         req = r.create_group(name, idempotency_key, on_complete)
