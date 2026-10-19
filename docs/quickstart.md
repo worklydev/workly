@@ -51,10 +51,10 @@ task = client.tasks.enqueue(
 )
 ```
 
-TypeScript (`npm install @workly/sdk`):
+TypeScript (`npm install @worklydev/sdk`):
 
 ```ts
-import { Workly } from '@workly/sdk';
+import { Workly } from '@worklydev/sdk';
 
 const workly = new Workly(); // WORKLY_URL, else http://localhost:7337; WORKLY_API_KEY
 const task = await workly.tasks.enqueue('emails', {
@@ -87,7 +87,7 @@ def send_email():
 ```
 
 ```ts
-import { SignatureVerificationError, verifySignature } from '@workly/sdk';
+import { SignatureVerificationError, verifySignature } from '@worklydev/sdk';
 
 export async function POST(request: Request) {
   const body = await request.text();

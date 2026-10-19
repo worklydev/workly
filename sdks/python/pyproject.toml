@@ -1,6 +1,6 @@
 [project]
 name = "workly"
-version = "0.1.0"
+version = "0.2.0"
 description = "Python SDK for Workly, the open-source HTTP task queue"
 readme = "README.md"
 license = "Apache-2.0"

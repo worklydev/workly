@@ -3,7 +3,7 @@
 The TypeScript SDK for [Workly](https://github.com/worklydev/workly), the open-source HTTP task queue. Enqueue a task, and Workly delivers it to your endpoint over HTTP, retrying with backoff until it succeeds.
 
 ```sh
-npm install @workly/sdk
+npm install @worklydev/sdk
 ```
 
 No dependencies. It uses `fetch` and Web Crypto, so it runs on Node 22+, Bun, Deno and edge runtimes (Cloudflare Workers, Vercel Edge). ESM, with types included.
@@ -13,7 +13,7 @@ No dependencies. It uses `fetch` and Web Crypto, so it runs on Node 22+, Bun, De
 Start a local server with `workly dev` (SQLite, no auth, on :7337; `pip install "workly[cli]"` or `curl -fsSL https://raw.githubusercontent.com/worklydev/workly/main/install.sh | sh`), then:
 
 ```ts
-import { Workly } from '@workly/sdk';
+import { Workly } from '@worklydev/sdk';
 
 const workly = new Workly(); // WORKLY_URL, else http://localhost:7337; WORKLY_API_KEY
 const task = await workly.tasks.enqueue('emails', {
@@ -30,7 +30,7 @@ Your endpoint receives a `POST` with the JSON payload. Any 2xx marks the task su
 Every delivery is signed: with the server's `WORKLY_SIGNING_SECRET` when you run Workly yourself, or with your workspace's secret on [workly.run](#hosted-workly). Check the signature against the **raw** body, before parsing it:
 
 ```ts
-import { SignatureVerificationError, verifySignature } from '@workly/sdk';
+import { SignatureVerificationError, verifySignature } from '@worklydev/sdk';
 
 // Next.js route handler, Hono, Cloudflare Workers: anything with a Fetch API Request
 export async function POST(request: Request) {

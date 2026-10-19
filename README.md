@@ -66,10 +66,10 @@ from workly import Workly
 task = Workly().tasks.enqueue("demo", url="http://localhost:7337/_dev/echo", payload={"hello": "world"})
 ```
 
-From TypeScript, with the [SDK](sdks/typescript) (`npm install @workly/sdk`):
+From TypeScript, with the [SDK](sdks/typescript) (`npm install @worklydev/sdk`):
 
 ```ts
-import { Workly } from '@workly/sdk';
+import { Workly } from '@worklydev/sdk';
 
 const task = await new Workly().tasks.enqueue('demo', { url: 'http://localhost:7337/_dev/echo', payload: { hello: 'world' } });
 ```

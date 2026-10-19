@@ -1,4 +1,4 @@
-# Tagging sdk-typescript/vX.Y.Z publishes the TypeScript SDK (@workly/sdk) to
+# Tagging sdk-typescript/vX.Y.Z publishes the TypeScript SDK (@worklydev/sdk) to
 # npm. The tag must match the version in sdks/typescript/package.json.
 name: sdk-typescript-release
 

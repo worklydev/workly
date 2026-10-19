@@ -82,7 +82,7 @@ def refresh_views():
 The same in TypeScript:
 
 ```ts
-import { Workly } from '@workly/sdk';
+import { Workly } from '@worklydev/sdk';
 
 const workly = new Workly();
 const API = 'https://api.example.com';
