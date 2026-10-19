@@ -12,15 +12,7 @@ import { displayState } from '../lib/states';
 import type { TaskPages } from '../lib/tasks';
 import type { SortField, TaskSorting } from '../lib/taskSort';
 import { Button } from '../primitives/button';
-import {
-  SortableTableHead,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '../primitives/table';
+import { SortableTableHead, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../primitives/table';
 import { ConfirmButton } from './ConfirmButton';
 import { CursorPager } from './ListControls';
 import { useCursorPages } from '../hooks/useCursorPages';

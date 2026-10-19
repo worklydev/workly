@@ -18,7 +18,7 @@ just test       # unit tests + SQLite conformance (Postgres tests skipped)
 just test-all   # also runs Postgres tests (starts a container on :55432)
 just test-e2e   # end-to-end tests: real `workly serve` replicas on Postgres (minutes)
 just generate   # regenerate internal/api/gen.go from api/openapi.yaml
-just lint       # gofmt + go vet + dashboard, TypeScript SDK and docs site type-check and lint + Python SDK ruff and pyright
+just lint       # gofmt + go vet + Prettier, type-check and lint for the dashboard and TypeScript SDK + docs site check + Python SDK ruff and pyright
 just test-python  # Python SDK tests, including against a server built from this checkout
 just test-typescript  # TypeScript SDK tests, likewise
 just dashboard-dev  # dashboard with hot reload on :5173 (run `just dev` alongside)

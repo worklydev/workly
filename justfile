@@ -59,7 +59,7 @@ loadtest *args:
 lint: dashboard-deps sdk-typescript-deps docs-deps
     gofmt -l -w .
     go vet ./...
-    cd dashboard && npm run check
+    cd dashboard && npm run format >/dev/null && npm run check
     cd sdks/python && uv run ruff format . && uv run ruff check . && uv run pyright
     cd sdks/typescript && npm run format >/dev/null && npm run check
     cd docs-site && npm run check

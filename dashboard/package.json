@@ -11,8 +11,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build && touch dist/.gitkeep",
-    "check": "tsc -b && oxlint",
-    "generate": "openapi-ts"
+    "check": "tsc -b && oxlint && prettier --check .",
+    "generate": "openapi-ts",
+    "format": "prettier --write ."
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
@@ -31,6 +32,7 @@
     "@types/react-dom": "^19.2.7",
     "@vitejs/plugin-react": "^6.1.1",
     "oxlint": "^1.81.0",
+    "prettier": "^3.9.10",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router": "^8.4.0",
@@ -40,10 +42,10 @@
     "vite": "^8.3.0"
   },
   "peerDependencies": {
+    "@tanstack/react-query": "^5.103.2",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "react-router": "^8.4.0",
-    "@tanstack/react-query": "^5.103.2"
+    "react-router": "^8.4.0"
   },
   "overrides": {
     "js-yaml": "^4.3.2"

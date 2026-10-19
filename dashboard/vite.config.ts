@@ -1,9 +1,9 @@
-import tailwindcss from '@tailwindcss/vite'
-import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vite'
+import tailwindcss from '@tailwindcss/vite';
+import react from '@vitejs/plugin-react';
+import { defineConfig } from 'vite';
 
 // `npm run dev` proxies the API to a local `workly dev` (just dev).
-const api = process.env.WORKLY_URL ?? 'http://localhost:7337'
+const api = process.env.WORKLY_URL ?? 'http://localhost:7337';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -12,4 +12,4 @@ export default defineConfig({
   server: {
     proxy: { '/v1': api, '/healthz': api },
   },
-})
+});
