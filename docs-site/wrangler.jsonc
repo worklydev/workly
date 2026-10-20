@@ -1,6 +1,9 @@
-// docs.workly.run, served as static assets by Cloudflare Workers (no Worker
+// workly.run/docs, served as static assets by Cloudflare Workers (no Worker
 // code). .github/workflows/docs.yml deploys it on release tags with
-// `wrangler deploy`, which also attaches the custom domain.
+// `wrangler deploy`. The rest of workly.run is the site (workly-cloud), on a
+// Custom Domain; these routes take precedence over it for /docs. The files are
+// under dist/docs/ because a route passes the full path through.
+// docs.workly.run redirects here with a Cloudflare redirect rule.
 {
   "name": "workly-docs",
   "compatibility_date": "2026-10-01",
@@ -8,5 +11,8 @@
     "directory": "./dist",
     "not_found_handling": "404-page"
   },
-  "routes": [{ "pattern": "docs.workly.run", "custom_domain": true }]
+  "routes": [
+    { "pattern": "workly.run/docs", "zone_name": "workly.run" },
+    { "pattern": "workly.run/docs/*", "zone_name": "workly.run" }
+  ]
 }

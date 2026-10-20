@@ -27,7 +27,7 @@ func loadFile(cmd *cobra.Command) (*deploy.File, error) {
 	var invalid *deploy.InvalidError
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return nil, fmt.Errorf("%s not found: create it (see https://docs.workly.run/deploy/) or pass --file", path)
+		return nil, fmt.Errorf("%s not found: create it (see https://workly.run/docs/deploy/) or pass --file", path)
 	case errors.As(err, &invalid):
 		return nil, fmt.Errorf("%s is invalid:\n  %s", path, strings.ReplaceAll(err.Error(), "\n", "\n  "))
 	}

@@ -72,7 +72,7 @@ dashboard: dashboard-deps
 dashboard-dev: dashboard-deps
     cd dashboard && npm run dev
 
-# Run the docs site (docs.workly.run) with hot reload on :4321; it reads docs/
+# Run the docs site (workly.run/docs) with hot reload on :4321/docs/; it reads docs/
 docs: docs-deps
     cd docs-site && npm run dev
 

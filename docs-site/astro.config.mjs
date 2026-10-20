@@ -17,7 +17,12 @@ const docs = {
 };
 
 export default defineConfig({
-  site: 'https://docs.workly.run',
+  // Served at workly.run/docs by a Workers route, so search engines and
+  // assistants see one site. `base` only prefixes links; outDir puts the files
+  // under docs/ too, since the route passes the full path to the Worker.
+  site: 'https://workly.run',
+  base: '/docs',
+  outDir: './dist/docs',
   integrations: [
     docs,
     starlight({

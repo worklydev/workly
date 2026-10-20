@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>API reference | Workly</title>
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/docs/favicon.svg" type="image/svg+xml" />
     <style>
       body { margin: 0; }
       .back {
@@ -19,13 +19,13 @@
     </style>
   </head>
   <body>
-    <a class="back" href="/">← Workly docs</a>
+    <a class="back" href="/docs/">← Workly docs</a>
     <div id="app"></div>
     <!-- openapi.yaml is copied here from api/ when the site builds (scripts/sync.mjs). -->
     <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.72.2"></script>
     <script>
       Scalar.createApiReference('#app', {
-        url: '/api/openapi.yaml',
+        url: '/docs/api/openapi.yaml',
         hideClientButton: true,
         withDefaultFonts: false,
         showDeveloperTools: 'never',

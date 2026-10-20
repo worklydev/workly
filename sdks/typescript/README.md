@@ -139,7 +139,7 @@ await workly.queues.delete('emails'); // delete the queue and all its tasks
 
 ## Schedules
 
-A schedule calls a URL on a cron timetable; each call is a run, retried and recorded like a task. Schedules are separate from queues. `put` is declarative, like `queues.put`. See [Schedules](https://docs.workly.run/schedules/).
+A schedule calls a URL on a cron timetable; each call is a run, retried and recorded like a task. Schedules are separate from queues. `put` is declarative, like `queues.put`. See [Schedules](https://workly.run/docs/schedules/).
 
 ```ts
 const schedule = await workly.schedules.put('nightly-report', {
@@ -167,7 +167,7 @@ Runs are delivered with `Workly-Run-Id`, `Workly-Schedule` and `Workly-Scheduled
 
 ## Task groups
 
-A group tracks a set of tasks and enqueues a callback task once it's closed and they've all finished: a `POST` of the group's status and counts. See [Task groups](https://docs.workly.run/groups/). The callback goes to Workly's `_callbacks` queue unless it names a `queue`.
+A group tracks a set of tasks and enqueues a callback task once it's closed and they've all finished: a `POST` of the group's status and counts. See [Task groups](https://workly.run/docs/groups/). The callback goes to Workly's `_callbacks` queue unless it names a `queue`.
 
 ```ts
 const group = await workly.groups.create({

@@ -58,12 +58,12 @@ Run `just test-all` before considering a change to `internal/store` done.
 - `api/openapi.yaml`: the API contract.
 - `e2e/`: end-to-end tests against real `workly serve` processes and Postgres, behind the `e2e` build tag because they take minutes of wall-clock time; `go test ./...` skips them. `failover_test.go` SIGKILLs the leader around schedule slots and checks every slot gets exactly one run.
 - `tools/loadtest/`: load generator; results in `docs/performance.md`.
-- `docs/`: user-facing documentation, published at docs.workly.run and readable on GitHub: plain Markdown, one page per file, starting with a `# Title`; `README.md` is the home page. Link to other pages as `page.md` and to repo files by relative path (`../deploy/...`); the site rewrites both. A new `WORKLY_*` setting goes in `docs/configuration.md`. A new page also goes in the sidebar in `docs-site/astro.config.mjs`.
-- `docs-site/`: the docs site (Astro and Starlight). `scripts/sync.mjs` copies `docs/` and `api/openapi.yaml` into it at build time; the API reference is rendered from the spec. `.github/workflows/docs.yml` publishes it on `vX.Y.Z` tags, so it describes the latest release.
+- `docs/`: user-facing documentation, published at workly.run/docs and readable on GitHub: plain Markdown, one page per file, starting with a `# Title`; `README.md` is the home page. Link to other pages as `page.md` and to repo files by relative path (`../deploy/...`); the site rewrites both. A new `WORKLY_*` setting goes in `docs/configuration.md`. A new page also goes in the sidebar in `docs-site/astro.config.mjs`.
+- `docs-site/`: the docs site (Astro and Starlight). `scripts/sync.mjs` copies `docs/` and `api/openapi.yaml` into it at build time; the API reference is rendered from the spec. `.github/workflows/docs.yml` publishes it on `vX.Y.Z` tags, so it describes the latest release. It's served at `workly.run/docs` by the `workly-docs` Worker on a Workers route (the rest of workly.run is the site, from workly-cloud), so it's built with `base: '/docs'` into `dist/docs/`; links in hand-written HTML under `public/` need the `/docs` prefix. docs.workly.run redirects there.
 
 ## Releases
 
-- **Server:** tag `vX.Y.Z` on main. `.github/workflows/release.yml` publishes binaries to GitHub releases, the `ghcr.io/worklydev/workly` image (tags `X.Y.Z`, `X.Y` and `latest`) and `workly-cli` wheels to PyPI, same version. `docs.yml` publishes docs.workly.run from the same tag.
+- **Server:** tag `vX.Y.Z` on main. `.github/workflows/release.yml` publishes binaries to GitHub releases, the `ghcr.io/worklydev/workly` image (tags `X.Y.Z`, `X.Y` and `latest`) and `workly-cli` wheels to PyPI, same version. `docs.yml` publishes workly.run/docs from the same tag.
 - **Python SDK:** bump `version` in `sdks/python/pyproject.toml`, then tag `sdk-python/vX.Y.Z`. The tag must match.
 
 - **TypeScript SDK:** bump `version` in `sdks/typescript/package.json` and `src/version.ts` (a test checks they match), then tag `sdk-typescript/vX.Y.Z`.

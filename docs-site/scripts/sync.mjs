@@ -18,8 +18,12 @@ const outDir = join(site, 'src/content/docs');
 const ref = process.env.DOCS_REF || 'main';
 const github = `https://github.com/worklydev/workly`;
 
+// Where the site is served (astro.config.mjs `base`): Astro doesn't prefix
+// links written in Markdown.
+const base = '/docs';
+
 /** Site links for repo paths that the site serves itself. */
-const served = { 'api/openapi.yaml': '/api/' };
+const served = { 'api/openapi.yaml': `${base}/api/` };
 
 function slug(file) {
   return file === 'README.md' ? '' : file.replace(/\.md$/, '');
@@ -33,7 +37,7 @@ function rewriteLink(target) {
   if (served[fromRoot]) return served[fromRoot] + anchor;
   if (fromRoot.startsWith('docs/') && fromRoot.endsWith('.md')) {
     const s = slug(fromRoot.slice('docs/'.length));
-    return (s ? `/${s}/` : '/') + anchor;
+    return `${base}/${s ? `${s}/` : ''}` + anchor;
   }
   let kind = 'tree';
   try {

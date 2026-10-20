@@ -1,4 +1,4 @@
-# docs.workly.run: built from docs/ and api/openapi.yaml by docs-site/.
+# workly.run/docs: built from docs/ and api/openapi.yaml by docs-site/.
 # Pull requests and main only check that the site builds; a vX.Y.Z tag
 # publishes it, so the docs describe the latest release, not unreleased work.
 # Run it by hand with a tag to republish (e.g. after fixing a typo in docs/,
