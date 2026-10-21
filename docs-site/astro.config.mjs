@@ -1,5 +1,6 @@
 import starlight from '@astrojs/starlight';
 import { defineConfig } from 'astro/config';
+import starlightLlmsTxt from 'starlight-llms-txt';
 import { docsDir, sync } from './scripts/sync.mjs';
 
 /** Keeps src/content/docs in step with ../docs, including while `astro dev` runs. */
@@ -31,6 +32,26 @@ export default defineConfig({
       favicon: '/favicon.svg',
       logo: { src: './public/favicon.svg', alt: '' },
       customCss: ['./src/theme.css'],
+      // /docs/llms.txt, llms-full.txt and llms-small.txt, so an assistant can
+      // read all the docs in one fetch. workly.run/llms.txt links here.
+      plugins: [
+        starlightLlmsTxt({
+          description:
+            'Workly is an open-source HTTP task queue and cron scheduler with built-in diagnostics. Your app enqueues a task with a URL and a JSON payload; Workly delivers it as a signed HTTP POST, retries it with backoff until it gets a 2xx, and keeps every attempt. It runs as one binary (SQLite locally, Postgres in production), in your own infrastructure, or hosted at workly.run.',
+          details: [
+            '- Handlers are plain HTTP endpoints in any language; there are Python (`pip install workly`) and TypeScript (`npm install @worklydev/sdk`) SDKs, a CLI and an MCP server.',
+            '- `workly dev` runs a local server and dashboard on localhost:7337 with no configuration. Hosted Workly is at https://api.workly.run with an API key.',
+            '- Delivery is at least once: handlers should be idempotent, using the `Workly-Task-Id` header.',
+          ].join('\n'),
+          // Starlight's "Section titled …" heading links are noise in plain text.
+          customSelectors: { all: ['.sl-anchor-link'] },
+          optionalLinks: [
+            { label: 'API reference', url: 'https://workly.run/docs/api/openapi.yaml', description: 'the OpenAPI spec for the HTTP API' },
+            { label: 'workly.run', url: 'https://workly.run/llms.txt', description: 'the product, pricing and comparisons with other tools' },
+            { label: 'Source', url: 'https://github.com/worklydev/workly' },
+          ],
+        }),
+      ],
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/worklydev/workly' }],
       sidebar: [
         {
