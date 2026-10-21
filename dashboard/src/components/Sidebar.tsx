@@ -19,9 +19,9 @@ export function Sidebar() {
 
   return (
     <aside className="hidden w-56 shrink-0 flex-col border-r border-border sm:flex">
-      <Link to="/" className="flex h-14 items-center gap-2 px-4 font-medium">
+      <Link to="/" className="flex h-14 items-center gap-1.5 px-4 font-mono tracking-[-0.02em]">
         <Logo className="size-5" />
-        workly
+        Workly
       </Link>
       <nav className="flex flex-col gap-0.5 px-2">
         {items.map((item) => (
