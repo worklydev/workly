@@ -13,6 +13,7 @@ The same binary runs everywhere: `workly dev` on your laptop (SQLite, no configu
 ## Start here
 
 - [Quickstart](quickstart.md): run Workly locally, enqueue a task and handle it.
+- [Concepts](concepts.md): queues, tasks, attempts, retries, delivery semantics and signing, including verifying signatures without an SDK.
 - [Schedules](schedules.md): call an endpoint on a cron timetable.
 - [Task groups](groups.md): fan out tasks and get one callback when they've all finished.
 - [Alerts](alerts.md): hear about failed tasks and runs by email or in Slack.
@@ -27,7 +28,7 @@ The same binary runs everywhere: `workly dev` on your laptop (SQLite, no configu
 - By default a queue delivers up to 3 tasks at once, makes up to 5 attempts, waits between 2 seconds and 1 hour between them, and times attempts out after 30 seconds. Raise `max_concurrency` (up to 10,000) for endpoints that can take more.
 - A task that runs out of attempts is **failed**. It stays in the history with every attempt's status, error and response body, and can be retried once the endpoint is fixed, one at a time or a whole queue's failures at once.
 - Delivery is **at least once**: if the server stops mid-delivery, the attempt is recorded as `lost` and the task is delivered again. Make handlers safe to run twice; the `Workly-Task-Id` header is stable across attempts and works as a deduplication key.
-- Every delivery is **signed** with `Workly-Signature`, so your endpoint can check it came from Workly. The SDKs verify it for you.
+- Every delivery is **signed** with `Workly-Signature`, so your endpoint can check it came from Workly. The SDKs verify it for you, and [Concepts](concepts.md#verifying-a-signature-without-an-sdk) shows how in any language.
 
 ## Reference
 

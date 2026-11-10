@@ -59,6 +59,7 @@ export default defineConfig({
           items: [
             { label: 'Overview', link: '/' },
             { slug: 'quickstart' },
+            { slug: 'concepts' },
           ],
         },
         {

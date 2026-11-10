@@ -34,6 +34,8 @@ const descriptions = {
     'Workly is an open-source HTTP task queue and cron scheduler: enqueue a task with a URL, and Workly delivers it with retries, rate limits and full history.',
   'quickstart.md':
     'Run Workly locally with workly dev, enqueue a task from Python, TypeScript or curl, and handle it in your own endpoint. About five minutes.',
+  'concepts.md':
+    'How Workly queues, tasks and attempts work: retries and backoff, at-least-once delivery, delivery headers, and verifying signatures without an SDK.',
   'schedules.md':
     'Call an HTTP endpoint on a cron timetable, in your timezone, with retries, signed requests, run history and a run-now button: cron for HTTP endpoints.',
   'groups.md':
