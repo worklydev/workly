@@ -230,14 +230,19 @@ func (h Handlers) PutSchedule(ctx context.Context, req PutScheduleRequestObject)
 	now := time.Now()
 	ws := workspaceID(ctx)
 	if h.Admission != nil {
-		_, err := h.Store.GetSchedule(ctx, ws, req.Schedule)
+		old, err := h.Store.GetSchedule(ctx, ws, req.Schedule)
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			return nil, err
 		}
-		err = h.Admission.AdmitSchedule(ctx, ws, ScheduleAdmission{
-			Name: req.Schedule, Exists: err == nil, Interval: shortestInterval(c, loc, now),
-		})
-		if err != nil {
+		adm := ScheduleAdmission{Name: req.Schedule, Exists: err == nil, Interval: shortestInterval(c, loc, now)}
+		if adm.Exists {
+			// A stored timetable parsed when it was saved; if it no longer
+			// does, there's no previous interval to keep.
+			if oc, oloc, err := parseSchedule(old.Cron, old.Timezone); err == nil {
+				adm.PreviousInterval = shortestInterval(oc, oloc, now)
+			}
+		}
+		if err := h.Admission.AdmitSchedule(ctx, ws, adm); err != nil {
 			return nil, err
 		}
 	}

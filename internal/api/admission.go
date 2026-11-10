@@ -26,6 +26,9 @@ type ScheduleAdmission struct {
 	Exists bool
 	// Interval is the shortest time between two of its runs.
 	Interval time.Duration
+	// PreviousInterval is the replaced schedule's Interval (zero for a new
+	// one), so a limit can let a schedule keep the timetable it has.
+	PreviousInterval time.Duration
 }
 
 // LimitError is an error an Admission returns to refuse a request; the

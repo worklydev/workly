@@ -87,8 +87,8 @@ func TestAdmissionSchedules(t *testing.T) {
 	}
 	want := []server.ScheduleAdmission{
 		{Name: "nightly", Exists: false, Interval: 24 * time.Hour},
-		{Name: "nightly", Exists: true, Interval: 5 * time.Minute},
-		{Name: "nightly", Exists: true, Interval: 10 * time.Minute},
+		{Name: "nightly", Exists: true, Interval: 5 * time.Minute, PreviousInterval: 24 * time.Hour},
+		{Name: "nightly", Exists: true, Interval: 10 * time.Minute, PreviousInterval: 24 * time.Hour},
 	}
 	if len(q.schedules) != len(want) {
 		t.Fatalf("admissions = %+v", q.schedules)
