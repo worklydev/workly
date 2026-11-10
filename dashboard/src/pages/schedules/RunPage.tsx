@@ -47,13 +47,13 @@ export function RunPage() {
     <>
       <PageHeader
         title={
-          <span className="flex items-center gap-1">
+          <span className="flex min-w-0 items-center gap-1">
             <span className="truncate font-mono text-base">{run.id}</span>
             <CopyButton text={run.id} title="Copy run ID" />
           </span>
         }
+        badge={<TaskStateBadge state={displayState(run, now)} />}
       >
-        <TaskStateBadge state={displayState(run, now)} />
         <RunActions run={run} />
       </PageHeader>
       <Notice run={run} schedule={schedule} />
@@ -119,15 +119,6 @@ function RunActions({ run }: { run: Run }) {
   return (
     <>
       {error && <span className="text-xs text-destructive">{errorMessage(error)}</span>}
-      <DisabledReason reason={finished ? `A ${run.state} run can't be cancelled.` : undefined}>
-        <ConfirmButton
-          confirmLabel="Cancel run?"
-          onConfirm={() => cancel.mutate(path)}
-          disabled={finished || cancel.isPending}
-        >
-          Cancel
-        </ConfirmButton>
-      </DisabledReason>
       <DisabledReason reason={run.state === 'running' ? 'An attempt is in flight; retry once it finishes.' : undefined}>
         <Button
           variant={run.state === 'failed' ? 'default' : 'secondary'}
@@ -137,6 +128,15 @@ function RunActions({ run }: { run: Run }) {
           <RotateCcw />
           {run.state === 'skipped' ? 'Run it now' : finished ? 'Retry' : 'Run now'}
         </Button>
+      </DisabledReason>
+      <DisabledReason reason={finished ? `A ${run.state} run can't be cancelled.` : undefined}>
+        <ConfirmButton
+          confirmLabel="Cancel run?"
+          onConfirm={() => cancel.mutate(path)}
+          disabled={finished || cancel.isPending}
+        >
+          Cancel
+        </ConfirmButton>
       </DisabledReason>
     </>
   );

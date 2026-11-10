@@ -24,7 +24,7 @@ export function CodePanel({
         </div>
       )}
       {children !== undefined && (
-        <pre className="max-h-96 overflow-auto p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all">
+        <pre className="max-h-96 overflow-auto p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap wrap-break-word">
           {children}
         </pre>
       )}

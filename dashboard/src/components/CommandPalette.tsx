@@ -17,6 +17,7 @@ import { listQueuesOptions, listSchedulesOptions } from '../api/@tanstack/react-
 import { useSlots } from '../context';
 import { EditPolicy } from '../pages/queues/EditPolicy';
 import { EditSchedule } from '../pages/schedules/EditSchedule';
+import { Button } from '../primitives/button';
 import { Dialog, DialogContent, DialogTitle } from '../primitives/dialog';
 import { ITEMS } from '../lib/nav';
 
@@ -54,6 +55,9 @@ export function CommandPalette() {
 
   return (
     <>
+      <Button variant="ghost" size="icon" onClick={() => setOpen(true)} aria-label="Search" className="md:hidden">
+        <Search className="size-4" />
+      </Button>
       <button
         type="button"
         onClick={() => setOpen(true)}

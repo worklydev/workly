@@ -50,8 +50,7 @@ export function SchedulePage() {
 
   return (
     <>
-      <PageHeader title={schedule.name}>
-        {schedule.paused && <Badge variant="warning">paused</Badge>}
+      <PageHeader title={schedule.name} badge={schedule.paused && <Badge variant="warning">paused</Badge>}>
         <ScheduleActions schedule={schedule} />
       </PageHeader>
       <PropertyGroups>
@@ -144,15 +143,6 @@ function ScheduleActions({ schedule }: { schedule: Schedule }) {
           </Link>
         </span>
       )}
-      <ConfirmButton
-        title="Delete the schedule and all its runs. A run in flight finishes, but its result isn't recorded."
-        confirmLabel="Delete schedule and runs"
-        onConfirm={() => remove.mutate(path)}
-        disabled={remove.isPending}
-      >
-        <Trash2 />
-        Delete
-      </ConfirmButton>
       <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>
         <Pencil />
         Edit
@@ -177,6 +167,15 @@ function ScheduleActions({ schedule }: { schedule: Schedule }) {
         <Play />
         Run now
       </Button>
+      <ConfirmButton
+        title="Delete the schedule and all its runs. A run in flight finishes, but its result isn't recorded."
+        confirmLabel="Delete schedule and runs"
+        onConfirm={() => remove.mutate(path)}
+        disabled={remove.isPending}
+      >
+        <Trash2 />
+        Delete
+      </ConfirmButton>
     </>
   );
 }
@@ -188,7 +187,7 @@ function Upcoming({ schedule }: { schedule: Schedule }) {
       <ol className="flex flex-col gap-1.5">
         {schedule.next_runs.map((t) => (
           <li key={t} className="flex items-center gap-3 text-sm">
-            <span className="w-44 font-mono text-xs">{formatDate(t)}</span>
+            <span className="w-36 font-mono text-xs">{formatDate(t, { seconds: false })}</span>
             <span className="text-xs text-muted-foreground">
               <RelativeTime iso={t} />
             </span>

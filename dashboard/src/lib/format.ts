@@ -60,13 +60,13 @@ function compact(ms: number): string {
   return `${Math.floor(ms / DAY)}d`;
 }
 
-export function formatDate(iso: string): string {
+export function formatDate(iso: string, { seconds = true }: { seconds?: boolean } = {}): string {
   return new Date(iso).toLocaleString(undefined, {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-    second: '2-digit',
+    second: seconds ? '2-digit' : undefined,
   });
 }
 
@@ -90,4 +90,30 @@ export function prettyBody(text: string): string {
   } catch {
     return text;
   }
+}
+
+/**
+ * A long ID cut to its prefix and last characters, task_…850730GDFY, for
+ * lists: IDs created together share their leading (time) characters, so the
+ * end is what tells them apart.
+ */
+export function shortId(id: string, keep = 6): string {
+  const cut = id.indexOf('_') + 1;
+  return id.length - cut <= keep + 2 ? id : `${id.slice(0, cut)}…${id.slice(-keep)}`;
+}
+
+/**
+ * A request target without the scheme, which is nearly always https:
+ * POST api.example.com/hook, or POST /hook when the host is `sharedHost`.
+ */
+export function formatTarget(method: string, url: string, sharedHost?: string): string {
+  const rest = url.replace(/^https?:\/\//, '');
+  if (sharedHost && rest.startsWith(sharedHost + '/')) return `${method} ${rest.slice(sharedHost.length)}`;
+  return `${method} ${rest}`;
+}
+
+/** The host (with port) every URL calls, if they all call the same one. */
+export function sharedHost(urls: string[]): string | undefined {
+  const hosts = new Set(urls.map((u) => u.replace(/^https?:\/\//, '').split('/')[0]));
+  return hosts.size === 1 ? [...hosts][0] : undefined;
 }

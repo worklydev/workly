@@ -1,11 +1,13 @@
 import { Fragment } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useLocation } from 'react-router';
-import { getHealthzOptions, getRunOptions } from '../api/@tanstack/react-query.gen';
+import { cn } from 'cn';
+import { getGroupOptions, getHealthzOptions, getRunOptions } from '../api/@tanstack/react-query.gen';
 import { useSlots, type NavItem } from '../context';
 import { useFrom } from '../lib/from';
 import { Badge } from '../primitives/badge';
 import { CommandPalette } from './CommandPalette';
+import { MobileNav } from './Sidebar';
 import { ThemeToggle } from './ThemeToggle';
 
 const LABELS: Record<string, string> = {
@@ -58,30 +60,47 @@ function useRunCrumbs(path: string, from: string | undefined) {
   return [...before, { to: path, label: id, mono: true }];
 }
 
+/** A group is named in the crumbs when it has a name: Groups / nightly-export. */
+function useGroupCrumbs(path: string) {
+  const id = path.startsWith('/groups/') ? decodeURIComponent(path.slice('/groups/'.length)) : '';
+  // Shares the group page's query.
+  const { data: group } = useQuery({ ...getGroupOptions({ path: { id } }), enabled: id !== '' });
+  if (!id || !group?.name) return undefined;
+  return [...crumbs('/groups'), { to: path, label: group.name, mono: false }];
+}
+
 export function Header() {
   const { header, nav } = useSlots();
   const path = useLocation().pathname;
   const from = useFrom();
   const runItems = useRunCrumbs(path, from);
-  const items = runItems ?? (path.startsWith('/tasks/') ? taskCrumbs(path, from) : crumbs(path, nav));
+  const groupItems = useGroupCrumbs(path);
+  const items = runItems ?? groupItems ?? (path.startsWith('/tasks/') ? taskCrumbs(path, from) : crumbs(path, nav));
 
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border px-6">
-      <h1 className="flex min-w-0 items-center gap-2 text-sm">
-        {items.map((crumb, i) => (
-          <Fragment key={crumb.to}>
-            {i > 0 && <span className="text-faint">/</span>}
-            {i === items.length - 1 ? (
-              <span className={crumb.mono ? 'truncate font-mono text-xs' : 'font-medium'}>{crumb.label}</span>
-            ) : (
-              <Link to={crumb.to} className="text-muted-foreground hover:text-foreground">
-                {crumb.label}
-              </Link>
-            )}
-          </Fragment>
-        ))}
+    <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border px-4 sm:gap-4 sm:px-6">
+      <MobileNav />
+      <h1 className="flex min-w-0 flex-1 items-center gap-2 text-sm">
+        {items.map((crumb, i) => {
+          // On phones only the parent shows, as a way back: the page's title names the page.
+          const phone = items.length === 1 || i === items.length - 2 ? '' : 'hidden sm:inline';
+          return (
+            <Fragment key={crumb.to}>
+              {i > 0 && <span className="hidden text-faint sm:inline">/</span>}
+              {i === items.length - 1 ? (
+                <span className={cn(crumb.mono ? 'truncate font-mono text-xs' : 'truncate font-medium', phone)}>
+                  {crumb.label}
+                </span>
+              ) : (
+                <Link to={crumb.to} className={cn('shrink-0 text-muted-foreground hover:text-foreground', phone)}>
+                  {crumb.label}
+                </Link>
+              )}
+            </Fragment>
+          );
+        })}
       </h1>
-      <div className="flex items-center gap-3">
+      <div className="flex shrink-0 items-center gap-2 sm:gap-3">
         <CommandPalette />
         {header}
         <ServerStatus />
@@ -94,13 +113,14 @@ export function Header() {
 function ServerStatus() {
   const { isPending, isError } = useQuery({ ...getHealthzOptions(), refetchInterval: 10_000, retry: false });
   if (isPending) return null;
+  // On phones the dot alone says it, leaving room for the page's name.
   return isError ? (
-    <Badge variant="danger" dot>
-      offline
+    <Badge variant="danger" dot title="The Workly API is unreachable">
+      <span className="hidden sm:inline">offline</span>
     </Badge>
   ) : (
-    <Badge variant="success" dot>
-      live
+    <Badge variant="success" dot title="Connected; updates live">
+      <span className="hidden sm:inline">live</span>
     </Badge>
   );
 }

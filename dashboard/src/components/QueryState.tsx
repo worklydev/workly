@@ -3,7 +3,7 @@ import { errorMessage } from '../lib/api';
 
 /** Placeholder text for loading, error and empty states. */
 export function Muted({ children }: { children: ReactNode }) {
-  return <div className="py-10 text-center text-muted-foreground">{children}</div>;
+  return <div className="py-6 text-center text-muted-foreground">{children}</div>;
 }
 
 export function ErrorText({ error }: { error: unknown }) {

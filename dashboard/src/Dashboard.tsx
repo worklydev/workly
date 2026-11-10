@@ -39,6 +39,12 @@ export type DashboardProps = {
    * of the `workly dev` examples.
    */
   gettingStarted?: GettingStarted;
+  /**
+   * Name the server's settings (e.g. WORKLY_RETENTION) where they explain a
+   * limit. Defaults to true; a hosted build, whose users can't set them,
+   * turns it off.
+   */
+  serverSettings?: boolean;
   /** Share a QueryClient with the wrapping app. */
   queryClient?: QueryClient;
 };
@@ -55,6 +61,7 @@ export function Dashboard({
   nav = [],
   header,
   gettingStarted,
+  serverSettings = true,
   queryClient,
 }: DashboardProps) {
   const [unauthorized, setUnauthorized] = useState(false);
@@ -87,7 +94,7 @@ export function Dashboard({
   return (
     <QueryClientProvider client={queries}>
       <LiveUpdates />
-      <SlotsContext value={{ nav, header, gettingStarted }}>
+      <SlotsContext value={{ nav, header, gettingStarted, serverSettings }}>
         <BrowserRouter basename={basename}>
           <Routes>
             <Route path="design" element={<DesignPage />} />

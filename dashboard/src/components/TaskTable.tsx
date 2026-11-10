@@ -2,12 +2,14 @@ import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { RotateCcw, X } from 'lucide-react';
 import { Link, useNavigate } from 'react-router';
+import { cn } from 'cn';
 import { cancelTask, retryTask } from '../api';
 import { cancelTaskMutation, retryTaskMutation } from '../api/@tanstack/react-query.gen';
 import type { Task } from '../api';
 import { useNow } from '../hooks/useNow';
 import { errorMessage } from '../lib/api';
 import { useFromHere } from '../lib/from';
+import { formatTarget, sharedHost, shortId } from '../lib/format';
 import { displayState } from '../lib/states';
 import type { TaskPages } from '../lib/tasks';
 import type { SortField, TaskSorting } from '../lib/taskSort';
@@ -58,6 +60,13 @@ export function TaskTable({ pages, showQueue, empty, paused = () => false, sorti
       <TableHead {...props}>{label}</TableHead>
     );
 
+  // When every task on the page calls the same host, the path is what differs.
+  const host = sharedHost(tasks.map((t) => t.url));
+
+  // With a Queue column the table is too wide for a laptop, so Last run goes
+  // first, unless the list is sorted by it.
+  const lastRun = showQueue && sorting?.sort.field !== 'last_attempt_at' ? 'hidden 2xl:table-cell' : undefined;
+
   // Selections of tasks no longer listed (e.g. after a filter change) don't count.
   const chosen = tasks.filter((t) => selected.has(t.id));
   const allChosen = chosen.length === tasks.length;
@@ -87,7 +96,7 @@ export function TaskTable({ pages, showQueue, empty, paused = () => false, sorti
             {head('attempt_count', 'Attempts', { className: 'text-right' })}
             <TableHead>Last result</TableHead>
             {head('run_at', 'Next run')}
-            {head('last_attempt_at', 'Last run', { title: 'When the latest attempt finished' })}
+            {head('last_attempt_at', 'Last run', { title: 'When the latest attempt finished', className: lastRun })}
             {head('created_at', 'Created')}
             <TableHead>Target</TableHead>
             <TableHead className="w-0">
@@ -106,30 +115,35 @@ export function TaskTable({ pages, showQueue, empty, paused = () => false, sorti
               <TableCell onClick={(e) => e.stopPropagation()}>
                 <Checkbox checked={selected.has(t.id)} onChange={() => toggle(t.id)} label={`Select ${t.id}`} />
               </TableCell>
-              <TableCell className="font-mono text-xs">
-                <Link to={`/tasks/${t.id}`} state={from} onClick={(e) => e.stopPropagation()}>
-                  {t.id}
+              <TableCell className="font-mono text-xs whitespace-nowrap">
+                <Link to={`/tasks/${t.id}`} state={from} title={t.id} onClick={(e) => e.stopPropagation()}>
+                  {shortId(t.id)}
                 </Link>
               </TableCell>
-              {showQueue && <TableCell>{t.queue}</TableCell>}
+              {showQueue && (
+                <TableCell className="max-w-36 truncate" title={t.queue}>
+                  {t.queue}
+                </TableCell>
+              )}
               <TableCell>
                 <TaskStateBadge state={displayState(t, now)} />
               </TableCell>
               <TableCell className="text-right font-mono text-xs">{t.attempt_count}</TableCell>
-              <TableCell className="max-w-44 truncate font-mono text-xs">
+              <TableCell className="max-w-36 truncate font-mono text-xs">
                 <LastResult task={t} />
               </TableCell>
               <TableCell className="text-xs text-muted-foreground">
                 <NextRun task={t} now={now} paused={paused(t.queue)} />
               </TableCell>
-              <TableCell className="text-xs text-muted-foreground">
+              <TableCell className={cn('text-xs text-muted-foreground', lastRun)}>
                 {t.last_attempt_at ? <RelativeTime iso={t.last_attempt_at} /> : <span className="text-faint">—</span>}
               </TableCell>
               <TableCell className="text-xs text-muted-foreground">
                 <RelativeTime iso={t.created_at} />
               </TableCell>
-              <TableCell className="max-w-48 truncate font-mono text-xs text-faint" title={t.url}>
-                {t.method} {t.url}
+              {/* Takes the width left over, at least 8rem, rather than widening the table. */}
+              <TableCell className="w-full max-w-0 min-w-32 truncate font-mono text-xs text-faint" title={t.url}>
+                {formatTarget(t.method, t.url, host)}
               </TableCell>
               <TableCell className="py-0" onClick={(e) => e.stopPropagation()}>
                 <RowActions task={t} />

@@ -76,7 +76,10 @@ Nav: an icon plus a label. Inactive items are `text-muted-foreground`. The activ
 - **Sorting:** time and count columns sort by clicking their header (`SortableTableHead`): the active column's arrow is orange, others show a faint arrow on hover. Next to the list's filters, `SortSummary` says what the order is and whether it's the default, with Reset once changed. The sort lives in the URL. Pending tasks default to Next run, soonest first, the order they're delivered in; everything else to newest first.
 - **Task tables** have a checkbox column and per-row Retry and Cancel. The bulk bar above stays visible, with its buttons disabled until tasks are selected, and each bulk action applies only to the selected tasks it can act on.
 - **Charts** (the Queues page's tasks-created chart): plain flex bars, no chart library. Series use `chart-1`…`chart-5`, muted hues clear of the accent and the status colors, so a queue never reads as failed or selected; the busiest queues get a color each and the rest share `chart-other`. Hovering a bar shows its counts; hovering a legend item fades the other series.
-- **Actions never disappear.** Render every action for an entity; when it doesn't apply, disable it and say why with `DisabledReason`. A hidden button reads as a missing feature.
+- **Actions never disappear.** Render every action for an entity; when it doesn't apply, disable it and say why with `DisabledReason`, which opens on hover, tap and keyboard focus. A hidden button reads as a missing feature.
+- **Page headers** (`PageHeader`): the entity's state badge sits next to the title (`badge`), not among the actions. Actions go ghost ones first, then the main action (a filled button), then destructive ones (`ConfirmButton`) last. On narrow screens they wrap below the title.
+- **Lists** show what tells rows apart: long IDs shortened to their last characters (`shortId`, the full ID in the title), targets without the scheme, and only the path when every row calls the same host. A pager appears only when there's more than one page.
+- **Phones:** below `sm` the sidebar becomes a drawer opened from the header (`MobileNav`), and the gutter shrinks to 16px. Wide tables scroll sideways inside their container, never the page.
 
 ### Don't
 

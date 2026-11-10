@@ -8,7 +8,7 @@ export function AppShell() {
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <Header />
-        <main className="flex-1 overflow-auto bg-surface p-6">
+        <main className="flex-1 overflow-auto bg-surface p-4 sm:p-6">
           <div className="mx-auto flex max-w-6xl flex-col gap-8">
             <Outlet />
           </div>

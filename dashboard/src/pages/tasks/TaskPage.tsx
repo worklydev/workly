@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { Link, useParams } from 'react-router';
 import {
   cancelTaskMutation,
+  getGroupOptions,
   getQueueOptions,
   getTaskDeliveryOptions,
   getTaskOptions,
@@ -56,13 +57,13 @@ export function TaskPage() {
     <>
       <PageHeader
         title={
-          <span className="flex items-center gap-1">
+          <span className="flex min-w-0 items-center gap-1">
             <span className="truncate font-mono text-base">{task.id}</span>
             <CopyButton text={task.id} title="Copy task ID" />
           </span>
         }
+        badge={<TaskStateBadge state={displayState(task, now)} />}
       >
-        <TaskStateBadge state={displayState(task, now)} />
         <TaskActions task={task} />
       </PageHeader>
       <Notices task={task} queue={queue} attempts={attempts?.attempts} />
@@ -108,18 +109,7 @@ export function TaskPage() {
           <Property label="Timeout">
             <span className="font-mono text-xs">{task.timeout_seconds ?? queue?.timeout_seconds ?? '…'}s</span>
           </Property>
-          <Property label="Group">
-            {task.group_id ? (
-              <Link
-                to={`/groups/${task.group_id}`}
-                className="font-mono text-xs underline decoration-border underline-offset-4 hover:text-primary hover:decoration-primary"
-              >
-                {task.group_id}
-              </Link>
-            ) : (
-              <None />
-            )}
-          </Property>
+          <Property label="Group">{task.group_id ? <GroupLink id={task.group_id} /> : <None />}</Property>
           <Property label="Idempotency key">
             {task.idempotency_key ? (
               <span className="font-mono text-xs" title={task.idempotency_key}>
@@ -161,6 +151,23 @@ function Duration({ task }: { task: Task }) {
   );
 }
 
+/** The group by name when it has one; its ID otherwise, and while it loads. */
+function GroupLink({ id }: { id: string }) {
+  const { data: group } = useQuery(getGroupOptions({ path: { id } }));
+  return (
+    <Link
+      to={`/groups/${id}`}
+      title={id}
+      className={cn(
+        'underline decoration-border underline-offset-4 hover:text-primary hover:decoration-primary',
+        !group?.name && 'font-mono text-xs',
+      )}
+    >
+      {group?.name ?? id}
+    </Link>
+  );
+}
+
 function TaskActions({ task }: { task: Task }) {
   const qc = useQueryClient();
   const [duplicating, setDuplicating] = useState(false);
@@ -174,15 +181,16 @@ function TaskActions({ task }: { task: Task }) {
   return (
     <>
       {error && <span className="text-xs text-destructive">{errorMessage(error)}</span>}
-      <DisabledReason reason={finished ? `A ${task.state} task can't be cancelled.` : undefined}>
-        <ConfirmButton
-          confirmLabel="Cancel task?"
-          onConfirm={() => cancel.mutate(path)}
-          disabled={finished || cancel.isPending}
-        >
-          Cancel
-        </ConfirmButton>
-      </DisabledReason>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => setDuplicating(true)}
+        title="Enqueue a new task with this request"
+      >
+        <Copy />
+        Duplicate
+      </Button>
+      <EnqueueTask queue={task.queue} from={task} open={duplicating} onClose={() => setDuplicating(false)} />
       <DisabledReason
         reason={task.state === 'running' ? 'An attempt is in flight; retry once it finishes.' : undefined}
       >
@@ -195,16 +203,15 @@ function TaskActions({ task }: { task: Task }) {
           {finished ? 'Retry' : 'Run now'}
         </Button>
       </DisabledReason>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => setDuplicating(true)}
-        title="Enqueue a new task with this request"
-      >
-        <Copy />
-        Duplicate
-      </Button>
-      <EnqueueTask queue={task.queue} from={task} open={duplicating} onClose={() => setDuplicating(false)} />
+      <DisabledReason reason={finished ? `A ${task.state} task can't be cancelled.` : undefined}>
+        <ConfirmButton
+          confirmLabel="Cancel task?"
+          onConfirm={() => cancel.mutate(path)}
+          disabled={finished || cancel.isPending}
+        >
+          Cancel
+        </ConfirmButton>
+      </DisabledReason>
     </>
   );
 }
@@ -264,10 +271,10 @@ function whyFailed(task: Task, queue: Queue, attempts: Attempt[]): React.ReactNo
   }
   if (exhausted) {
     return task.max_attempts !== undefined ? (
-      <>It used all {max} attempts, the limit set on this task.</>
+      <>That's the limit set on this task (max attempts: {max}).</>
     ) : (
       <>
-        It used all {max} attempts, the limit (Max attempts) in {policy}.
+        That's the limit in {policy} (Max attempts: {max}).
       </>
     );
   }

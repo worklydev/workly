@@ -16,6 +16,7 @@ import {
 } from '../../api/@tanstack/react-query.gen';
 import type { FailureGroup, ListTasksData, Queue, TaskState } from '../../api';
 import { ConfirmButton } from '../../components/ConfirmButton';
+import { useSetting } from '../../context';
 import { ListPager } from '../../components/ListControls';
 import { usePage } from '../../hooks/usePage';
 import { useRange, useRangeSince } from '../../hooks/useRange';
@@ -55,8 +56,7 @@ export function QueuePage() {
 
   return (
     <>
-      <PageHeader title={queue.name}>
-        {queue.paused && <Badge variant="warning">paused</Badge>}
+      <PageHeader title={queue.name} badge={queue.paused && <Badge variant="warning">paused</Badge>}>
         <QueueActions queue={queue} />
       </PageHeader>
       <Section title="Backlog">
@@ -93,6 +93,7 @@ function Activity({ queue }: { queue: string }) {
     placeholderData: keepPreviousData,
   });
   const retention = data?.retention_seconds;
+  const setting = useSetting();
   const finished = data ? data.succeeded + data.failed : 0;
   // Keeps the range when filtering the task list below.
   const tasks = (state: TaskState) => `${query ? `${query}&` : '?'}state=${state}`;
@@ -126,10 +127,10 @@ function Activity({ queue }: { queue: string }) {
             <p className="flex items-center gap-1.5 text-xs text-faint">
               <Info className="size-3.5 shrink-0" />
               {retention === undefined
-                ? 'Finished tasks are kept forever (WORKLY_RETENTION).'
+                ? `Finished tasks are kept forever${setting('WORKLY_RETENTION')}.`
                 : retention < seconds
-                  ? `Finished tasks are kept for ${formatDays(retention)} (WORKLY_RETENTION), so older activity isn't counted.`
-                  : `Finished tasks are kept for ${formatDays(retention)} (WORKLY_RETENTION).`}
+                  ? `Finished tasks are kept for ${formatDays(retention)}${setting('WORKLY_RETENTION')}, so older activity isn't counted.`
+                  : `Finished tasks are kept for ${formatDays(retention)}${setting('WORKLY_RETENTION')}.`}
             </p>
           )}
         </>
@@ -175,16 +176,6 @@ function QueueActions({ queue }: { queue: Queue }) {
           {retried === 0 ? 'No failed tasks' : `Retrying ${formatCount(retried)} failed`}
         </span>
       )}
-      <DisabledReason reason={pending === 0 ? 'No pending tasks to cancel.' : undefined}>
-        <ConfirmButton
-          title="Cancel every pending task, including scheduled ones. They stay in the history and can be retried."
-          confirmLabel={`Cancel ${formatCount(pending)} pending?`}
-          onConfirm={() => cancelPending.mutate(path)}
-          disabled={pending === 0 || cancelPending.isPending}
-        >
-          Cancel pending
-        </ConfirmButton>
-      </DisabledReason>
       <DisabledReason reason={failed === 0 ? 'No failed tasks to retry.' : undefined}>
         <Button
           variant="ghost"
@@ -198,12 +189,12 @@ function QueueActions({ queue }: { queue: Queue }) {
         </Button>
       </DisabledReason>
       {queue.paused ? (
-        <Button onClick={() => resume.mutate(path)} disabled={resume.isPending}>
+        <Button variant="ghost" size="sm" onClick={() => resume.mutate(path)} disabled={resume.isPending}>
           <Play />
           Resume
         </Button>
       ) : (
-        <Button onClick={() => pause.mutate(path)} disabled={pause.isPending}>
+        <Button variant="ghost" size="sm" onClick={() => pause.mutate(path)} disabled={pause.isPending}>
           <Pause />
           Pause
         </Button>
@@ -213,6 +204,16 @@ function QueueActions({ queue }: { queue: Queue }) {
         Enqueue task
       </Button>
       <EnqueueTask queue={queue.name} open={enqueueing} onClose={() => setEnqueueing(false)} />
+      <DisabledReason reason={pending === 0 ? 'No pending tasks to cancel.' : undefined}>
+        <ConfirmButton
+          title="Cancel every pending task, including scheduled ones. They stay in the history and can be retried."
+          confirmLabel={`Cancel ${formatCount(pending)} pending?`}
+          onConfirm={() => cancelPending.mutate(path)}
+          disabled={pending === 0 || cancelPending.isPending}
+        >
+          Cancel pending
+        </ConfirmButton>
+      </DisabledReason>
       <ConfirmButton
         title="Delete the queue and every task in it, history included. This can't be undone."
         confirmLabel="Delete queue and all its tasks"
@@ -330,7 +331,7 @@ function FailureRow({ queue, group: g }: { queue: string; group: FailureGroup })
             disabled={retry.isPending}
           >
             <RotateCcw />
-            Retry these
+            Retry {formatCount(g.count)}
           </Button>
         </div>
       </TableCell>
@@ -389,7 +390,8 @@ function QueueTasks({ queue }: { queue: Queue }) {
   const [params, setParams] = useSearchParams();
   const state = (params.get('state') ?? 'all') as TaskState | 'all';
   const lastError = params.get('last_error');
-  const counts = stateCounts(queue);
+  // The counts are the whole queue's, so they'd contradict a filtered list.
+  const counts = lastError === null ? stateCounts(queue) : {};
   const sorting = useTaskSort(state);
   const query: ListTasksData['query'] = { ...sorting.query, limit: PAGE_SIZE };
   if (state !== 'all') query.state = state;

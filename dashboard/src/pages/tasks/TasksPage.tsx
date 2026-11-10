@@ -86,25 +86,28 @@ export function TasksPage() {
   return (
     <>
       <PageHeader title="Tasks" description="Search across all queues." />
-      <div className="flex flex-wrap items-center gap-2">
-        <form onSubmit={submit}>
-          <Input
-            icon={<Search />}
-            placeholder="Task ID or idempotency key"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            onBlur={() => !search.trim().startsWith('task_') && set('idempotency_key', search.trim())}
-            className="w-72"
-          />
-        </form>
-        <Filter items={queueItems} value={queue} onChange={(v) => set('queue', v)} className="w-40" />
-        <Filter items={STATE_ITEMS} value={state} onChange={(v) => set('state', v)} className="w-36" />
-        <Filter items={SINCE_ITEMS} value={since} onChange={(v) => set('since', v)} className="w-40" />
-        <div className="ml-auto">
-          <SortSummary sorting={sorting} />
+      {/* Filters, sort and the table belong together, so they don't get the page's section spacing. */}
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <form onSubmit={submit}>
+            <Input
+              icon={<Search />}
+              placeholder="Task ID or idempotency key"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onBlur={() => !search.trim().startsWith('task_') && set('idempotency_key', search.trim())}
+              className="w-64"
+            />
+          </form>
+          <Filter items={queueItems} value={queue} onChange={(v) => set('queue', v)} className="w-40" />
+          <Filter items={STATE_ITEMS} value={state} onChange={(v) => set('state', v)} className="w-36" />
+          <Filter items={SINCE_ITEMS} value={since} onChange={(v) => set('since', v)} className="w-40" />
+          <div className="ml-auto">
+            <SortSummary sorting={sorting} />
+          </div>
         </div>
+        <TaskTable pages={pages} showQueue sorting={sorting} paused={(q) => paused.has(q)} empty="No tasks match." />
       </div>
-      <TaskTable pages={pages} showQueue sorting={sorting} paused={(q) => paused.has(q)} empty="No tasks match." />
     </>
   );
 }

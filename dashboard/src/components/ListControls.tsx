@@ -20,9 +20,9 @@ export function ListSearch({ list, placeholder }: { list: ListPage<unknown>; pla
   );
 }
 
-/** "26–50 of 140" with previous and next, below a paged list. */
+/** "26–50 of 140" with previous and next, below a paged list that needs more than one page. */
 export function ListPager({ list, noun }: { list: Page<unknown>; noun: string }) {
-  if (list.matching === 0) return null;
+  if (list.pages <= 1) return null;
   const first = list.page * PAGE_SIZE + 1;
   const last = Math.min(list.matching, first + PAGE_SIZE - 1);
   const isFirst = list.page === 0;
@@ -61,9 +61,12 @@ export function ListPager({ list, noun }: { list: Page<unknown>; noun: string })
   );
 }
 
-/** "51–100" (of 120, once known) with previous and next, below a cursor-paged list. */
+/**
+ * "51–100" (of 120, once known) with previous and next, below a cursor-paged
+ * list that needs more than one page.
+ */
 export function CursorPager({ page, noun }: { page: CursorPage<unknown>; noun: string }) {
-  if (page.items.length === 0) return null;
+  if (page.items.length === 0 || (!page.hasPrev && !page.hasNext)) return null;
   const first = page.offset + 1;
   const last = page.offset + page.items.length;
   return (

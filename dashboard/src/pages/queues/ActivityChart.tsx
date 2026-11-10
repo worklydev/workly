@@ -4,6 +4,7 @@ import { getActivityOptions } from '../../api/@tanstack/react-query.gen';
 import type { Activity, ActivityBucket } from '../../api';
 import { ErrorText } from '../../components/QueryState';
 import { RangeTabs } from '../../components/RangeTabs';
+import { useSetting } from '../../context';
 import { useRange } from '../../hooks/useRange';
 import { formatCount } from '../../lib/format';
 import { cn } from 'cn';
@@ -20,6 +21,7 @@ export function ActivityChart() {
   const { data, error } = useQuery({ ...getActivityOptions({ query: { range } }), refetchInterval: 15_000 });
   const [hovered, setHovered] = useState<number>();
   const [focus, setFocus] = useState<string>();
+  const setting = useSetting();
 
   const series = data ? toSeries(data.buckets) : undefined;
 
@@ -43,7 +45,7 @@ export function ActivityChart() {
         <div className="h-36" />
       ) : (
         <>
-          <Detail data={data} series={series} index={hovered} />
+          <Detail data={data} series={series} index={hovered} per={per} />
           <div className="flex h-28 items-end gap-px" onMouseLeave={() => setHovered(undefined)}>
             {data.buckets.map((b, i) => {
               const total = sum(b.counts);
@@ -99,8 +101,8 @@ export function ActivityChart() {
           </div>
           {data.retention_seconds !== undefined && data.retention_seconds < RANGE_SECONDS[range] && (
             <p className="text-xs text-faint">
-              Finished tasks are deleted after {Math.round(data.retention_seconds / 3600)}h (WORKLY_RETENTION), so older
-              bars count only what's left.
+              Finished tasks are deleted after {Math.round(data.retention_seconds / 3600)}h{setting('WORKLY_RETENTION')}
+              , so older bars count only what's left.
             </p>
           )}
         </>
@@ -144,12 +146,14 @@ function countFor(b: ActivityBucket, key: string, keys: string[]): number {
 
 const sum = (counts: Record<string, number>) => Object.values(counts).reduce((a, b) => a + b, 0);
 
-/** The hovered bar's time and counts, or the tallest bar's height as a scale. */
-function Detail({ data, series, index }: { data: Activity; series: Series; index?: number }) {
+/** The hovered bar's time and counts, or the busiest bar's count as a scale. */
+function Detail({ data, series, index, per }: { data: Activity; series: Series; index?: number; per: string }) {
   if (index === undefined) {
     return (
       <div className="h-5 text-xs text-faint">
-        {series.total === 0 ? 'No tasks created in this range.' : `Tallest bar: ${formatCount(series.max)}`}
+        {series.total === 0
+          ? 'No tasks created in this range.'
+          : `Busiest ${per}: ${formatCount(series.max)}. Hover a bar for its counts.`}
       </div>
     );
   }
@@ -176,11 +180,12 @@ function Detail({ data, series, index }: { data: Activity; series: Series; index
 const time = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' });
 const dayTime = new Intl.DateTimeFormat(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' });
 
+// Beyond an hour the axis spans two days or more, so its times need the day.
 function tick(iso: string, range: Range) {
-  return (range === '7d' ? dayTime : time).format(new Date(iso));
+  return (range === '1h' ? time : dayTime).format(new Date(iso));
 }
 
 function span(start: Date, end: Date, range: Range) {
-  const f = range === '7d' ? dayTime : time;
+  const f = range === '1h' ? time : dayTime;
   return `${f.format(start)}–${time.format(end)}`;
 }

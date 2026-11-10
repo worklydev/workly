@@ -5,7 +5,7 @@ import { Link, useNavigate } from 'react-router';
 import { getQueueActivityOptions, listQueuesOptions } from '../../api/@tanstack/react-query.gen';
 import type { Queue, QueueActivity } from '../../api';
 import { CodePanel } from '../../components/CodePanel';
-import { useSlots } from '../../context';
+import { useSetting, useSlots } from '../../context';
 import { ListPager, ListSearch } from '../../components/ListControls';
 import { PageHeader } from '../../components/PageHeader';
 import { ErrorText, Muted } from '../../components/QueryState';
@@ -68,6 +68,7 @@ function Totals({ queues }: { queues: Queue[] }) {
     .filter((t): t is string => t !== undefined)
     .sort()[0];
   const now = useNow();
+  const setting = useSetting();
   const behind = oldest ? Math.max(0, now - new Date(oldest).getTime()) : 0;
 
   const failed = sum('failed');
@@ -88,7 +89,7 @@ function Totals({ queues }: { queues: Queue[] }) {
         value={formatCount(failed)}
         tone={failed > 0 ? 'danger' : undefined}
         to={failed > 0 ? '/tasks?state=failed' : undefined}
-        title="Failed tasks still kept (WORKLY_RETENTION)"
+        title={`Failed tasks still kept${setting('WORKLY_RETENTION')}`}
       />
     </div>
   );
@@ -123,6 +124,7 @@ function QueueTable({ queues }: { queues: Queue[] }) {
   const navigate = useNavigate();
   const day = useDayActivity(queues);
   const { value: range, query } = useRange();
+  const setting = useSetting();
   return (
     <Table>
       <TableHeader>
@@ -132,7 +134,7 @@ function QueueTable({ queues }: { queues: Queue[] }) {
             Pending
           </TableHead>
           <TableHead className="text-right">Running</TableHead>
-          <TableHead className="text-right" title="Failed tasks still kept (WORKLY_RETENTION)">
+          <TableHead className="text-right" title={`Failed tasks still kept${setting('WORKLY_RETENTION')}`}>
             Failed
           </TableHead>
           <TableHead className="text-right" title={LONGEST_WAIT_TITLE}>

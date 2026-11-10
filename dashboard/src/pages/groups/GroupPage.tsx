@@ -45,14 +45,18 @@ export function GroupPage() {
     <>
       <PageHeader
         title={
-          <span className="flex items-center gap-1">
-            {group.name ?? <span className="truncate font-mono text-base">{group.id}</span>}
+          <span className="flex min-w-0 items-center gap-1">
+            {group.name ? (
+              <span className="truncate">{group.name}</span>
+            ) : (
+              <span className="truncate font-mono text-base">{group.id}</span>
+            )}
             <CopyButton text={group.id} title="Copy group ID" />
           </span>
         }
         description={group.name && <span className="font-mono text-xs">{group.id}</span>}
+        badge={<GroupStatusBadge status={group.status} />}
       >
-        <GroupStatusBadge status={group.status} />
         <CloseGroup group={group} />
       </PageHeader>
       <Notice group={group} />

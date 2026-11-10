@@ -5,24 +5,45 @@ import {
   getQueueFailuresOptions,
   listAlertChannelsOptions,
   listQueuesOptions,
+  listRunsOptions,
+  listSchedulesOptions,
   retryFailedTasksMutation,
 } from '../api/@tanstack/react-query.gen';
-import type { FailureGroup } from '../api';
+import type { FailureGroup, Run } from '../api';
 import { ListPager } from '../components/ListControls';
 import { PageHeader } from '../components/PageHeader';
 import { ErrorText, Muted } from '../components/QueryState';
 import { RelativeTime } from '../components/RelativeTime';
+import { Section } from '../components/Section';
 import { usePage } from '../hooks/usePage';
 import { errorMessage, LIVE } from '../lib/api';
-import { formatCount } from '../lib/format';
+import { formatCount, shortId } from '../lib/format';
 import { useFromHere } from '../lib/from';
 import { Button } from '../primitives/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../primitives/table';
 
 type Group = FailureGroup & { queue: string };
 
-/** Failed tasks in every queue, grouped by the error they ended with: what's broken, and how badly. */
+/**
+ * What's broken, and how badly: failed tasks in every queue and failed runs
+ * of every schedule, grouped by the error they ended with.
+ */
 export function FailuresPage() {
+  return (
+    <>
+      <PageHeader
+        title="Failures"
+        description="Failed tasks and schedule runs, grouped by the error they ended with. Fix the cause, then retry them."
+      >
+        <AlertsLink />
+      </PageHeader>
+      <QueueFailures />
+      <ScheduleFailures />
+    </>
+  );
+}
+
+function QueueFailures() {
   const queues = useQuery({ ...listQueuesOptions(), ...LIVE });
   const failing = (queues.data?.queues ?? []).filter((q) => (q.stats?.failed ?? 0) > 0);
   const failures = useQueries({
@@ -38,13 +59,7 @@ export function FailuresPage() {
   const error = queues.error ?? failures.find((f) => f.error)?.error;
 
   return (
-    <>
-      <PageHeader
-        title="Failures"
-        description="Failed tasks in every queue, grouped by the error they ended with. Fix the cause, then retry the group."
-      >
-        <AlertsLink />
-      </PageHeader>
+    <Section title="Queues">
       {error ? (
         <ErrorText error={error} />
       ) : queues.isPending || failures.some((f) => f.isPending) ? (
@@ -75,9 +90,111 @@ export function FailuresPage() {
           <ListPager list={list} noun="errors" />
         </div>
       )}
-    </>
+    </Section>
   );
 }
+
+/** How many failed runs are looked at per schedule; more shows as "50+". */
+const RUN_LIMIT = 50;
+
+type RunGroup = { schedule: string; error: string; count: number; more: boolean; latest: Run };
+
+/**
+ * Failed runs of every schedule, grouped like the queues' failures. The API
+ * has no failure summary for schedules, so this groups each schedule's
+ * latest failed runs here.
+ */
+function ScheduleFailures() {
+  const from = useFromHere();
+  const schedules = useQuery({ ...listSchedulesOptions(), ...LIVE });
+  const names = (schedules.data?.schedules ?? []).map((s) => s.name);
+  const runs = useQueries({
+    queries: names.map((name) => ({
+      ...listRunsOptions({ path: { schedule: name }, query: { state: 'failed', limit: RUN_LIMIT } }),
+      refetchInterval: 15_000,
+    })),
+  });
+  const groups: RunGroup[] = runs
+    .flatMap((r, i) => {
+      const byError = new Map<string, RunGroup>();
+      for (const run of r.data?.runs ?? []) {
+        const error = run.last_error ?? '';
+        const g = byError.get(error);
+        if (g) g.count++;
+        // Newest first, so the first run of each error is its latest.
+        else byError.set(error, { schedule: names[i], error, count: 1, more: false, latest: run });
+      }
+      if (r.data?.next_cursor) byError.forEach((g) => (g.more = true));
+      return [...byError.values()];
+    })
+    .sort((a, b) => b.count - a.count || lastFailed(b) - lastFailed(a));
+  const list = usePage(groups);
+  const error = schedules.error ?? runs.find((r) => r.error)?.error;
+
+  return (
+    <Section title="Schedules">
+      {error ? (
+        <ErrorText error={error} />
+      ) : schedules.isPending || runs.some((r) => r.isPending) ? (
+        <Muted>Loading…</Muted>
+      ) : groups.length === 0 ? (
+        <Muted>No failed schedule runs.</Muted>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Schedule</TableHead>
+                <TableHead className="text-right">Runs</TableHead>
+                <TableHead className="w-full">Error</TableHead>
+                <TableHead>Latest run</TableHead>
+                <TableHead>Last failed</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {list.items.map((g) => (
+                <TableRow key={`${g.schedule}\n${g.error}`}>
+                  <TableCell className="font-medium">
+                    <Link to={`/schedules/${encodeURIComponent(g.schedule)}`}>{g.schedule}</Link>
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-xs">
+                    <Link
+                      to={`/schedules/${encodeURIComponent(g.schedule)}?state=failed`}
+                      className="text-destructive hover:underline"
+                      title="Show the failed runs"
+                    >
+                      {formatCount(g.count)}
+                      {g.more && '+'}
+                    </Link>
+                  </TableCell>
+                  <TableCell className="max-w-0 min-w-48 truncate" title={g.error}>
+                    {g.error || <span className="text-faint">No error recorded</span>}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs whitespace-nowrap text-muted-foreground">
+                    <Link
+                      to={`/runs/${g.latest.id}`}
+                      state={from}
+                      title={g.latest.id}
+                      className="hover:text-foreground hover:underline"
+                    >
+                      {shortId(g.latest.id)}
+                    </Link>
+                  </TableCell>
+                  <TableCell className="text-xs whitespace-nowrap text-muted-foreground">
+                    <RelativeTime iso={g.latest.finished_at ?? g.latest.updated_at} />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <ListPager list={list} noun="errors" />
+        </div>
+      )}
+    </Section>
+  );
+}
+
+const lastFailed = (g: RunGroup) => Date.parse(g.latest.finished_at ?? g.latest.updated_at);
 
 /** Where failures are announced, or a nudge to set that up. */
 function AlertsLink() {
@@ -112,7 +229,7 @@ function GroupRow({ group: g }: { group: Group }) {
       <TableCell className="max-w-72 truncate" title={g.error}>
         {g.error || <span className="text-faint">No error recorded</span>}
       </TableCell>
-      <TableCell className="max-w-0 truncate font-mono text-xs text-muted-foreground">
+      <TableCell className="max-w-0 min-w-48 truncate font-mono text-xs text-muted-foreground">
         <Link
           to={`/tasks/${g.latest_task_id}`}
           state={from}
