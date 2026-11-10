@@ -142,6 +142,10 @@ just release-snapshot  # build release binaries and PyPI wheels locally
 
 See [AGENTS.md](AGENTS.md) for repo conventions.
 
+## Contributing
+
+Issues and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Commits need a DCO sign-off (`git commit -s`). Report security problems privately, as in [SECURITY.md](SECURITY.md).
+
 ## License
 
 Workly, its dashboard and its SDKs are licensed under the [Apache License 2.0](LICENSE).

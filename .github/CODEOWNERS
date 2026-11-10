@@ -1,0 +1,3 @@
+# Every pull request needs the maintainer's approval (branch protection
+# requires a code owner's review on main).
+* @bjornstromeqt

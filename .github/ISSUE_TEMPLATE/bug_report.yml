@@ -1,0 +1,68 @@
+name: Bug report
+description: Something in Workly doesn't work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Security problems go through [private reporting](https://github.com/worklydev/workly/security/advisories/new) instead, not here.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead. Include error messages and the attempt history (`workly tasks get <id> --json`) if it's about a delivery.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: The smallest steps that show it, ideally against `workly dev` and its `/_dev/echo` target.
+      placeholder: |
+        1. workly dev
+        2. curl -X POST localhost:7337/v1/queues/demo/tasks -d '...'
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The output of `workly version`, or the SDK version.
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Where
+      multiple: true
+      options:
+        - Server or dispatcher
+        - Schedules
+        - Dashboard
+        - CLI
+        - MCP
+        - Python SDK
+        - TypeScript SDK
+        - Docs
+        - Docker image or Kubernetes manifests
+    validations:
+      required: true
+  - type: dropdown
+    id: setup
+    attributes:
+      label: How you run it
+      options:
+        - workly dev (SQLite)
+        - workly serve with SQLite
+        - workly serve with Postgres
+        - Hosted (workly.run)
+        - Doesn't apply
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Server output around the problem, if any. Leave out secrets and API keys.
+      render: text

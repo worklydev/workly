@@ -1,0 +1,32 @@
+name: Feature request
+description: Suggest something Workly should do.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Workly is an HTTP task queue and scheduler, not a workflow engine: no DAGs, workflow DSLs, chains or nested groups, and it never runs your code. Requests in that direction will most likely be declined.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you're trying to do, and where Workly gets in the way today. Start with the problem rather than a solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you'd like
+      description: "How it could work: an API change, a setting, a dashboard view. Rough is fine."
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do now
+      description: Workarounds you use, or how other tools solve it.
+  - type: dropdown
+    id: contribute
+    attributes:
+      label: Would you like to build it?
+      options:
+        - "No"
+        - Yes, once we've agreed on the shape
