@@ -78,9 +78,19 @@ func TestRateLimit(t *testing.T) {
 		if span < 950*time.Millisecond || span > 5*time.Second {
 			t.Fatalf("11 deliveries at 10/s took %v, want ~1s", span)
 		}
-		for i := 1; i < len(arrivals); i++ {
-			if gap := arrivals[i].Sub(arrivals[i-1]); gap < 50*time.Millisecond {
-				t.Fatalf("deliveries %d and %d were %v apart, want ~100ms", i-1, i, gap)
+		// Tokens are taken 100ms apart, but arrivals here also carry the
+		// claim, goroutine start and HTTP round trip, which vary by tens of
+		// milliseconds under -race on a busy runner: one slow delivery
+		// followed by a fast one can arrive 20ms apart. So allow that jitter
+		// once per window rather than once per gap; a limiter letting
+		// several deliveries through together still fails.
+		const jitter = 150 * time.Millisecond
+		for i := range arrivals {
+			for j := i + 1; j < len(arrivals); j++ {
+				want := time.Duration(j-i)*100*time.Millisecond - jitter
+				if span := arrivals[j].Sub(arrivals[i]); span < want {
+					t.Fatalf("deliveries %d to %d took %v, want at least %v", i, j, span, want)
+				}
 			}
 		}
 	})
