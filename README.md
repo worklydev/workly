@@ -1,5 +1,10 @@
 # Workly
 
+[![Release](https://img.shields.io/github/v/release/worklydev/workly?label=release)](https://github.com/worklydev/workly/releases/latest)
+[![PyPI](https://img.shields.io/pypi/v/workly?label=PyPI&logo=pypi&logoColor=white)](https://pypi.org/project/workly/)
+[![npm](https://img.shields.io/npm/v/%40worklydev%2Fsdk?label=npm&logo=npm)](https://www.npmjs.com/package/@worklydev/sdk)
+[![Docker image](https://img.shields.io/badge/image-ghcr.io%2Fworklydev%2Fworkly-blue?logo=docker&logoColor=white)](https://github.com/worklydev/workly/pkgs/container/workly)
+[![Docs](https://img.shields.io/badge/docs-workly.run-orange)](https://workly.run/docs/)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 **The open-source Cloud Tasks.** A simple, reliable HTTP task queue and scheduler you can run locally, deploy as a pod in your cluster, or use as a managed service at [workly.run](https://workly.run).
