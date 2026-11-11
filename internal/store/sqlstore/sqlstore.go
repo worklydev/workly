@@ -341,11 +341,24 @@ func (s *Store) listQueues(ctx context.Context, query string, args ...any) ([]st
 func (s *Store) DeleteQueue(ctx context.Context, ws workspace.ID, name string) error {
 	var callbacks bool
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
+		// Locked, so no task joins the queue (an insert's foreign key check
+		// waits) between counting its grouped tasks and deleting it.
+		var found int
+		err := s.queryRow(ctx, tx, `SELECT 1 FROM queues WHERE workspace_id = ? AND name = ?`+s.forUpdate(),
+			ws, name).Scan(&found)
+		if errors.Is(err, sql.ErrNoRows) {
+			return store.ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
 		// The queue's tasks leave their groups, which may complete without
-		// them.
-		rows, err := s.query(ctx, tx, `SELECT group_id, state, count(*) FROM tasks
+		// them. Deleting them reports the state each one was in, even if an
+		// attempt finished or it was cancelled a moment ago; counting first
+		// and deleting after would not.
+		rows, err := s.query(ctx, tx, `DELETE FROM tasks
 			WHERE workspace_id = ? AND queue = ? AND group_id IS NOT NULL
-			GROUP BY group_id, state`, ws, name)
+			RETURNING group_id, state`, ws, name)
 		if err != nil {
 			return err
 		}
@@ -354,25 +367,22 @@ func (s *Store) DeleteQueue(ctx context.Context, ws workspace.ID, name string) e
 			var (
 				groupID string
 				state   store.TaskState
-				n       int
 			)
-			if err := rows.Scan(&groupID, &state, &n); err != nil {
+			if err := rows.Scan(&groupID, &state); err != nil {
 				rows.Close()
 				return err
 			}
-			counts.remove(groupID, state, n)
+			counts.remove(groupID, state, 1)
 		}
 		if err := rows.Close(); err != nil {
 			return err
 		}
-		res, err := s.exec(ctx, tx, `DELETE FROM queues WHERE workspace_id = ? AND name = ?`, ws, name)
-		if err != nil {
+		if err := rows.Err(); err != nil {
 			return err
 		}
-		if n, err := res.RowsAffected(); err != nil {
+		// The rest of its tasks go by cascade.
+		if _, err := s.exec(ctx, tx, `DELETE FROM queues WHERE workspace_id = ? AND name = ?`, ws, name); err != nil {
 			return err
-		} else if n == 0 {
-			return store.ErrNotFound
 		}
 		callbacks, err = s.applyGroupCounts(ctx, tx, counts)
 		return err
