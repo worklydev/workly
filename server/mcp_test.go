@@ -240,6 +240,82 @@ func TestMCPAPIKey(t *testing.T) {
 	}
 }
 
+// TestMCPModeFor: per-request modes narrow the server's, never widen it.
+func TestMCPModeFor(t *testing.T) {
+	readOnlyKey := func(r *http.Request) server.MCPMode {
+		if r.Header.Get("Authorization") == "Bearer read" {
+			return server.MCPReadOnly
+		}
+		return server.MCPFull
+	}
+	for _, tc := range []struct {
+		name      string
+		mode      server.MCPMode
+		auth      string
+		wantWrite bool
+		reason    string
+	}{
+		{"full server, full credentials", server.MCPFull, "Bearer write", true, ""},
+		{"full server, read credentials", server.MCPFull, "Bearer read", false, "credentials only allow reading"},
+		{"read-only server, full credentials", server.MCPReadOnly, "Bearer write", false, "WORKLY_MCP=read-only"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newServer(t, server.Options{DisableDispatcher: true, MCP: tc.mode, MCPModeFor: readOnlyKey}).Handler()
+			c := mcpClient{t: t, h: h, auth: tc.auth}
+			if got := slices.Contains(c.toolNames(), "enqueue_task"); got != tc.wantWrite {
+				t.Errorf("enqueue_task listed = %v, want %v", got, tc.wantWrite)
+			}
+			res := c.rpc("tools/call", map[string]any{"name": "enqueue_task", "arguments": map[string]any{"queue": "q", "url": "http://x.test"}})
+			if tc.wantWrite {
+				if res.Error != nil {
+					t.Errorf("enqueue_task = %+v", res.Error)
+				}
+				return
+			}
+			if res.Error == nil || !strings.Contains(res.Error.Message, tc.reason) {
+				t.Errorf("enqueue_task = %+v, want an error saying %q", res.Error, tc.reason)
+			}
+			var init struct {
+				Instructions string `json:"instructions"`
+			}
+			_ = json.Unmarshal(c.rpc("initialize", map[string]any{"protocolVersion": "2025-11-25"}).Result, &init)
+			if !strings.Contains(init.Instructions, "read-only") {
+				t.Errorf("instructions don't say read-only: %s", init.Instructions)
+			}
+		})
+	}
+}
+
+func TestMCPResourceMetadata(t *testing.T) {
+	const meta = "https://api.example.com/.well-known/oauth-protected-resource"
+	for _, tc := range []struct {
+		name, metadata, path, want string
+	}{
+		{"configured", meta, "/mcp", `Bearer resource_metadata="` + meta + `"`},
+		{"not configured", "", "/mcp", ""},
+		{"only on /mcp", meta, "/v1/queues", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newServer(t, server.Options{
+				DisableDispatcher: true, WorkspaceResolver: server.StaticResolver("secret"), MCPResourceMetadata: tc.metadata,
+			}).Handler()
+			method := "GET"
+			if tc.path == "/mcp" {
+				method = "POST"
+			}
+			req := httptest.NewRequest(method, tc.path, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != 401 {
+				t.Fatalf("status = %d, want 401", rec.Code)
+			}
+			if got := rec.Header().Get("WWW-Authenticate"); got != tc.want {
+				t.Errorf("WWW-Authenticate = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestMCPTools(t *testing.T) {
 	h := newServer(t, server.Options{DisableDispatcher: true, MCP: server.MCPFull}).Handler()
 	c := mcpClient{t: t, h: h}

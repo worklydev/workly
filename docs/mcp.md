@@ -18,7 +18,7 @@ There is nothing to install: the endpoint is part of the server, so its tools al
 claude mcp add --transport http workly http://localhost:7337/mcp
 ```
 
-On [workly.run](https://workly.run), the endpoint is `https://api.workly.run/mcp`. Create an API key in the console (**API keys**) and send it as a bearer token; the agent sees that key's workspace:
+On [workly.run](https://workly.run), the endpoint is `https://api.workly.run/mcp`. Clients that support MCP's OAuth sign-in (Claude, ChatGPT, Cursor, VS Code, Claude Code) need only the URL: they open the console, you sign in, pick a workspace and choose read-only or read and write. Or create an API key in the console (**API keys**) and send it as a bearer token; the agent sees that key's workspace:
 
 ```sh
 claude mcp add --transport http workly-prod https://api.workly.run/mcp \
@@ -89,7 +89,7 @@ bearer_token_env_var = "WORKLY_PROD_API_KEY"
 | `full` | Read and write tools | `workly dev` |
 | `off` | None: `/mcp` answers 404 | |
 
-So pointing an agent at production can't enqueue, retry or cancel anything unless whoever runs the server opts in with `WORKLY_MCP=full`. workly.run serves the full tools. The endpoint takes the same credentials as `/v1`: with `WORKLY_API_KEY` set, an agent needs the key. Anyone with the key can already do everything through the API, so `read-only` is a guard against an agent's mistakes, not an access control.
+So pointing an agent at production can't enqueue, retry or cancel anything unless whoever runs the server opts in with `WORKLY_MCP=full`. workly.run serves the full tools to API keys, and to OAuth connections given read and write access; a connection given read-only access gets the read tools. The endpoint takes the same credentials as `/v1`: with `WORKLY_API_KEY` set, an agent needs the key. Anyone with the key can already do everything through the API, so `read-only` is a guard against an agent's mistakes, not an access control.
 
 ## Tools
 
