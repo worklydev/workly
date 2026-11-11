@@ -434,16 +434,18 @@ func cappedCount(cond string) string {
 		cond, store.StatsCountLimit)
 }
 
-var queueStatsQuery = `SELECT q.workspace_id, q.name, q.paused, ` +
-	cappedCount(`t.state = 'pending' AND t.run_at <= ?`) + `, ` +
-	cappedCount(`t.state = 'pending' AND t.run_at > ?`) + `, ` +
-	cappedCount(`t.state = 'running'`) + `, ` +
-	// A failed task always has finished_at; saying so lets the count use
-	// tasks_queue_finished.
-	cappedCount(`t.state = 'failed' AND t.finished_at IS NOT NULL`) + `,
-	(SELECT min(t.run_at) FROM tasks t WHERE t.workspace_id = q.workspace_id AND t.queue = q.name
-		AND t.state = 'pending' AND t.run_at <= ?)
-	FROM queues q`
+func queueStatsQuery() string {
+	return `SELECT q.workspace_id, q.name, q.paused, ` +
+		cappedCount(`t.state = 'pending' AND t.run_at <= ?`) + `, ` +
+		cappedCount(`t.state = 'pending' AND t.run_at > ?`) + `, ` +
+		cappedCount(`t.state = 'running'`) + `, ` +
+		// A failed task always has finished_at; saying so lets the count use
+		// tasks_queue_finished.
+		cappedCount(`t.state = 'failed' AND t.finished_at IS NOT NULL`) + `,
+		(SELECT min(t.run_at) FROM tasks t WHERE t.workspace_id = q.workspace_id AND t.queue = q.name
+			AND t.state = 'pending' AND t.run_at <= ?)
+		FROM queues q`
+}
 
 func (s *Store) QueueStats(ctx context.Context, ws workspace.ID, name string, now time.Time) (map[string]store.QueueStats, error) {
 	where, args := ` WHERE q.workspace_id = ?`, []any{ws}
@@ -468,7 +470,7 @@ func (s *Store) AllQueueStats(ctx context.Context, now time.Time) ([]store.Queue
 
 func (s *Store) queueStats(ctx context.Context, now time.Time, where string, args ...any) ([]store.QueueStatus, error) {
 	n := s.ts(now)
-	rows, err := s.query(ctx, s.db, queueStatsQuery+where, append([]any{n, n, n}, args...)...)
+	rows, err := s.query(ctx, s.db, queueStatsQuery()+where, append([]any{n, n, n}, args...)...)
 	if err != nil {
 		return nil, err
 	}

@@ -2,7 +2,6 @@ package storetest
 
 import (
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -73,14 +72,17 @@ func testQueueStats(t *testing.T, open func() store.Store) {
 
 func testQueueStatsCap(t *testing.T, open func() store.Store) {
 	s := seeded(t, open)
+	// Lowered: every statement is slow on SQLite under the race detector.
+	limit := store.StatsCountLimit
+	store.StatsCountLimit = 20
+	t.Cleanup(func() { store.StatsCountLimit = limit })
+
 	nts := make([]store.NewTask, store.StatsCountLimit+5)
 	for i := range nts {
 		nts[i] = store.NewTask{Queue: "big", Method: "POST", URL: "http://example.test", RunAt: now()}
 	}
-	for chunk := range slices.Chunk(nts, 1000) {
-		if _, _, err := s.CreateTasks(t.Context(), workspace.Default, chunk, true); err != nil {
-			t.Fatalf("CreateTasks: %v", err)
-		}
+	if _, _, err := s.CreateTasks(t.Context(), workspace.Default, nts, true); err != nil {
+		t.Fatalf("CreateTasks: %v", err)
 	}
 	stats, err := s.QueueStats(t.Context(), workspace.Default, "big", now().Add(time.Second))
 	if err != nil || stats["big"].Due != store.StatsCountLimit {
