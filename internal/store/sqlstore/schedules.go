@@ -148,14 +148,17 @@ func (s *Store) listSchedules(ctx context.Context, q querier, query string, args
 // lastRuns returns the latest run of the named schedule, or of every
 // schedule in the workspace if name is empty, keyed by schedule.
 func (s *Store) lastRuns(ctx context.Context, ws workspace.ID, name string) (map[string]*store.RunSummary, error) {
+	// From the schedules, one index lookup each for its latest run, rather
+	// than from every run in the workspace.
 	query := `SELECT r.schedule, r.id, r.state, r.trigger_type, r.scheduled_for, r.finished_at,
 			r.last_status, r.last_error
-		FROM runs r
-		WHERE r.workspace_id = ? AND r.id = (SELECT max(l.id) FROM runs l
-			WHERE l.workspace_id = r.workspace_id AND l.schedule = r.schedule)`
+		FROM schedules sc
+			JOIN runs r ON r.id = (SELECT max(l.id) FROM runs l
+				WHERE l.workspace_id = sc.workspace_id AND l.schedule = sc.name)
+		WHERE sc.workspace_id = ?`
 	args := []any{ws}
 	if name != "" {
-		query += ` AND r.schedule = ?`
+		query += ` AND sc.name = ?`
 		args = append(args, name)
 	}
 	rows, err := s.query(ctx, s.db, query, args...)
@@ -372,38 +375,7 @@ func (s *Store) listRuns(ctx context.Context, q querier, query string, args ...a
 }
 
 func (s *Store) ListRunAttempts(ctx context.Context, ws workspace.ID, runID string) ([]store.Attempt, error) {
-	rows, err := s.query(ctx, s.db, `SELECT id, run_id, number, started_at, finished_at,
-			status_code, outcome, error, response_body, response_headers, retried_at
-		FROM run_attempts WHERE workspace_id = ? AND run_id = ? ORDER BY number`, ws, runID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	attempts := []store.Attempt{}
-	for rows.Next() {
-		var (
-			a                          store.Attempt
-			started, finished, retried dbTime
-			status                     sql.NullInt64
-			errText, body              sql.NullString
-			headers                    []byte
-		)
-		if err := rows.Scan(&a.ID, &a.RunID, &a.Number, &started, &finished,
-			&status, &a.Outcome, &errText, &body, &headers, &retried); err != nil {
-			return nil, err
-		}
-		a.StartedAt, a.FinishedAt, a.RetriedAt = started.Time, finished.Time, retried.ptr()
-		if status.Valid {
-			n := int(status.Int64)
-			a.StatusCode = &n
-		}
-		a.Error, a.ResponseBody = errText.String, body.String
-		if a.ResponseHeaders, err = unmarshalHeaders(headers); err != nil {
-			return nil, err
-		}
-		attempts = append(attempts, a)
-	}
-	return attempts, rows.Err()
+	return s.listAttempts(ctx, "run_attempts", "run_id", ws, runID, func(a *store.Attempt) *string { return &a.RunID })
 }
 
 func (s *Store) CancelRun(ctx context.Context, ws workspace.ID, id string) (store.Run, error) {

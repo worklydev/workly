@@ -8,11 +8,13 @@
 package sqlstore
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -36,9 +38,15 @@ type Options struct {
 type Store struct {
 	db   *sql.DB
 	opts Options
+	// insertTask is the enqueue statement, built once.
+	insertTask string
 }
 
-func New(db *sql.DB, opts Options) *Store { return &Store{db: db, opts: opts} }
+func New(db *sql.DB, opts Options) *Store {
+	s := &Store{db: db, opts: opts}
+	s.insertTask = s.insertTaskQuery()
+	return s
+}
 
 // rebind converts ? placeholders to $1, $2, … for Postgres. Queries in this
 // package never contain a literal ?.
@@ -430,7 +438,9 @@ var queueStatsQuery = `SELECT q.workspace_id, q.name, q.paused, ` +
 	cappedCount(`t.state = 'pending' AND t.run_at <= ?`) + `, ` +
 	cappedCount(`t.state = 'pending' AND t.run_at > ?`) + `, ` +
 	cappedCount(`t.state = 'running'`) + `, ` +
-	cappedCount(`t.state = 'failed'`) + `,
+	// A failed task always has finished_at; saying so lets the count use
+	// tasks_queue_finished.
+	cappedCount(`t.state = 'failed' AND t.finished_at IS NOT NULL`) + `,
 	(SELECT min(t.run_at) FROM tasks t WHERE t.workspace_id = q.workspace_id AND t.queue = q.name
 		AND t.state = 'pending' AND t.run_at <= ?)
 	FROM queues q`
@@ -699,22 +709,11 @@ func (s *Store) CreateTasks(ctx context.Context, ws workspace.ID, nts []store.Ne
 	tasks := make([]store.Task, len(nts))
 	created := make([]bool, len(nts))
 	anyCreated := false
-	err := s.inTx(ctx, func(tx *sql.Tx) error {
-		queues := map[string]bool{}
+	create := func(q querier) error {
 		joined := map[string]int{}
 		for i, nt := range nts {
-			if !queues[nt.Queue] {
-				if autoCreateQueue {
-					if err := s.upsertQueue(ctx, tx, ws, nt.Queue, store.DefaultQueueConfig(), false); err != nil {
-						return err
-					}
-				} else if _, err := s.getQueue(ctx, tx, ws, nt.Queue); err != nil {
-					return err
-				}
-				queues[nt.Queue] = true
-			}
 			var err error
-			if tasks[i], created[i], err = s.createTask(ctx, tx, ws, nt); err != nil {
+			if tasks[i], created[i], err = s.createTask(ctx, q, ws, nt, autoCreateQueue); err != nil {
 				return err
 			}
 			anyCreated = anyCreated || created[i]
@@ -722,11 +721,22 @@ func (s *Store) CreateTasks(ctx context.Context, ws workspace.ID, nts []store.Ne
 				joined[nt.GroupID]++
 			}
 		}
+		if len(joined) == 0 {
+			return nil
+		}
 		// In the same transaction as the inserts, so a group can't close
 		// (and complete) between the check that it is open and its new
 		// tasks being counted.
-		return s.joinGroups(ctx, tx, ws, joined)
-	})
+		return s.joinGroups(ctx, q, ws, joined)
+	}
+	var err error
+	if len(nts) == 1 && nts[0].GroupID == "" {
+		// The common enqueue is one statement, so it needs no transaction
+		// around it: that saves two round trips out of three.
+		err = create(s.db)
+	} else {
+		err = s.inTx(ctx, func(tx *sql.Tx) error { return create(tx) })
+	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -736,9 +746,24 @@ func (s *Store) CreateTasks(ctx context.Context, ws workspace.ID, nts []store.Ne
 	return tasks, created, nil
 }
 
-// createTask inserts a task into an existing queue, or returns the task with
-// the same idempotency key.
-func (s *Store) createTask(ctx context.Context, tx *sql.Tx, ws workspace.ID, nt store.NewTask) (store.Task, bool, error) {
+// insertTaskQuery inserts a task if its queue exists and its idempotency key is
+// free, and returns it. Otherwise it inserts and returns nothing.
+func (s *Store) insertTaskQuery() string {
+	return `INSERT INTO tasks (id, workspace_id, queue, state, method, url,
+			headers, body, run_at, max_attempts, timeout_ms, idempotency_key, trace_context,
+			created_at, updated_at, group_id)
+		SELECT * FROM (VALUES ` + s.values("text", "text", "text", "text", "text", "text",
+		"json", "bytes", "ts", "int", "int", "text", "text", "ts", "ts", "text") + `) AS v
+		WHERE EXISTS (SELECT 1 FROM queues q WHERE q.workspace_id = ? AND q.name = ?)
+		ON CONFLICT (workspace_id, queue, idempotency_key) WHERE idempotency_key IS NOT NULL
+		DO NOTHING
+		RETURNING ` + taskColumns
+}
+
+// createTask inserts a task, or returns the task with the same idempotency
+// key. A missing queue is created if autoCreateQueue is set, and is
+// ErrNotFound otherwise.
+func (s *Store) createTask(ctx context.Context, q querier, ws workspace.ID, nt store.NewTask, autoCreateQueue bool) (store.Task, bool, error) {
 	headers, err := marshalHeaders(nt.Headers)
 	if err != nil {
 		return store.Task{}, false, err
@@ -747,31 +772,39 @@ func (s *Store) createTask(ctx context.Context, tx *sql.Tx, ws workspace.ID, nt 
 		nt.Body = []byte{}
 	}
 	now := s.ts(time.Now())
-	taskID := id.New("task")
-	res, err := s.exec(ctx, tx, `INSERT INTO tasks (id, workspace_id, queue, state, method, url,
-			headers, body, run_at, max_attempts, timeout_ms, idempotency_key, trace_context,
-			created_at, updated_at, group_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT (workspace_id, queue, idempotency_key) WHERE idempotency_key IS NOT NULL
-		DO NOTHING`,
-		taskID, ws, nt.Queue, store.TaskPending, nt.Method, nt.URL, headers, nt.Body,
+	args := []any{id.New("task"), ws, nt.Queue, store.TaskPending, nt.Method, nt.URL, headers, nt.Body,
 		s.ts(nt.RunAt), nullInt(nt.MaxAttempts), nullMillis(nt.Timeout),
-		nullString(nt.IdempotencyKey), nullString(nt.TraceContext), now, now, nullString(nt.GroupID))
-	if err != nil {
-		return store.Task{}, false, err
+		nullString(nt.IdempotencyKey), nullString(nt.TraceContext), now, now, nullString(nt.GroupID),
+		ws, nt.Queue}
+	for createdQueue := false; ; createdQueue = true {
+		t, err := scanTask(s.queryRow(ctx, q, s.insertTask, args...))
+		if err == nil {
+			return t, true, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return store.Task{}, false, err
+		}
+		// Nothing was inserted: the idempotency key is taken, or there is no
+		// such queue. Queues almost always exist, so the insert checks
+		// rather than every enqueue making sure first.
+		if nt.IdempotencyKey != "" {
+			t, err := scanTask(s.queryRow(ctx, q, `SELECT `+taskColumns+` FROM tasks
+				WHERE workspace_id = ? AND queue = ? AND idempotency_key = ?`,
+				ws, nt.Queue, nt.IdempotencyKey))
+			if err == nil {
+				return t, false, nil
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return store.Task{}, false, err
+			}
+		}
+		if !autoCreateQueue || createdQueue {
+			return store.Task{}, false, store.ErrNotFound
+		}
+		if err := s.upsertQueue(ctx, q, ws, nt.Queue, store.DefaultQueueConfig(), false); err != nil {
+			return store.Task{}, false, err
+		}
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return store.Task{}, false, err
-	}
-	if n == 0 {
-		t, err := scanTask(s.queryRow(ctx, tx, `SELECT `+taskColumns+` FROM tasks
-			WHERE workspace_id = ? AND queue = ? AND idempotency_key = ?`,
-			ws, nt.Queue, nt.IdempotencyKey))
-		return t, false, err
-	}
-	t, err := s.getTask(ctx, tx, ws, taskID)
-	return t, true, err
 }
 
 func (s *Store) GetTask(ctx context.Context, ws workspace.ID, id string) (store.Task, error) {
@@ -864,9 +897,16 @@ func (s *Store) listTasks(ctx context.Context, q querier, query string, args ...
 // Attempts
 
 func (s *Store) ListAttempts(ctx context.Context, ws workspace.ID, taskID string) ([]store.Attempt, error) {
-	rows, err := s.query(ctx, s.db, `SELECT id, task_id, number, started_at, finished_at,
+	return s.listAttempts(ctx, "attempts", "task_id", ws, taskID, func(a *store.Attempt) *string { return &a.TaskID })
+}
+
+// listAttempts lists the attempts of a task (table attempts) or a run
+// (run_attempts), oldest first. owner picks the field its ID goes in.
+func (s *Store) listAttempts(ctx context.Context, table, ownerColumn string, ws workspace.ID, ownerID string,
+	owner func(*store.Attempt) *string) ([]store.Attempt, error) {
+	rows, err := s.query(ctx, s.db, `SELECT id, `+ownerColumn+`, number, started_at, finished_at,
 			status_code, outcome, error, response_body, response_headers, retried_at
-		FROM attempts WHERE workspace_id = ? AND task_id = ? ORDER BY number`, ws, taskID)
+		FROM `+table+` WHERE workspace_id = ? AND `+ownerColumn+` = ? ORDER BY number`, ws, ownerID)
 	if err != nil {
 		return nil, err
 	}
@@ -880,7 +920,7 @@ func (s *Store) ListAttempts(ctx context.Context, ws workspace.ID, taskID string
 			errText, body              sql.NullString
 			headers                    []byte
 		)
-		if err := rows.Scan(&a.ID, &a.TaskID, &a.Number, &started, &finished,
+		if err := rows.Scan(&a.ID, owner(&a), &a.Number, &started, &finished,
 			&status, &a.Outcome, &errText, &body, &headers, &retried); err != nil {
 			return nil, err
 		}
@@ -1001,7 +1041,7 @@ func (s *Store) RetryFailedTasks(ctx context.Context, ws workspace.ID, queue, la
 		query := `UPDATE tasks SET
 				replayed_attempts = attempt_count, state = 'pending', run_at = ?,
 				finished_at = NULL, updated_at = ?, retried_at = ?
-			WHERE workspace_id = ? AND queue = ? AND state = 'failed'`
+			WHERE workspace_id = ? AND queue = ? AND state = 'failed' AND finished_at IS NOT NULL`
 		args := []any{now, now, now, ws, queue}
 		if lastError != "" {
 			query += ` AND last_error = ?`
@@ -1046,55 +1086,41 @@ func (s *Store) NextRunAt(ctx context.Context, after time.Time) (time.Time, bool
 }
 
 func (s *Store) ClaimTasks(ctx context.Context, q store.Queue, limit int, now time.Time, grace time.Duration) ([]store.Task, error) {
-	// The queue may have been paused since DueQueues listed it; a pause
-	// stops deliveries from starting as soon as it returns.
-	query := `SELECT ` + taskColumns + ` FROM tasks
-		WHERE workspace_id = ? AND queue = ? AND state = 'pending' AND run_at <= ?
-			AND EXISTS (SELECT 1 FROM queues q
-				WHERE q.workspace_id = tasks.workspace_id AND q.name = tasks.queue AND NOT q.paused)
-		ORDER BY run_at LIMIT ?`
+	// One statement, since the claim loop is serial and round trips bound
+	// dispatch throughput. The queue may have been paused since DueQueues
+	// listed it; a pause stops deliveries from starting as soon as it
+	// returns.
+	query := `WITH due AS (
+			SELECT id FROM tasks
+			WHERE workspace_id = ? AND queue = ? AND state = 'pending' AND run_at <= ?
+				AND EXISTS (SELECT 1 FROM queues q
+					WHERE q.workspace_id = tasks.workspace_id AND q.name = tasks.queue AND NOT q.paused)
+			ORDER BY run_at LIMIT ?`
 	if s.opts.Postgres {
 		// Redundant with a single leader, but keeps a stale leader that
 		// hasn't noticed it lost its lock from double-claiming.
 		query += ` FOR UPDATE SKIP LOCKED`
 	}
-	var tasks []store.Task
-	err := s.inTx(ctx, func(tx *sql.Tx) error {
-		var err error
-		tasks, err = s.listTasks(ctx, tx, query, q.WorkspaceID, q.Name, s.ts(now), limit)
-		if err != nil {
-			return err
-		}
-		// One statement per distinct lease (usually one: tasks rarely
-		// override the queue's timeout), since the claim loop is serial and
-		// round trips bound dispatch throughput.
-		byLease := map[time.Time][]int{}
-		for i, t := range tasks {
-			lease := now.Add(t.EffectiveTimeout(q.QueueConfig) + grace).UTC()
-			byLease[lease] = append(byLease[lease], i)
-		}
-		for lease, idx := range byLease {
-			args := []any{s.ts(lease), s.ts(now)}
-			for _, i := range idx {
-				args = append(args, tasks[i].ID)
-			}
-			if _, err := s.exec(ctx, tx, `UPDATE tasks
-				SET state = 'running', attempt_count = attempt_count + 1,
-					lease_expires_at = ?, updated_at = ?
-				WHERE id IN (?`+strings.Repeat(", ?", len(idx)-1)+`)`, args...); err != nil {
-				return err
-			}
-			for _, i := range idx {
-				t := &tasks[i]
-				t.State = store.TaskRunning
-				t.AttemptCount++
-				t.LeaseExpiresAt = &lease
-				t.UpdatedAt = now.UTC()
-			}
-		}
-		return nil
+	// The lease runs for the task's timeout, or else the queue's, plus grace.
+	lease := `? + COALESCE(timeout_ms, ?) + ?`
+	if s.opts.Postgres {
+		lease = `CAST(? AS TIMESTAMPTZ) + (COALESCE(timeout_ms, ?) + ?) * interval '1 millisecond'`
+	}
+	query += `)
+		UPDATE tasks SET state = 'running', attempt_count = attempt_count + 1,
+			lease_expires_at = ` + lease + `, updated_at = ?
+		WHERE id IN (SELECT id FROM due)
+		RETURNING ` + taskColumns
+	tasks, err := s.listTasks(ctx, s.db, query, q.WorkspaceID, q.Name, s.ts(now), limit,
+		s.ts(now), q.Timeout.Milliseconds(), grace.Milliseconds(), s.ts(now))
+	if err != nil {
+		return nil, err
+	}
+	// Returned in no particular order; deliveries start oldest first.
+	slices.SortFunc(tasks, func(a, b store.Task) int {
+		return cmp.Or(a.RunAt.Compare(b.RunAt), cmp.Compare(a.ID, b.ID))
 	})
-	return tasks, err
+	return tasks, nil
 }
 
 func (s *Store) FinishAttempt(ctx context.Context, ws workspace.ID, r store.AttemptResult) (store.TaskState, error) {
@@ -1230,12 +1256,12 @@ func (s *Store) FinishAttempts(ctx context.Context, rs []store.FinishedAttempt) 
 }
 
 // values returns one row of a VALUES list: a placeholder per column, cast
-// to the column's type ("text", "int", "ts" or "json"), because Postgres
+// to the column's type ("text", "int", "ts", "json" or "bytes"), because Postgres
 // would otherwise take every parameter in a VALUES list for text.
 func (s *Store) values(kinds ...string) string {
-	types := map[string]string{"text": "TEXT", "int": "INTEGER", "ts": "INTEGER", "json": "TEXT"}
+	types := map[string]string{"text": "TEXT", "int": "INTEGER", "ts": "INTEGER", "json": "TEXT", "bytes": "BLOB"}
 	if s.opts.Postgres {
-		types["ts"], types["json"] = "TIMESTAMPTZ", "JSONB"
+		types["ts"], types["json"], types["bytes"] = "TIMESTAMPTZ", "JSONB", "BYTEA"
 	}
 	cols := make([]string, len(kinds))
 	for i, k := range kinds {

@@ -106,6 +106,55 @@ func (d *Dispatcher) reserve(q store.Queue, n int, now time.Time) (got int, wait
 	return n, 0
 }
 
+// headroom is how many deliveries the queue's limits let it start now,
+// without taking them. If that is 0 because of the rate limit, wait is how
+// long until one may start.
+func (d *Dispatcher) headroom(q store.Queue, now time.Time) (n int, wait time.Duration) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	st := d.queueState(q)
+	n = math.MaxInt
+	if q.MaxConcurrency > 0 {
+		n = q.MaxConcurrency - st.inFlight
+	}
+	if n <= 0 {
+		return 0, 0
+	}
+	if q.RatePerSecond > 0 {
+		st.bucket.refill(now)
+		if n = min(n, int(st.bucket.tokens+epsilon)); n == 0 {
+			return 0, d.refillWait(st, now)
+		}
+	}
+	return n, 0
+}
+
+// allotSlots shares free slots among queues that have room for room[i]
+// deliveries each: equal shares, and what a queue has no room for goes to
+// the others. When there are fewer slots than queues, the first ones get
+// them.
+func allotSlots(room []int, free int) []int {
+	allot := make([]int, len(room))
+	for free > 0 {
+		open := 0
+		for i, r := range room {
+			if allot[i] < r {
+				open++
+			}
+		}
+		if open == 0 {
+			break
+		}
+		share := max(1, free/open)
+		for i, r := range room {
+			k := min(share, r-allot[i], free)
+			allot[i] += k
+			free -= k
+		}
+	}
+	return allot
+}
+
 // unreserve returns slots reserved but not used: n unused tokens and slots.
 func (d *Dispatcher) unreserve(q store.Queue, n int) {
 	d.mu.Lock()

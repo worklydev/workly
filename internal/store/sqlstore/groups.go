@@ -192,11 +192,6 @@ func (s *Store) completeGroup(ctx context.Context, tx *sql.Tx, g *store.Group, n
 	if g.OnComplete == nil {
 		return false, nil
 	}
-	// The callback queue may have been deleted since the group was created;
-	// recreate it rather than drop the callback.
-	if err := s.upsertQueue(ctx, tx, g.WorkspaceID, g.OnComplete.Queue, store.DefaultQueueConfig(), false); err != nil {
-		return false, err
-	}
 	headers := map[string]string{"Content-Type": "application/json"}
 	for k, v := range g.OnComplete.Headers {
 		if strings.EqualFold(k, "Content-Type") {
@@ -205,11 +200,13 @@ func (s *Store) completeGroup(ctx context.Context, tx *sql.Tx, g *store.Group, n
 		headers[k] = v
 	}
 	// The group's ID as idempotency key is a second guard against a
-	// duplicate callback.
+	// duplicate callback. The callback queue may have been deleted since
+	// the group was created; it is recreated rather than the callback
+	// dropped.
 	cb, _, err := s.createTask(ctx, tx, g.WorkspaceID, store.NewTask{
 		Queue: g.OnComplete.Queue, Method: "POST", URL: g.OnComplete.URL, Headers: headers,
 		Body: g.CallbackBody(), RunAt: now, IdempotencyKey: g.ID,
-	})
+	}, true)
 	if err != nil {
 		return false, err
 	}
@@ -230,7 +227,7 @@ func (s *Store) DeleteFinishedGroups(ctx context.Context, before time.Time, limi
 }
 
 // joinGroups adds n new tasks to each group, which must be open.
-func (s *Store) joinGroups(ctx context.Context, tx *sql.Tx, ws workspace.ID, added map[string]int) error {
+func (s *Store) joinGroups(ctx context.Context, tx querier, ws workspace.ID, added map[string]int) error {
 	for _, groupID := range sortedKeys(added) {
 		res, err := s.exec(ctx, tx, `UPDATE task_groups SET total = total + ?
 			WHERE workspace_id = ? AND id = ? AND status = ?`, added[groupID], ws, groupID, store.GroupOpen)
