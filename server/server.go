@@ -205,6 +205,17 @@ type Options struct {
 	// adds ones that enqueue, retry, cancel and reconfigure, and MCPOff
 	// doesn't serve it. /mcp takes the same credentials as /v1.
 	MCP MCPMode
+	// MCPModeFor, if set, is asked for each /mcp request once its workspace
+	// is resolved, and can make it read-only (anything but MCPFull) when MCP
+	// is MCPFull; it can't widen MCP. For credentials that carry their own
+	// access, such as OAuth tokens granted only read access.
+	MCPModeFor func(*http.Request) MCPMode
+	// MCPResourceMetadata, if set, is the URL of /mcp's OAuth protected
+	// resource metadata (RFC 9728): a 401 on /mcp names it in its
+	// WWW-Authenticate header, so MCP clients can sign in with OAuth
+	// instead of an API key. Workly doesn't serve the metadata or issue
+	// tokens; the WorkspaceResolver accepts whatever tokens are issued.
+	MCPResourceMetadata string
 }
 
 type Server struct {
@@ -255,9 +266,11 @@ func New(opts Options) (*Server, error) {
 		Alerts:           alerts,
 		Signer: dispatch.NewSigner([]byte(opts.SigningSecret), []byte(opts.PreviousSigningSecret),
 			userAgent(opts.Version), opts.SigningSecrets),
-		MCP:     cmp.Or(opts.MCP, MCPReadOnly),
-		Version: cmp.Or(opts.Version, "dev"),
-		Live:    hub,
+		MCP:                 cmp.Or(opts.MCP, MCPReadOnly),
+		MCPModeFor:          opts.MCPModeFor,
+		MCPResourceMetadata: opts.MCPResourceMetadata,
+		Version:             cmp.Or(opts.Version, "dev"),
+		Live:                hub,
 	}
 	if opts.DevEndpoints {
 		apiOpts.DevEcho = api.DevEcho([]byte(opts.SigningSecret), opts.Logger)

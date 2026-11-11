@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -38,6 +39,12 @@ type Options struct {
 	Signer dispatch.Signer
 	// MCP sets which tools /mcp serves; mcp.Off doesn't serve it.
 	MCP mcp.Mode
+	// MCPModeFor, if set, can make an /mcp request read-only (see mcp.Options).
+	MCPModeFor func(*http.Request) mcp.Mode
+	// MCPResourceMetadata, if set, is the URL of /mcp's OAuth protected
+	// resource metadata (RFC 9728), named in the WWW-Authenticate header of
+	// its 401s so MCP clients can find where to get a token.
+	MCPResourceMetadata string
 	// Version is reported to MCP clients.
 	Version string
 	// Admission, if set, may refuse new tasks and schedules.
@@ -105,7 +112,7 @@ func NewHandler(opts Options) http.Handler {
 		writeError(w, http.StatusNotFound, "not_found", "no such endpoint: "+r.Method+" "+r.URL.Path)
 	})
 	if opts.MCP != mcp.Off {
-		mux.Handle("/mcp", mcp.NewHandler(mcp.Options{API: mux, Mode: opts.MCP, Version: opts.Version, Logger: opts.Logger}))
+		mux.Handle("/mcp", mcp.NewHandler(mcp.Options{API: mux, Mode: opts.MCP, ModeFor: opts.MCPModeFor, Version: opts.Version, Logger: opts.Logger}))
 	} else {
 		mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "not_found", "MCP is turned off on this server (WORKLY_MCP=off)")
@@ -127,7 +134,7 @@ func NewHandler(opts Options) http.Handler {
 	}
 
 	var h http.Handler = mux
-	h = resolveWorkspace(opts.Resolver, h)
+	h = resolveWorkspace(opts.Resolver, opts.MCPResourceMetadata, h)
 	h = limitBody(opts.MaxPayloadBytes+requestOverhead, h)
 	h = securityHeaders(h)
 	h = logRequests(opts.Logger, h)
@@ -164,8 +171,9 @@ func authorize(resolver workspace.Resolver, next http.Handler) http.Handler {
 // tools call /v1. Health checks and the dashboard shell are not.
 func scoped(path string) bool { return strings.HasPrefix(path, "/v1/") || path == "/mcp" }
 
-// resolveWorkspace attaches the request's workspace to its context.
-func resolveWorkspace(resolver workspace.Resolver, next http.Handler) http.Handler {
+// resolveWorkspace attaches the request's workspace to its context. A 401 on
+// /mcp names resourceMetadata, if set, for MCP clients that sign in with OAuth.
+func resolveWorkspace(resolver workspace.Resolver, resourceMetadata string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !scoped(r.URL.Path) {
 			next.ServeHTTP(w, r)
@@ -173,6 +181,9 @@ func resolveWorkspace(resolver workspace.Resolver, next http.Handler) http.Handl
 		}
 		id, err := resolver.Resolve(r)
 		if errors.Is(err, workspace.ErrUnauthorized) {
+			if resourceMetadata != "" && r.URL.Path == "/mcp" {
+				w.Header().Set("WWW-Authenticate", fmt.Sprintf("Bearer resource_metadata=%q", resourceMetadata))
+			}
 			writeError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid API key")
 			return
 		}

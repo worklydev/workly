@@ -48,8 +48,12 @@ func ParseMode(s string) (Mode, error) {
 
 type Options struct {
 	// API serves /v1 for requests already scoped to a workspace.
-	API     http.Handler
-	Mode    Mode
+	API  http.Handler
+	Mode Mode
+	// ModeFor, if set, can make a request read-only when Mode is Full, e.g.
+	// for credentials granted only read access; anything but Full is read-only.
+	// It can't widen Mode.
+	ModeFor func(*http.Request) Mode
 	Version string
 	Logger  *slog.Logger
 }
@@ -59,19 +63,43 @@ var protocolVersions = []string{"2025-11-25", "2025-06-18", "2025-03-26"}
 
 // NewHandler serves the MCP endpoint.
 func NewHandler(opts Options) http.Handler {
-	s := &server{opts: opts, api: apiClient{h: opts.API}}
-	for _, t := range allTools() {
-		if opts.Mode == Full || t.Annotations.ReadOnlyHint {
-			s.tools = append(s.tools, t)
+	s := &server{opts: opts, api: apiClient{h: opts.API}, full: allTools()}
+	for _, t := range s.full {
+		if t.Annotations.ReadOnlyHint {
+			s.readOnly = append(s.readOnly, t)
 		}
 	}
 	return s
 }
 
 type server struct {
-	opts  Options
-	api   apiClient
-	tools []*tool
+	opts     Options
+	api      apiClient
+	full     []*tool
+	readOnly []*tool
+}
+
+// mode is the request's mode: the server's, narrowed by ModeFor.
+func (s *server) mode(r *http.Request) Mode {
+	if s.opts.Mode != Full || (s.opts.ModeFor != nil && s.opts.ModeFor(r) != Full) {
+		return ReadOnly
+	}
+	return Full
+}
+
+func (s *server) tools(r *http.Request) []*tool {
+	if s.mode(r) == Full {
+		return s.full
+	}
+	return s.readOnly
+}
+
+// readOnlyReason says why tools that change data are missing.
+func (s *server) readOnlyReason() string {
+	if s.opts.Mode == Full {
+		return "this connection's credentials only allow reading"
+	}
+	return "this server is read-only (WORKLY_MCP=read-only)"
 }
 
 // JSON-RPC 2.0 error codes.
@@ -184,12 +212,12 @@ func (s *server) handle(r *http.Request, msg message) (any, error) {
 				"title":   "Workly",
 				"version": s.opts.Version,
 			},
-			"instructions": s.instructions(),
+			"instructions": s.instructions(r),
 		}, nil
 	case "ping":
 		return struct{}{}, nil
 	case "tools/list":
-		return map[string]any{"tools": s.tools}, nil
+		return map[string]any{"tools": s.tools(r)}, nil
 	case "tools/call":
 		var p struct {
 			Name      string          `json:"name"`
@@ -198,30 +226,35 @@ func (s *server) handle(r *http.Request, msg message) (any, error) {
 		if err := json.Unmarshal(msg.Params, &p); err != nil {
 			return nil, &rpcError{Code: codeInvalidParams, Message: "invalid params: " + err.Error()}
 		}
-		i := slices.IndexFunc(s.tools, func(t *tool) bool { return t.Name == p.Name })
+		tools := s.tools(r)
+		i := slices.IndexFunc(tools, func(t *tool) bool { return t.Name == p.Name })
 		if i < 0 {
 			message := "unknown tool " + p.Name
-			if s.opts.Mode != Full && slices.ContainsFunc(allTools(), func(t *tool) bool { return t.Name == p.Name }) {
-				message = p.Name + " changes data, and this server is read-only (WORKLY_MCP=read-only)"
+			if slices.ContainsFunc(s.full, func(t *tool) bool { return t.Name == p.Name }) {
+				message = p.Name + " changes data, and " + s.readOnlyReason()
 			}
 			return nil, &rpcError{Code: codeInvalidParams, Message: message}
 		}
-		return s.call(r, s.tools[i], p.Arguments), nil
+		return s.call(r, tools[i], p.Arguments), nil
 	}
 	return nil, &rpcError{Code: codeMethodNotFound, Message: "method not found: " + msg.Method}
 }
 
-func (s *server) instructions() string {
+func (s *server) instructions(r *http.Request) string {
 	b := new(strings.Builder)
 	b.WriteString(`Workly is an HTTP task queue and scheduler. A task is an HTTP request (URL, method, headers, body) in a named queue; Workly delivers it to the URL and retries with backoff until the endpoint answers 2xx or the attempts run out. Every delivery attempt is recorded with its status code, error, the start of the response body and its duration.
 
 Schedules are separate from queues: a schedule calls its URL on a cron timetable, and each call is a run, retried and recorded like a task. get_schedule shows a schedule with its recent runs; a skipped run says why it didn't go (overlap or missed); get_run shows a run's attempts.
 
 To debug failures: get_queue groups a queue's failed tasks by error, with the latest task of each group; get_task shows a task and its attempts (status codes, errors, response bodies). list_tasks with state "failed" (and last_error) lists the tasks behind a group. get_task_delivery returns the exact signed request, with a curl command to replay it against a local handler.`)
-	if s.opts.Mode == Full {
+	if s.mode(r) == Full {
 		b.WriteString(`
 
 To test a handler: enqueue_task to its URL, then wait_for_task to see how the first attempt went. After fixing a handler, retry_task delivers a task again at once (retry_failed_tasks for a whole queue, or one group of failures with last_error). For a schedule's handler, trigger_schedule runs it now and wait_for_run shows the result; update_schedule creates or changes a schedule.`)
+	} else if s.opts.Mode == Full {
+		b.WriteString(`
+
+This connection is read-only: its credentials only allow reading, so tools that enqueue, trigger, retry, cancel or reconfigure are not available. Connecting again with write access enables them.`)
 	} else {
 		b.WriteString(`
 
