@@ -188,25 +188,9 @@ func (s *scheduler) finish(run store.Run, ar store.RunAttemptResult) {
 		}
 	}
 
-	attrs := []any{
-		"run_id", run.ID,
-		"schedule", run.Schedule,
-		"attempt", ar.Number,
-		"outcome", ar.Outcome,
-		"duration_ms", ar.Duration().Milliseconds(),
-		"next", state,
-	}
-	if run.WorkspaceID != workspace.Default {
-		attrs = append(attrs, "workspace", run.WorkspaceID)
-	}
-	if ar.StatusCode != nil {
-		attrs = append(attrs, "status", *ar.StatusCode)
-	}
-	if ar.Error != "" {
-		attrs = append(attrs, "error", ar.Error)
-	}
+	attrs := attemptAttrs([]any{"run_id", run.ID, "schedule", run.Schedule}, run.WorkspaceID, ar.Attempt, string(state))
 	if state == store.RunPending {
-		attrs = append(attrs, "retry_in", max(time.Until(ar.RunAt), 0).Round(time.Millisecond).String())
+		attrs = append(attrs, "retry_in", retryIn(ar.RunAt))
 	}
 	switch {
 	case errors.Is(err, store.ErrLeaseLost):

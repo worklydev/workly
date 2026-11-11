@@ -322,7 +322,7 @@ func (d *Dispatcher) free() int {
 	return d.opts.MaxInFlight - int(d.inFlight.Load())
 }
 
-// dispatch claims due tasks, round-robin across queues and within their
+// dispatch claims due tasks, shared fairly among queues and within their
 // limits, and starts their deliveries. more reports that some queue may have
 // more due tasks it could deliver now; wait, if non-zero, is when a
 // rate-limited queue will have tokens again.
@@ -342,17 +342,32 @@ func (d *Dispatcher) dispatch(ctx, deliverCtx context.Context, wg *sync.WaitGrou
 		}
 	}
 
-	// Each queue gets an equal share of the free slots, and a different
-	// queue goes first each round, so no queue starves the others when
-	// slots are scarce.
-	share := min(max(1, free/len(queues)), claimBatch)
+	// Only queues that can start a delivery now share the free slots: one
+	// at its concurrency limit or out of rate tokens would otherwise take a
+	// share it can't use, and the rest would be claimed a task or two per
+	// round. A different queue goes first each round, so no queue starves
+	// the others when slots are scarce.
 	start := d.round % len(queues)
 	d.round++
+	var (
+		ready []store.Queue
+		room  []int
+	)
 	for i := range queues {
 		q := queues[(start+i)%len(queues)]
-		allot := min(d.free(), share)
-		if allot <= 0 {
-			return true, wait, nil
+		n, w := d.headroom(q, now)
+		if n == 0 {
+			later(w)
+			continue
+		}
+		ready, room = append(ready, q), append(room, min(n, claimBatch))
+	}
+	for i, allot := range allotSlots(room, free) {
+		q := ready[i]
+		if allot == 0 {
+			// Out of slots this round.
+			more = true
+			continue
 		}
 		n, w := d.reserve(q, allot, now)
 		if n == 0 {
@@ -369,10 +384,11 @@ func (d *Dispatcher) dispatch(ctx, deliverCtx context.Context, wg *sync.WaitGrou
 			d.opts.Changed(q.WorkspaceID)
 		}
 		if len(tasks) == n {
-			if n == allot {
+			if n < room[i] || n == claimBatch {
+				// Held back by the slots or the batch size, not by the
+				// queue's own limits.
 				more = true
 			} else {
-				// Held back by the queue's limits.
 				later(d.tokenWait(q, now))
 			}
 		}
@@ -412,25 +428,9 @@ func (d *Dispatcher) finish(q store.Queue, t store.Task, ar store.AttemptResult)
 		d.opts.Changed(t.WorkspaceID)
 	}
 
-	attrs := []any{
-		"task_id", t.ID,
-		"queue", t.Queue,
-		"attempt", ar.Number,
-		"outcome", ar.Outcome,
-		"duration_ms", ar.Duration().Milliseconds(),
-		"next", state,
-	}
-	if t.WorkspaceID != workspace.Default {
-		attrs = append(attrs, "workspace", t.WorkspaceID)
-	}
-	if ar.StatusCode != nil {
-		attrs = append(attrs, "status", *ar.StatusCode)
-	}
-	if ar.Error != "" {
-		attrs = append(attrs, "error", ar.Error)
-	}
+	attrs := attemptAttrs([]any{"task_id", t.ID, "queue", t.Queue}, t.WorkspaceID, ar.Attempt, string(state))
 	if state == store.TaskPending {
-		attrs = append(attrs, "retry_in", max(time.Until(ar.RunAt), 0).Round(time.Millisecond).String())
+		attrs = append(attrs, "retry_in", retryIn(ar.RunAt))
 	}
 
 	switch {
@@ -446,6 +446,31 @@ func (d *Dispatcher) finish(q store.Queue, t store.Task, ar store.AttemptResult)
 	default:
 		d.log.Info("task attempt", attrs...)
 	}
+}
+
+// attemptAttrs are the log attributes of an attempt of the task or run that
+// subject identifies, and what follows it.
+func attemptAttrs(subject []any, ws workspace.ID, a store.Attempt, next string) []any {
+	attrs := append(subject,
+		"attempt", a.Number,
+		"outcome", a.Outcome,
+		"duration_ms", a.Duration().Milliseconds(),
+		"next", next,
+	)
+	if ws != workspace.Default {
+		attrs = append(attrs, "workspace", ws)
+	}
+	if a.StatusCode != nil {
+		attrs = append(attrs, "status", *a.StatusCode)
+	}
+	if a.Error != "" {
+		attrs = append(attrs, "error", a.Error)
+	}
+	return attrs
+}
+
+func retryIn(at time.Time) string {
+	return max(time.Until(at), 0).Round(time.Millisecond).String()
 }
 
 // count updates the metrics for a recorded attempt.

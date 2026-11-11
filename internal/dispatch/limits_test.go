@@ -1,6 +1,7 @@
 package dispatch
 
 import (
+	"slices"
 	"testing"
 	"time"
 )
@@ -67,5 +68,28 @@ func TestBucketRate(t *testing.T) {
 	}
 	if limit := 5*60 + 1; total > limit || total < limit*95/100 {
 		t.Fatalf("took %d tokens in 60s at 5/s polling every 7ms, want at most %d and close to it", total, limit)
+	}
+}
+
+func TestAllotSlots(t *testing.T) {
+	tests := []struct {
+		name string
+		room []int
+		free int
+		want []int
+	}{
+		{"equal shares", []int{50, 50}, 40, []int{20, 20}},
+		{"unused share goes to the others", []int{1, 1, 50}, 30, []int{1, 1, 28}},
+		{"room is the limit", []int{2, 3}, 100, []int{2, 3}},
+		{"fewer slots than queues", []int{5, 5, 5}, 2, []int{1, 1, 0}},
+		{"no slots", []int{5}, 0, []int{0}},
+		{"no queues", nil, 10, []int{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := allotSlots(tt.room, tt.free); !slices.Equal(got, tt.want) {
+				t.Errorf("allotSlots(%v, %d) = %v, want %v", tt.room, tt.free, got, tt.want)
+			}
+		})
 	}
 }
