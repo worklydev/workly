@@ -341,8 +341,9 @@ type Queue struct {
 }
 
 // StatsCountLimit caps the counts in QueueStats, so that stats stay cheap
-// on queues with a large backlog.
-const StatsCountLimit = 10000
+// on queues with a large backlog. It's a variable only so that tests can
+// lower it instead of creating thousands of tasks.
+var StatsCountLimit = 10000
 
 // QueueStats describes a queue's current work. Counts stop at
 // StatsCountLimit.
