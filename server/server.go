@@ -150,6 +150,17 @@ type Options struct {
 	// called for every delivery, so it should cache. For a server shared by
 	// untrusted users, who mustn't be able to sign for each other.
 	SigningSecrets func(ctx context.Context, ws WorkspaceID) (current, previous []byte, err error)
+	// MaxInFlight caps concurrent task deliveries across all queues and
+	// workspaces. Defaults to 100.
+	MaxInFlight int
+	// WorkspaceMaxInFlight, if set, returns a workspace's own cap on
+	// concurrent task deliveries, within MaxInFlight (0 for none), so on a
+	// server shared by many workspaces one with slow endpoints can't hold
+	// every delivery slot. Each workspace's cap is looked up again a minute
+	// after the last lookup, and kept if a lookup fails. Free slots are shared
+	// equally by the workspaces with tasks due either way, however many
+	// queues each has.
+	WorkspaceMaxInFlight func(ctx context.Context, ws WorkspaceID) (int, error)
 	// DisableDispatcher runs the API only, without delivering tasks.
 	DisableDispatcher bool
 	// DisableQueueAutoCreate makes enqueueing to a missing queue an error
@@ -288,6 +299,8 @@ func New(opts Options) (*Server, error) {
 			SigningSecrets:        opts.SigningSecrets,
 			UserAgent:             userAgent(opts.Version),
 			ShutdownTimeout:       opts.ShutdownTimeout,
+			MaxInFlight:           opts.MaxInFlight,
+			WorkspaceMaxInFlight:  opts.WorkspaceMaxInFlight,
 			Retention:             opts.Retention,
 			RunRetention:          opts.RunRetention,
 			Metrics:               m,

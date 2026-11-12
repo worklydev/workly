@@ -14,6 +14,7 @@ The server is configured with environment variables. `--port` and `--database-ur
 | `WORKLY_RUN_RETENTION` | `WORKLY_RETENTION` | How long finished [schedule](schedules.md) runs are kept. Each schedule's latest run is always kept. `0` keeps them forever. |
 | `WORKLY_SHUTDOWN_TIMEOUT` | `25s` | How long in-flight requests and deliveries get to finish on shutdown. Deliveries still running after it are retried. |
 | `WORKLY_MAX_PAYLOAD_BYTES` | `1048576` | Largest task body, up to 100 MiB. |
+| `WORKLY_MAX_IN_FLIGHT` | `100` | Most task deliveries in flight at once, across all queues, up to 10,000. Throughput to slow endpoints is at most this divided by their response time; queues' `max_concurrency` limits them further. Schedule runs have their own cap of 20. |
 | `WORKLY_AUTO_CREATE_QUEUES` | `true` | Enqueueing to a missing queue creates it with defaults. With `false`, it's a `404 queue_not_found`. |
 | `WORKLY_AUTO_MIGRATE` | `true` | Apply database migrations on startup. With `false`, run `workly migrate` before starting new versions. |
 | `WORKLY_MCP` | `read-only` (`full` in `dev`) | Tools served to coding agents at `/mcp`: `read-only`, `full` (adds enqueue, run now, retry, cancel, pause and settings changes) or `off`. See [MCP](mcp.md). |

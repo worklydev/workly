@@ -37,6 +37,9 @@ type Options struct {
 	// MaxInFlight caps concurrent deliveries across all queues. Queues can
 	// set lower limits of their own. Default 100.
 	MaxInFlight int
+	// WorkspaceMaxInFlight, if set, returns a workspace's own cap on
+	// concurrent deliveries, within MaxInFlight; 0 means none.
+	WorkspaceMaxInFlight func(ctx context.Context, ws workspace.ID) (int, error)
 	// MaxRunsInFlight caps concurrent deliveries of schedule runs,
 	// separately from MaxInFlight. Default 20.
 	MaxRunsInFlight int
@@ -93,9 +96,11 @@ type Dispatcher struct {
 	// results records attempt results while leading.
 	results *resultWriter
 
-	mu     sync.Mutex
-	queues map[queueKey]*queueState
-	// round rotates which queue is served first. Only lead uses it.
+	mu         sync.Mutex
+	queues     map[queueKey]*queueState
+	workspaces map[workspace.ID]*workspaceState
+	// round rotates which workspace, and which of its queues, is served
+	// first. Only lead uses it.
 	round int
 }
 
@@ -129,11 +134,12 @@ func New(opts Options) *Dispatcher {
 		opts.Changed = func(workspace.ID) {}
 	}
 	d := &Dispatcher{
-		opts:    opts,
-		store:   opts.Store,
-		log:     opts.Logger,
-		metrics: opts.Metrics,
-		queues:  map[queueKey]*queueState{},
+		opts:       opts,
+		store:      opts.Store,
+		log:        opts.Logger,
+		metrics:    opts.Metrics,
+		queues:     map[queueKey]*queueState{},
+		workspaces: map[workspace.ID]*workspaceState{},
 		deliverer: deliverer{
 			client: opts.Client,
 			signer: NewSigner(opts.SigningSecret, opts.PreviousSigningSecret, opts.UserAgent, opts.SigningSecrets),
@@ -345,24 +351,51 @@ func (d *Dispatcher) dispatch(ctx, deliverCtx context.Context, wg *sync.WaitGrou
 	// Only queues that can start a delivery now share the free slots: one
 	// at its concurrency limit or out of rate tokens would otherwise take a
 	// share it can't use, and the rest would be claimed a task or two per
-	// round. A different queue goes first each round, so no queue starves
-	// the others when slots are scarce.
-	start := d.round % len(queues)
-	d.round++
+	// round. Slots are shared by workspace first, then by queue, so on a
+	// server shared by many workspaces none gets more for having more
+	// queues. A different workspace, and queue within it, goes first each
+	// round, so none starves the others when slots are scarce.
+	d.refreshLimits(ctx, queues, now)
 	var (
-		ready []store.Queue
-		room  []int
+		ready  []store.Queue
+		room   []int
+		byWS   [][]store.Queue
+		wsSeen = map[workspace.ID]int{}
 	)
-	for i := range queues {
-		q := queues[(start+i)%len(queues)]
-		n, w := d.headroom(q, now)
-		if n == 0 {
-			later(w)
-			continue
+	for _, q := range queues {
+		g, ok := wsSeen[q.WorkspaceID]
+		if !ok {
+			g = len(byWS)
+			wsSeen[q.WorkspaceID] = g
+			byWS = append(byWS, nil)
 		}
-		ready, room = append(ready, q), append(room, min(n, claimBatch))
+		byWS[g] = append(byWS[g], q)
 	}
-	for i, allot := range allotSlots(room, free) {
+	var (
+		groups [][]int
+		caps   []int
+	)
+	round := d.round
+	d.round++
+	for g := range byWS {
+		qs := byWS[(round+g)%len(byWS)]
+		var group []int
+		for j := range qs {
+			q := qs[(round+j)%len(qs)]
+			n, w := d.headroom(q, now)
+			if n == 0 {
+				later(w)
+				continue
+			}
+			group = append(group, len(ready))
+			ready, room = append(ready, q), append(room, min(n, claimBatch))
+		}
+		if len(group) > 0 {
+			groups = append(groups, group)
+			caps = append(caps, d.workspaceRoom(qs[0].WorkspaceID))
+		}
+	}
+	for i, allot := range allotByWorkspace(groups, caps, room, free) {
 		q := ready[i]
 		if allot == 0 {
 			// Out of slots this round.

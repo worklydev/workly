@@ -24,6 +24,8 @@ type Config struct {
 	AutoMigrate           bool
 	AutoCreateQueues      bool
 	MaxPayloadBytes       int64
+	// MaxInFlight caps concurrent task deliveries across all queues.
+	MaxInFlight int
 	// Retention is how long finished tasks are kept. 0 keeps them forever.
 	Retention time.Duration
 	// RunRetention is how long finished schedule runs are kept. It
@@ -53,6 +55,7 @@ func Default() Config {
 		AutoMigrate:      true,
 		AutoCreateQueues: true,
 		MaxPayloadBytes:  1 << 20,
+		MaxInFlight:      100,
 		Retention:        7 * 24 * time.Hour,
 		RunRetention:     7 * 24 * time.Hour,
 		ShutdownTimeout:  25 * time.Second,
@@ -121,6 +124,13 @@ func Load(getenv func(string) string) (Config, error) {
 		}
 		c.MaxPayloadBytes = n
 	}
+	if v := getenv("WORKLY_MAX_IN_FLIGHT"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return c, fmt.Errorf("WORKLY_MAX_IN_FLIGHT: %q is not a number", v)
+		}
+		c.MaxInFlight = n
+	}
 	if v := getenv("WORKLY_RETENTION"); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil {
@@ -171,6 +181,9 @@ func (c Config) Validate() error {
 	}
 	if c.MaxPayloadBytes < 1 || c.MaxPayloadBytes > 100<<20 {
 		return fmt.Errorf("max payload bytes %d must be between 1 and 100 MiB", c.MaxPayloadBytes)
+	}
+	if c.MaxInFlight < 1 || c.MaxInFlight > 10000 {
+		return fmt.Errorf("max in flight %d must be between 1 and 10000", c.MaxInFlight)
 	}
 	if c.Retention < 0 {
 		return fmt.Errorf("retention %v must not be negative", c.Retention)

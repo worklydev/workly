@@ -1,6 +1,7 @@
 package dispatch
 
 import (
+	"math"
 	"slices"
 	"testing"
 	"time"
@@ -89,6 +90,32 @@ func TestAllotSlots(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := allotSlots(tt.room, tt.free); !slices.Equal(got, tt.want) {
 				t.Errorf("allotSlots(%v, %d) = %v, want %v", tt.room, tt.free, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAllotByWorkspace(t *testing.T) {
+	const none = math.MaxInt
+	tests := []struct {
+		name   string
+		groups [][]int
+		caps   []int
+		room   []int
+		free   int
+		want   []int
+	}{
+		{"shares are per workspace, not per queue", [][]int{{0, 1, 2, 3}, {4}}, []int{none, none}, []int{50, 50, 50, 50, 50}, 40, []int{5, 5, 5, 5, 20}},
+		{"a workspace's cap leaves its share to the others", [][]int{{0, 1}, {2}}, []int{4, none}, []int{50, 50, 50}, 40, []int{2, 2, 36}},
+		{"a full workspace gets nothing", [][]int{{0}, {1}}, []int{0, none}, []int{50, 50}, 10, []int{0, 10}},
+		{"fewer slots than workspaces", [][]int{{0, 1}, {2}, {3}}, []int{none, none, none}, []int{5, 5, 5, 5}, 2, []int{1, 0, 1, 0}},
+		{"one workspace shares among its queues", [][]int{{0, 1}}, []int{none}, []int{50, 50}, 40, []int{20, 20}},
+		{"no queues", nil, nil, nil, 10, []int{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := allotByWorkspace(tt.groups, tt.caps, tt.room, tt.free); !slices.Equal(got, tt.want) {
+				t.Errorf("allotByWorkspace(%v, %v, %v, %d) = %v, want %v", tt.groups, tt.caps, tt.room, tt.free, got, tt.want)
 			}
 		})
 	}
