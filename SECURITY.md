@@ -8,7 +8,7 @@ Include what's affected (server, dashboard, an SDK), the version, and how to rep
 
 ## Supported versions
 
-Workly is in early development. Fixes go into the latest release only.
+Security fixes go into the latest release of the server and each SDK. Upgrade to it to get them.
 
 ## What counts
 

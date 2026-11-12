@@ -15,7 +15,7 @@ enqueue → queue → HTTP delivery → retry → success/failure
 
 Next to queues, schedules call an endpoint on a cron timetable, with the same retries, signing and history: cron for HTTP endpoints, separate from queues.
 
-> **Status:** early development. Nothing here is stable yet.
+> **Beta:** Workly is in beta. Until 1.0.0, a release may include breaking changes.
 
 ## Install
 
