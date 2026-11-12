@@ -8,6 +8,8 @@ export type ListPage<T> = {
   items: T[];
   /** How many items match the search, across all pages. */
   matching: number;
+  /** How many items there are, search or not. */
+  total: number;
   /** Zero-based, clamped to the pages there are. */
   page: number;
   pages: number;
@@ -49,6 +51,7 @@ export function useListPage<T>(all: T[], text: (item: T) => string[]): ListPage<
   return {
     items: matches.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE),
     matching: matches.length,
+    total: all.length,
     page,
     pages,
     setPage: (p) => update((next) => (p > 0 ? next.set('page', String(p + 1)) : next.delete('page'))),

@@ -21,5 +21,8 @@ export const SKIP_REASONS = {
   missed: 'The server was down at this time (missed: skip).',
 } as const;
 
+/** Short words for why a slot was skipped, for lists and stats. */
+export const SKIP_SHORT = { overlap: 'previous run still going', missed: 'server was down' } as const;
+
 export const runFinished = (r: Run) =>
   r.state === 'succeeded' || r.state === 'failed' || r.state === 'cancelled' || r.state === 'skipped';
