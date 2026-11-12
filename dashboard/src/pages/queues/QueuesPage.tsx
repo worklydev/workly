@@ -20,7 +20,8 @@ import { EditPolicy } from './EditPolicy';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../primitives/table';
 import { LONGEST_WAIT_TITLE, LongestWait } from './LongestWait';
 import { PendingCard } from './PendingCard';
-import { limits } from '../../lib/queues';
+import { limits, LOW_SUCCESS } from '../../lib/queues';
+import { Count } from '../../components/Count';
 import { RowHint } from '../../components/RowHint';
 import { useNow } from '../../hooks/useNow';
 import { useListPage } from '../../hooks/useListPage';
@@ -34,7 +35,10 @@ export function QueuesPage() {
 
   return (
     <>
-      <PageHeader title="Queues">
+      <PageHeader
+        title="Queues"
+        description="HTTP tasks delivered to your endpoints, with retries, rate limits and concurrency set per queue."
+      >
         <Button onClick={() => setCreating(true)}>
           <Plus />
           New queue
@@ -168,11 +172,13 @@ function QueueTable({ queues }: { queues: Queue[] }) {
               </div>
             </TableCell>
             <TableCell className="text-right font-mono text-xs">
-              {formatCount(Math.min(COUNT_LIMIT, (q.stats?.due ?? 0) + (q.stats?.scheduled ?? 0)))}
+              <Count n={(q.stats?.due ?? 0) + (q.stats?.scheduled ?? 0)} />
             </TableCell>
-            <TableCell className="text-right font-mono text-xs">{formatCount(q.stats?.running ?? 0)}</TableCell>
             <TableCell className="text-right font-mono text-xs">
-              <Failed n={q.stats?.failed ?? 0} />
+              <Count n={q.stats?.running ?? 0} />
+            </TableCell>
+            <TableCell className="text-right font-mono text-xs">
+              <Count n={q.stats?.failed ?? 0} tone="danger" />
             </TableCell>
             <TableCell className="text-right font-mono text-xs">
               <LongestWait since={q.stats?.oldest_due_at} />
@@ -191,22 +197,17 @@ function DayActivity({ activity: a }: { activity?: QueueActivity }) {
   const rate = done > 0 ? a!.succeeded / done : undefined;
   return (
     <>
-      <TableCell className="text-right font-mono text-xs text-muted-foreground">
-        {a ? formatCount(Math.min(COUNT_LIMIT, done)) : <span className="text-faint">…</span>}
+      <TableCell className="text-right font-mono text-xs">
+        {a ? <Count n={done} /> : <span className="text-faint">…</span>}
       </TableCell>
       <TableCell
-        className={cn('text-right font-mono text-xs', rate !== undefined && rate < 0.9 && 'text-destructive')}
+        className={cn('text-right font-mono text-xs', rate !== undefined && rate < LOW_SUCCESS && 'text-destructive')}
         title={a && `${a.succeeded.toLocaleString()} succeeded, ${a.failed.toLocaleString()} failed`}
       >
         {rate === undefined ? <span className="text-faint">—</span> : formatRate(rate)}
       </TableCell>
     </>
   );
-}
-
-/** Red when there are any, so a failing queue stands out in the list. */
-function Failed({ n }: { n: number }) {
-  return <span className={n > 0 ? 'text-destructive' : 'text-muted-foreground'}>{formatCount(n)}</span>;
 }
 
 /** A wrapping app's own first steps, or the `workly dev` example. */

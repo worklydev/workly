@@ -22,7 +22,8 @@ export function PendingCard({
       className={className}
       label="Pending"
       value={formatCount(pending)}
-      detail={`${formatCount(due)} now · ${formatCount(scheduled)} scheduled`}
+      // The split only means something once there's a backlog; a 0 says the rest.
+      detail={pending > 0 ? `${formatCount(due)} now · ${formatCount(scheduled)} scheduled` : undefined}
       to={pending > 0 ? to : undefined}
       title="Tasks not run yet: due now, or scheduled for later (including ones waiting to retry)"
     />

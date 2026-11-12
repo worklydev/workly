@@ -3,17 +3,18 @@ import { RotateCcw, X } from 'lucide-react';
 import { Link, useNavigate } from 'react-router';
 import { cancelRunMutation, retryRunMutation } from '../../api/@tanstack/react-query.gen';
 import type { Run } from '../../api';
-import { runFinished, SKIP_REASONS, type RunPages } from '../../lib/runs';
+import { runFinished, type RunPages } from '../../lib/runs';
 import { ConfirmButton } from '../../components/ConfirmButton';
 import { CursorPager } from '../../components/ListControls';
 import { useCursorPages } from '../../hooks/useCursorPages';
 import { DisabledReason } from '../../components/DisabledReason';
 import { ErrorText, Muted } from '../../components/QueryState';
 import { RelativeTime } from '../../components/RelativeTime';
-import { StatusCode, TaskStateBadge } from '../../components/states';
+import { TaskStateBadge } from '../../components/states';
 import { useNow } from '../../hooks/useNow';
 import { errorMessage } from '../../lib/api';
-import { formatDate, shortId } from '../../lib/format';
+import { formatDate, formatRelative, shortId } from '../../lib/format';
+import { LastResult } from '../../components/LastResult';
 import { useFromHere } from '../../lib/from';
 import { displayState } from '../../lib/states';
 import { Button } from '../../primitives/button';
@@ -59,12 +60,15 @@ export function RunTable({ pages, empty }: { pages: RunPages; empty: string }) {
                   {r.trigger === 'manual' && <span className="text-xs text-faint">manual</span>}
                 </span>
               </TableCell>
-              <TableCell className="text-xs text-muted-foreground" title={formatDate(r.scheduled_for)}>
-                <RelativeTime iso={r.scheduled_for} />
+              {/* A cron slot is a time on the timetable, so the time itself names the run; how long ago is on hover. */}
+              <TableCell className="font-mono text-xs text-muted-foreground">
+                <span title={formatRelative(r.scheduled_for, now)}>
+                  {formatDate(r.scheduled_for, { seconds: false })}
+                </span>
               </TableCell>
               <TableCell className="text-right font-mono text-xs">{r.attempt_count}</TableCell>
               <TableCell className="max-w-56 truncate text-xs">
-                <LastResult run={r} />
+                <LastResult result={r} />
               </TableCell>
               <TableCell className="text-xs text-muted-foreground">
                 {r.finished_at ? <RelativeTime iso={r.finished_at} /> : <span className="text-faint">—</span>}
@@ -79,34 +83,6 @@ export function RunTable({ pages, empty }: { pages: RunPages; empty: string }) {
       <CursorPager page={page} noun="runs" />
     </div>
   );
-}
-
-/** Why a run was skipped, or its latest status with the reason. */
-function LastResult({ run: r }: { run: Run }) {
-  if (r.state === 'skipped' && r.skip_reason) {
-    return (
-      <span className="text-warning" title={SKIP_REASONS[r.skip_reason]}>
-        {r.skip_reason === 'overlap' ? 'previous run still going' : 'server was down'}
-      </span>
-    );
-  }
-  if (r.last_status !== undefined) {
-    const reason = r.last_error?.match(/^HTTP \d{3} (.+)$/)?.[1];
-    return (
-      <span className="font-mono" title={r.last_error}>
-        <StatusCode code={r.last_status} />
-        {reason && <span className="font-sans text-faint"> {reason}</span>}
-      </span>
-    );
-  }
-  if (r.last_outcome && r.last_outcome !== 'success') {
-    return (
-      <span className={r.last_outcome === 'lost' ? 'text-warning' : 'text-destructive'} title={r.last_error}>
-        {r.last_outcome.replace('_', ' ')}
-      </span>
-    );
-  }
-  return <span className="text-faint">—</span>;
 }
 
 function RowActions({ run }: { run: Run }) {

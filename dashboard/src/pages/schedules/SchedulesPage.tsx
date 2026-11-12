@@ -15,6 +15,7 @@ import { TaskStateBadge } from '../../components/states';
 import { useListPage } from '../../hooks/useListPage';
 import { LIVE } from '../../lib/api';
 import { describeCron } from '../../lib/cron';
+import { formatTarget, sharedHost } from '../../lib/format';
 import { Badge } from '../../primitives/badge';
 import { Button } from '../../primitives/button';
 import { EditSchedule } from './EditSchedule';
@@ -86,25 +87,32 @@ function ScheduleList({ schedules }: { schedules: Schedule[] }) {
 }
 
 /** Only the schedules shown get their recent runs fetched. */
+// On a phone the row keeps what tells you whether a schedule is healthy (its
+// last run and recent runs); when it runs moves under the name, in words.
+const WIDE = 'hidden sm:table-cell';
+
 function ScheduleTable({ schedules }: { schedules: Schedule[] }) {
   const navigate = useNavigate();
   const recent = useRecentRuns(schedules);
+  // When every schedule calls the same host, the path is what differs.
+  const host = sharedHost(schedules.map((s) => s.url));
   return (
     <Table>
       <TableHeader>
         <TableRow>
           <TableHead>Schedule</TableHead>
-          <TableHead>When</TableHead>
-          <TableHead>Next run</TableHead>
+          <TableHead className={WIDE}>When</TableHead>
+          <TableHead className={WIDE}>Next run</TableHead>
           <TableHead>Last run</TableHead>
           <TableHead title="The latest runs, oldest first">Recent</TableHead>
-          <TableHead>Target</TableHead>
+          <TableHead className="hidden lg:table-cell">Target</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {schedules.map((s) => (
           <TableRow key={s.name} className="cursor-pointer" onClick={() => navigate(`/schedules/${s.name}`)}>
-            <TableCell>
+            {/* Two-line cells get room above and below, so the row doesn't look squeezed. */}
+            <TableCell className="py-2">
               <div className="flex items-center gap-2">
                 <Link to={`/schedules/${s.name}`} className="font-medium" onClick={(e) => e.stopPropagation()}>
                   {s.name}
@@ -112,11 +120,12 @@ function ScheduleTable({ schedules }: { schedules: Schedule[] }) {
                 {s.paused && <Badge variant="warning">paused</Badge>}
                 <RowHint />
               </div>
+              <div className="text-xs text-faint sm:hidden">{describeCron(s.cron) ?? s.cron}</div>
             </TableCell>
-            <TableCell>
+            <TableCell className={`py-2 ${WIDE}`}>
               <When schedule={s} />
             </TableCell>
-            <TableCell className="text-xs text-muted-foreground">
+            <TableCell className={`text-xs text-muted-foreground ${WIDE}`}>
               {s.next_run_at ? <RelativeTime iso={s.next_run_at} /> : <span className="text-warning">paused</span>}
             </TableCell>
             <TableCell>
@@ -130,10 +139,10 @@ function ScheduleTable({ schedules }: { schedules: Schedule[] }) {
               )}
             </TableCell>
             <TableCell>
-              <RecentRuns runs={recent.get(s.name)} />
+              <RecentRuns runs={recent.get(s.name)} phoneSlots={8} />
             </TableCell>
-            <TableCell className="max-w-56 truncate font-mono text-xs text-faint" title={s.url}>
-              {s.method} {s.url}
+            <TableCell className="hidden max-w-56 truncate font-mono text-xs text-faint lg:table-cell" title={s.url}>
+              {formatTarget(s.method, s.url, host)}
             </TableCell>
           </TableRow>
         ))}
@@ -146,7 +155,7 @@ function ScheduleTable({ schedules }: { schedules: Schedule[] }) {
 export function When({ schedule: s }: { schedule: Schedule }) {
   const words = describeCron(s.cron);
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col gap-0.5">
       <span className={words ? undefined : 'font-mono text-xs'}>{words ?? s.cron}</span>
       <span className="font-mono text-xs text-faint">
         {words && `${s.cron} · `}

@@ -6,8 +6,13 @@ import { Button } from '../primitives/button';
 import { DisabledReason } from './DisabledReason';
 import { Input } from '../primitives/input';
 
-/** The search box above a paged list. */
+/** Below this many items a list is read at a glance, and a search box is clutter. */
+const SEARCH_FROM = 10;
+
+/** The search box above a paged list, once the list is long enough to need one. */
 export function ListSearch({ list, placeholder }: { list: ListPage<unknown>; placeholder: string }) {
+  // A search in the URL keeps the box, so it can be cleared.
+  if (list.total < SEARCH_FROM && !list.search) return null;
   return (
     <Input
       icon={<Search />}

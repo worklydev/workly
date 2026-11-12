@@ -35,6 +35,7 @@ Live reference: **`/design`** in the dashboard (`src/pages/DesignPage.tsx`). Tok
 | `faint`                               | 0.5                    | 0.65            | meta, placeholders, icons                     |
 | `primary`                             | orange                 | orange (darker) | accent                                        |
 | `success` / `warning` / `destructive` | green / yellow / red   |                 | status tints                                  |
+| `warning-fill`                        | = warning              | brighter yellow | warning as a solid mark (run bars)            |
 
 ## Type scale
 
@@ -73,19 +74,24 @@ Nav: an icon plus a label. Inactive items are `text-muted-foreground`. The activ
 - **Attempt outcomes:** `success` success; `http_error`, `timeout` and `network_error` danger; `lost` warning (the result is unknown).
 - **Attempts:** a table, newest first. Manual retries are divider rows (`bg-muted/40`). The Response column previews the error or body; a row opens the full response in a dialog, where ↑/↓ move between attempts.
 - **Code panels** (request body, headers, response): `bg-card` with a hairline, `font-mono text-xs`, JSON pretty-printed.
-- **Destructive actions** (cancel pending, cancel) use `ConfirmButton`: a second click confirms. In table rows it is an icon (`size="icon"`) that widens to its confirm label.
+- **Destructive actions** (cancel pending, cancel) use `ConfirmButton`: a second click confirms. In table rows it is an icon (`size="icon"`) that widens to its confirm label. In a page header they go in the `MoreActions` "⋯" menu as `ConfirmItem`s, which ask twice the same way and, when they can't act, stay listed with the reason underneath.
 - **Sorting:** time and count columns sort by clicking their header (`SortableTableHead`): the active column's arrow is orange, others show a faint arrow on hover. Next to the list's filters, `SortSummary` says what the order is and whether it's the default, with Reset once changed. The sort lives in the URL. Pending tasks default to Next run, soonest first, the order they're delivered in; everything else to newest first.
 - **Task tables** have a checkbox column and per-row Retry and Cancel. The bulk bar above stays visible, with its buttons disabled until tasks are selected, and each bulk action applies only to the selected tasks it can act on.
-- **Charts** (the Queues page's tasks-created chart): plain flex bars, no chart library. Series use `chart-1`…`chart-5`, muted hues clear of the accent and the status colors, so a queue never reads as failed or selected; the busiest queues get a color each and the rest share `chart-other`. Hovering a bar shows its counts; hovering a legend item fades the other series.
+- **Charts** (the Queues page's tasks-created chart): plain flex bars, no chart library. The top is a dashed line labelled with the scale, the tallest bar rounded up to 1, 2 or 5 × 10ⁿ and at least 5, so a handful of tasks doesn't read as a spike. Series use `chart-1`…`chart-5`, muted hues clear of the accent and the status colors, so a queue never reads as failed or selected; the busiest queues get a color each and the rest share `chart-other`. Hovering a bar shows its counts; hovering a legend item fades the other series.
 - **Actions never disappear.** Render every action for an entity; when it doesn't apply, disable it and say why with `DisabledReason`, which opens on hover, tap and keyboard focus. A hidden button reads as a missing feature.
-- **Page headers** (`PageHeader`): the entity's state badge sits next to the title (`badge`), not among the actions. Actions go ghost ones first, then the main action (a filled button), then destructive ones (`ConfirmButton`) last. On narrow screens they wrap below the title.
-- **Lists** show what tells rows apart: long IDs shortened to their last characters (`shortId`, the full ID in the title), targets without the scheme, and only the path when every row calls the same host. A pager appears only when there's more than one page.
-- **Stats** that belong together are one `StatStrip`: cells divided by hairlines, not a box each. A queue's policy is one line of label–value pairs under its title, and a task table has a single row of controls above it (selection, sort, bulk actions).
-- **Top-level pages** (Queues, Tasks, …) show their name once, as the page title; the header's breadcrumbs start on detail pages. A detail page's title carries its key facts underneath in mono (a queue's limits, a schedule's cron and timezone).
+- **Page headers** (`PageHeader`): the entity's state badge sits next to the title (`badge`), not among the actions. Actions go ghost ones first (Edit leads), then the main action (a filled button), then the "⋯" menu with the destructive ones. On narrow screens they wrap below the title.
+- **Lists** show what tells rows apart: long IDs shortened to their last characters (`shortId`, the full ID in the title), targets without the scheme, and only the path when every row calls the same host (`formatTarget`, `sharedHost`). A pager appears only when there's more than one page, a search box only from 10 items. Rows with two-line cells get `py-2`.
+- **Stats** that belong together are one `StatStrip`: cells divided by hairlines, not a box each. Stats about now and stats over a range are separate strips, side by side, and the range tabs head only the range's ("Now" | "Last 24h"), so the labels don't repeat the range. When a range count and an all-time count of the same thing are both on the page (failed in 24h against the Failed tab), the stat says both.
+- **Settings line** (`InlineFields`): a queue's policy or a schedule's delivery is one line of label–value pairs under its title. Values are mono, except words (`prose`: "only 408 and 429", "skip the slot"). A task table has a single row of controls above it (selection, sort, bulk actions).
+- **Counts in tables** (`Count`): zeros are faint, so rows with something in them stand out; failed counts are red when non-zero. A success rate is red below `LOW_SUCCESS` (90%), wherever it's shown.
+- **Last result** (`LastResult`): one component for tasks and runs: the status code in mono with its reason, or the outcome in words, or why a run was skipped. A state is never a big mono word; in a stat it's a badge with its time.
+- **Recent runs** (`RecentRuns`): always the same number of slots, empty ones as faint stubs, newest on the right, so strips line up down a list. Fewer on phones in tables.
+- **Run times:** a run's cron slot shows as a time (`Nov 12, 08:00`), the relative time on hover; when it finished stays relative.
+- **Top-level pages** (Queues, Tasks, …) show their name once, as the page title, with a one-line description under it; the header's breadcrumbs start on detail pages. A detail page's title carries its key facts underneath in mono (a queue's limits, a schedule's cron and timezone).
 - **Header actions are one size** (`PageHeader` sets it), so only the fill marks the main action. A disabled destructive action turns grey, not pale red.
 - **Clickable rows** show an arrow next to the name on hover (`RowHint`), and their row actions brighten.
 - **Checkboxes** use the `Checkbox` primitive, not the browser's, which is pure white in dark mode.
-- **Phones:** below `sm` the sidebar becomes a drawer opened from the header (`MobileNav`), and the gutter shrinks to 16px. Wide tables scroll sideways inside their container, never the page.
+- **Phones:** below `sm` the sidebar becomes a drawer opened from the header (`MobileNav`), and the gutter shrinks to 16px. Wide tables scroll sideways inside their container, never the page, but first drop columns so the ones that say whether something is healthy stay in view (the schedules list keeps Last run and Recent, and moves When under the name).
 
 ### Don't
 

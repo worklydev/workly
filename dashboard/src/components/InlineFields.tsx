@@ -9,16 +9,17 @@ export function InlineFields({
   items,
   children,
 }: {
-  items: { label: string; value: ReactNode }[];
+  /** Values are mono, as machine values; `prose` ones ("only 408 and 429") are words, in the body font. */
+  items: { label: string; value: ReactNode; prose?: boolean }[];
   children?: ReactNode;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
       <dl className="contents">
-        {items.map(({ label, value }) => (
+        {items.map(({ label, value, prose }) => (
           <div key={label} className="flex items-baseline gap-1.5 text-xs">
             <dt className="text-muted-foreground">{label}</dt>
-            <dd className="font-mono">{value}</dd>
+            <dd className={prose ? undefined : 'font-mono'}>{value}</dd>
           </div>
         ))}
       </dl>
