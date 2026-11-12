@@ -798,6 +798,14 @@ type QueueActivity struct {
 	Cancelled int `json:"cancelled"`
 	Failed    int `json:"failed"`
 
+	// P50DurationMs Median duration of the latest attempt of the succeeded and failed
+	// tasks counted (at most the last 1,000 of each). Absent if none
+	// has one.
+	P50DurationMs *int `json:"p50_duration_ms,omitempty"`
+
+	// P95DurationMs 95th percentile of the same durations.
+	P95DurationMs *int `json:"p95_duration_ms,omitempty"`
+
 	// RetentionSeconds How long the server keeps finished tasks (`WORKLY_RETENTION`).
 	// Absent if it keeps them forever.
 	RetentionSeconds *float64 `json:"retention_seconds,omitempty"`
@@ -889,7 +897,10 @@ type Run struct {
 	// Id Example: run_01J9ZK3M5Q8R2T4V6W8X0Y2Z4A
 	Id            string     `json:"id"`
 	LastAttemptAt *time.Time `json:"last_attempt_at,omitempty"`
-	LastError     *string    `json:"last_error,omitempty"`
+
+	// LastDurationMs How long the latest finished attempt took. Absent before the first attempt finishes.
+	LastDurationMs *int    `json:"last_duration_ms,omitempty"`
+	LastError      *string `json:"last_error,omitempty"`
 
 	// LastOutcome How a delivery attempt ended. `lost` means the result is unknown: the
 	// dispatcher crashed or shut down mid-delivery, and the endpoint may
@@ -917,6 +928,9 @@ type Run struct {
 	// policy `skip`). `missed`: the server was down at the slot (missed
 	// policy `skip`).
 	SkipReason *SkipReason `json:"skip_reason,omitempty"`
+
+	// StartedAt When the first delivery attempt started. Retries by hand don't change it. Absent before the first attempt.
+	StartedAt *time.Time `json:"started_at,omitempty"`
 
 	// State A `skipped` run was never delivered: see `skip_reason`. It can be
 	// retried to deliver it now.
@@ -969,14 +983,22 @@ type Schedule struct {
 	// NextRunAt When the schedule next fires. Absent while paused.
 	NextRunAt *time.Time `json:"next_run_at,omitempty"`
 
-	// NextRuns The next five slots, also while paused (as if resumed now).
+	// NextRuns The next five slots. Empty while paused; see `next_runs_if_resumed`.
 	NextRuns []time.Time `json:"next_runs"`
+
+	// NextRunsIfResumed While paused, the five slots the schedule would run at if resumed
+	// now, to check its cron expression. Absent while it runs.
+	NextRunsIfResumed *[]time.Time `json:"next_runs_if_resumed,omitempty"`
 
 	// Overlap What happens when a slot comes up while the previous run is still
 	// pending or running. `skip` records the slot as a `skipped` run;
 	// `allow` runs it alongside.
 	Overlap OverlapPolicy `json:"overlap"`
 	Paused  bool          `json:"paused"`
+
+	// PausedAt When a paused schedule was paused. Absent while it runs, and for
+	// schedules paused before Workly recorded it.
+	PausedAt *time.Time `json:"paused_at,omitempty"`
 
 	// Payload The body, when it is JSON.
 	Payload        *json.RawMessage `json:"payload,omitempty"`
@@ -1080,7 +1102,10 @@ type Task struct {
 
 	// LastAttemptAt When the latest attempt finished. Absent before the first attempt.
 	LastAttemptAt *time.Time `json:"last_attempt_at,omitempty"`
-	LastError     *string    `json:"last_error,omitempty"`
+
+	// LastDurationMs How long the latest finished attempt took. Absent before the first attempt finishes.
+	LastDurationMs *int    `json:"last_duration_ms,omitempty"`
+	LastError      *string `json:"last_error,omitempty"`
 
 	// LastOutcome How a delivery attempt ended. `lost` means the result is unknown: the
 	// dispatcher crashed or shut down mid-delivery, and the endpoint may
@@ -1104,6 +1129,11 @@ type Task struct {
 
 	// RunAt When the task is next eligible for delivery.
 	RunAt time.Time `json:"run_at"`
+
+	// StartedAt When the first delivery attempt started; `started_at` minus
+	// `created_at` is how long the task waited in the queue. Retries by
+	// hand don't change it. Absent before the first attempt.
+	StartedAt *time.Time `json:"started_at,omitempty"`
 
 	// State A `pending` task with `run_at` in the future is scheduled. A `failed`
 	// task has exhausted its attempts or got a non-retryable response.
@@ -1253,7 +1283,9 @@ type CreateTasksParams struct {
 
 // ListRunsParams defines parameters for ListRuns.
 type ListRunsParams struct {
-	State *RunState `form:"state,omitempty" json:"state,omitempty"`
+	// Schedule Only this schedule's runs.
+	Schedule *string   `form:"schedule,omitempty" json:"schedule,omitempty"`
+	State    *RunState `form:"state,omitempty" json:"state,omitempty"`
 
 	// Cursor The `next_cursor` of the previous page, requested with the same
 	// filters and order.
@@ -1402,6 +1434,9 @@ type ServerInterface interface {
 	// CreateTasks Enqueue up to 100 tasks at once
 	// (POST /v1/queues/{queue}/tasks:batch)
 	CreateTasks(w http.ResponseWriter, r *http.Request, queue QueueName, params CreateTasksParams)
+	// ListRuns List runs, newest first
+	// (GET /v1/runs)
+	ListRuns(w http.ResponseWriter, r *http.Request, params ListRunsParams)
 	// GetRun Get a run
 	// (GET /v1/runs/{id})
 	GetRun(w http.ResponseWriter, r *http.Request, id RunID)
@@ -1435,9 +1470,6 @@ type ServerInterface interface {
 	// ResumeSchedule Resume a paused schedule
 	// (POST /v1/schedules/{schedule}/resume)
 	ResumeSchedule(w http.ResponseWriter, r *http.Request, schedule ScheduleName)
-	// ListRuns List a schedule's runs, newest first
-	// (GET /v1/schedules/{schedule}/runs)
-	ListRuns(w http.ResponseWriter, r *http.Request, schedule ScheduleName, params ListRunsParams)
 	// TriggerSchedule Run a schedule now
 	// (POST /v1/schedules/{schedule}/trigger)
 	TriggerSchedule(w http.ResponseWriter, r *http.Request, schedule ScheduleName)
@@ -2298,6 +2330,78 @@ func (siw *ServerInterfaceWrapper) CreateTasks(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
+// ListRuns operation middleware
+func (siw *ServerInterfaceWrapper) ListRuns(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListRunsParams
+
+	// ------------- Optional query parameter "schedule" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "schedule", r.URL.Query(), &params.Schedule, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "schedule"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "schedule", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "state" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "state", r.URL.Query(), &params.State, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "state"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "state", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListRuns(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetRun operation middleware
 func (siw *ServerInterfaceWrapper) GetRun(w http.ResponseWriter, r *http.Request) {
 
@@ -2563,74 +2667,6 @@ func (siw *ServerInterfaceWrapper) ResumeSchedule(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ResumeSchedule(w, r, schedule)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// ListRuns operation middleware
-func (siw *ServerInterfaceWrapper) ListRuns(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "schedule" -------------
-	var schedule ScheduleName
-
-	err = runtime.BindStyledParameterWithOptions("simple", "schedule", r.PathValue("schedule"), &schedule, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "schedule", Err: err})
-		return
-	}
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params ListRunsParams
-
-	// ------------- Optional query parameter "state" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "state", r.URL.Query(), &params.State, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "state"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "state", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "cursor" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "limit" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
-		}
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListRuns(w, r, schedule, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3113,7 +3149,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/schedules/{schedule}/pause", wrapper.PauseSchedule)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/schedules/{schedule}/resume", wrapper.ResumeSchedule)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/schedules/{schedule}/trigger", wrapper.TriggerSchedule)
-	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/schedules/{schedule}/runs", wrapper.ListRuns)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/runs", wrapper.ListRuns)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/runs/{id}", wrapper.GetRun)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/runs/{id}/attempts", wrapper.ListRunAttempts)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/runs/{id}/delivery", wrapper.GetRunDelivery)
@@ -4113,6 +4149,45 @@ func (response CreateTasksdefaultJSONResponse) VisitCreateTasksResponse(w http.R
 	return err
 }
 
+type ListRunsRequestObject struct {
+	Params ListRunsParams
+}
+
+type ListRunsResponseObject interface {
+	VisitListRunsResponse(w http.ResponseWriter) error
+}
+
+type ListRuns200JSONResponse RunList
+
+func (response ListRuns200JSONResponse) VisitListRunsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRunsdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListRunsdefaultJSONResponse) VisitListRunsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetRunRequestObject struct {
 	Id RunID `json:"id"`
 }
@@ -4550,46 +4625,6 @@ func (response ResumeScheduledefaultJSONResponse) VisitResumeScheduleResponse(w 
 	return err
 }
 
-type ListRunsRequestObject struct {
-	Schedule ScheduleName `json:"schedule"`
-	Params   ListRunsParams
-}
-
-type ListRunsResponseObject interface {
-	VisitListRunsResponse(w http.ResponseWriter) error
-}
-
-type ListRuns200JSONResponse RunList
-
-func (response ListRuns200JSONResponse) VisitListRunsResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type ListRunsdefaultJSONResponse struct {
-	Body       Error
-	StatusCode int
-}
-
-func (response ListRunsdefaultJSONResponse) VisitListRunsResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(response.StatusCode)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
 type TriggerScheduleRequestObject struct {
 	Schedule ScheduleName `json:"schedule"`
 }
@@ -4940,6 +4975,9 @@ type StrictServerInterface interface {
 	// CreateTasks Enqueue up to 100 tasks at once
 	// (POST /v1/queues/{queue}/tasks:batch)
 	CreateTasks(ctx context.Context, request CreateTasksRequestObject) (CreateTasksResponseObject, error)
+	// ListRuns List runs, newest first
+	// (GET /v1/runs)
+	ListRuns(ctx context.Context, request ListRunsRequestObject) (ListRunsResponseObject, error)
 	// GetRun Get a run
 	// (GET /v1/runs/{id})
 	GetRun(ctx context.Context, request GetRunRequestObject) (GetRunResponseObject, error)
@@ -4973,9 +5011,6 @@ type StrictServerInterface interface {
 	// ResumeSchedule Resume a paused schedule
 	// (POST /v1/schedules/{schedule}/resume)
 	ResumeSchedule(ctx context.Context, request ResumeScheduleRequestObject) (ResumeScheduleResponseObject, error)
-	// ListRuns List a schedule's runs, newest first
-	// (GET /v1/schedules/{schedule}/runs)
-	ListRuns(ctx context.Context, request ListRunsRequestObject) (ListRunsResponseObject, error)
 	// TriggerSchedule Run a schedule now
 	// (POST /v1/schedules/{schedule}/trigger)
 	TriggerSchedule(ctx context.Context, request TriggerScheduleRequestObject) (TriggerScheduleResponseObject, error)
@@ -5717,6 +5752,32 @@ func (sh *strictHandler) CreateTasks(w http.ResponseWriter, r *http.Request, que
 	}
 }
 
+// ListRuns operation middleware
+func (sh *strictHandler) ListRuns(w http.ResponseWriter, r *http.Request, params ListRunsParams) {
+	var request ListRunsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListRuns(ctx, request.(ListRunsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListRuns")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListRunsResponseObject); ok {
+		if err := validResponse.VisitListRunsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetRun operation middleware
 func (sh *strictHandler) GetRun(w http.ResponseWriter, r *http.Request, id RunID) {
 	var request GetRunRequestObject
@@ -6001,33 +6062,6 @@ func (sh *strictHandler) ResumeSchedule(w http.ResponseWriter, r *http.Request, 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ResumeScheduleResponseObject); ok {
 		if err := validResponse.VisitResumeScheduleResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// ListRuns operation middleware
-func (sh *strictHandler) ListRuns(w http.ResponseWriter, r *http.Request, schedule ScheduleName, params ListRunsParams) {
-	var request ListRunsRequestObject
-
-	request.Schedule = schedule
-	request.Params = params
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.ListRuns(ctx, request.(ListRunsRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "ListRuns")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(ListRunsResponseObject); ok {
-		if err := validResponse.VisitListRunsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

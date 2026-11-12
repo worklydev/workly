@@ -151,7 +151,7 @@ schedule = client.schedules.put(
 print(schedule.next_runs)  # the next five times
 
 run = client.schedules.trigger("nightly-report")  # run it now
-for run in client.schedules.runs("nightly-report", state="failed"):
+for run in client.runs.list(schedule="nightly-report", state="failed"):
     print(run.id, run.scheduled_for, run.last_error)
 client.runs.attempts(run.id)
 client.runs.retry(run.id)  # deliver it again, e.g. a failed or skipped run

@@ -380,4 +380,19 @@ func TestEndToEnd(t *testing.T) {
 			t.Fatalf("echo = %v", echo)
 		}
 	}
+	// started_at is when the first attempt started, last_duration_ms how
+	// long the latest took: queue wait and handler time, without the
+	// attempts.
+	if task["started_at"] == nil || task["last_duration_ms"] != attempts[2].(map[string]any)["duration_ms"] {
+		t.Fatalf("task started_at = %v, last_duration_ms = %v", task["started_at"], task["last_duration_ms"])
+	}
+	started, _ := time.Parse(time.RFC3339Nano, task["started_at"].(string))
+	firstStart, _ := time.Parse(time.RFC3339Nano, attempts[0].(map[string]any)["started_at"].(string))
+	if d := firstStart.Sub(started); d < 0 || d > time.Second {
+		t.Fatalf("started_at = %v, first attempt started %v", started, firstStart)
+	}
+	activity := call("GET", "/v1/queues/demo/activity", "")
+	if activity["failed"] != 1.0 || activity["p50_duration_ms"] == nil || activity["p95_duration_ms"] == nil {
+		t.Fatalf("activity = %v", activity)
+	}
 }

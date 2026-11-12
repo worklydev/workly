@@ -42,22 +42,24 @@ func optionalLimit[T int | float64](v T) *T {
 
 func toTask(t store.Task) Task {
 	out := Task{
-		Id:            t.ID,
-		Queue:         t.Queue,
-		State:         TaskState(t.State),
-		Method:        HTTPMethod(t.Method),
-		Url:           t.URL,
-		Headers:       t.Headers,
-		RunAt:         t.RunAt,
-		AttemptCount:  t.AttemptCount,
-		MaxAttempts:   t.MaxAttempts,
-		LastStatus:    t.LastStatus,
-		CreatedAt:     t.CreatedAt,
-		UpdatedAt:     t.UpdatedAt,
-		FinishedAt:    t.FinishedAt,
-		LastAttemptAt: t.LastAttemptAt,
-		RetriedAt:     t.RetriedAt,
-		GroupId:       optional(t.GroupID),
+		Id:             t.ID,
+		Queue:          t.Queue,
+		State:          TaskState(t.State),
+		Method:         HTTPMethod(t.Method),
+		Url:            t.URL,
+		Headers:        t.Headers,
+		RunAt:          t.RunAt,
+		AttemptCount:   t.AttemptCount,
+		MaxAttempts:    t.MaxAttempts,
+		LastStatus:     t.LastStatus,
+		CreatedAt:      t.CreatedAt,
+		UpdatedAt:      t.UpdatedAt,
+		FinishedAt:     t.FinishedAt,
+		LastAttemptAt:  t.LastAttemptAt,
+		StartedAt:      t.StartedAt,
+		LastDurationMs: durationMillis(t.LastDuration),
+		RetriedAt:      t.RetriedAt,
+		GroupId:        optional(t.GroupID),
 	}
 	if t.Timeout != nil {
 		s := seconds(*t.Timeout)
@@ -95,6 +97,15 @@ func toAttempt(a store.Attempt) Attempt {
 		ResponseHeaders: a.ResponseHeaders,
 		RetriedAt:       a.RetriedAt,
 	}
+}
+
+// durationMillis is an optional duration in whole milliseconds.
+func durationMillis(d *time.Duration) *int {
+	if d == nil {
+		return nil
+	}
+	ms := int(d.Milliseconds())
+	return &ms
 }
 
 func deref(s *string) string {

@@ -270,7 +270,8 @@ export const getQueueActivityQueryKey = (options: Options<GetQueueActivityData>)
 /**
  * Count a queue's finished tasks
  *
- * Counts the tasks that finished since `since`, by final state. Finished
+ * Counts the tasks that finished since `since`, by final state, with
+ * percentiles of how long their latest attempt took. Finished
  * tasks are deleted after the server's retention period, so a `since`
  * further back than `retention_seconds` only counts what is left.
  *
@@ -899,12 +900,16 @@ export const triggerScheduleMutation = (options?: Partial<Options<TriggerSchedul
     return mutationOptions;
 };
 
-export const listRunsQueryKey = (options: Options<ListRunsData>) => createQueryKey('listRuns', options);
+export const listRunsQueryKey = (options?: Options<ListRunsData>) => createQueryKey('listRuns', options);
 
 /**
- * List a schedule's runs, newest first
+ * List runs, newest first
+ *
+ * Runs of every schedule, or of one with `schedule`. A `schedule` that
+ * doesn't exist is `schedule_not_found`.
+ *
  */
-export const listRunsOptions = (options: Options<ListRunsData>) => queryOptions<ListRunsResponse, ListRunsError, ListRunsResponse, ReturnType<typeof listRunsQueryKey>>({
+export const listRunsOptions = (options?: Options<ListRunsData>) => queryOptions<ListRunsResponse, ListRunsError, ListRunsResponse, ReturnType<typeof listRunsQueryKey>>({
     queryFn: async ({ queryKey, signal }) => {
         const { data } = await listRuns({
             ...options,
@@ -917,12 +922,16 @@ export const listRunsOptions = (options: Options<ListRunsData>) => queryOptions<
     queryKey: listRunsQueryKey(options)
 });
 
-export const listRunsInfiniteQueryKey = (options: Options<ListRunsData>): QueryKey<Options<ListRunsData>> => createQueryKey('listRuns', options, true);
+export const listRunsInfiniteQueryKey = (options?: Options<ListRunsData>): QueryKey<Options<ListRunsData>> => createQueryKey('listRuns', options, true);
 
 /**
- * List a schedule's runs, newest first
+ * List runs, newest first
+ *
+ * Runs of every schedule, or of one with `schedule`. A `schedule` that
+ * doesn't exist is `schedule_not_found`.
+ *
  */
-export const listRunsInfiniteOptions = (options: Options<ListRunsData>) => {
+export const listRunsInfiniteOptions = (options?: Options<ListRunsData>) => {
     const opts = infiniteQueryOptions<ListRunsResponse, ListRunsError, InfiniteData<ListRunsResponse>, QueryKey<Options<ListRunsData>>, string | Pick<QueryKey<Options<ListRunsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
     // @ts-ignore
     {

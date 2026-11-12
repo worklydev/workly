@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -325,7 +326,7 @@ func (c *cluster) waitRunsFinished(schedule string, timeout time.Duration) []run
 				Runs       []run  `json:"runs"`
 				NextCursor string `json:"next_cursor"`
 			}
-			c.doInto("GET", "/v1/schedules/"+schedule+"/runs?limit=100&cursor="+cursor, nil, &page)
+			c.doInto("GET", "/v1/runs?schedule="+url.QueryEscape(schedule)+"&limit=100&cursor="+cursor, nil, &page)
 			runs = append(runs, page.Runs...)
 			if cursor = page.NextCursor; cursor == "" {
 				break

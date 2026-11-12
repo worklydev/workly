@@ -116,7 +116,7 @@ async def test_schedules() -> None:
         s = await c.schedules.put("nightly", cron="0 3 * * *", url="https://x")
         assert s.name == "nightly"
         assert (await c.schedules.trigger("nightly")).id == "run_1"
-        assert [r.id async for r in c.schedules.runs("nightly")] == ["run_1"]
+        assert [r.id async for r in c.runs.list(schedule="nightly")] == ["run_1"]
 
 
 async def test_groups() -> None:

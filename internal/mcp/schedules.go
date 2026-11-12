@@ -26,7 +26,7 @@ var (
 const recentRuns = 10
 
 var listSchedules = newTool("list_schedules", "List schedules",
-	"All schedules: cron expression and timezone, the URL each calls, whether it is paused, when it next runs (next_run_at) and how its latest run went (last_run). Schedules are separate from queues; their calls are runs, not tasks.",
+	"All schedules, in summary: cron expression and timezone, the URL each calls, whether it is paused (and since when, paused_at), when it next runs (next_run_at, absent while paused) and how its latest run went (last_run). Use get_schedule for a schedule's request, retry policy and recent runs. Schedules are separate from queues; their calls are runs, not tasks.",
 	object(map[string]any{}), readOnly,
 	func(ctx context.Context, api apiClient, _ struct{}) (any, error) {
 		var out struct {
@@ -35,14 +35,31 @@ var listSchedules = newTool("list_schedules", "List schedules",
 		if err := api.do(ctx, "GET", "/v1/schedules", nil, nil, &out); err != nil {
 			return nil, err
 		}
-		for _, s := range out.Schedules {
-			truncateBody(s)
+		for i, s := range out.Schedules {
+			out.Schedules[i] = scheduleOverview(s)
 		}
 		return out, nil
 	})
 
+// scheduleOverview is what list_schedules shows of a schedule.
+func scheduleOverview(s map[string]any) map[string]any {
+	out := map[string]any{}
+	for _, k := range []string{"name", "cron", "timezone", "url", "paused", "paused_at", "next_run_at", "last_run"} {
+		if v, ok := s[k]; ok {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// scheduleDetail is a schedule as the tools that return one show it.
+func scheduleDetail(s map[string]any) map[string]any {
+	truncateBody(s)
+	return s
+}
+
 var getSchedule = newTool("get_schedule", "Get schedule",
-	`A schedule's settings, its next five slots (next_runs) and its most recent runs, newest first. A "skipped" run was not delivered: skip_reason "overlap" means the previous run was still going, "missed" that the server was down at that time. Start here to find out why a scheduled job didn't run or failed.`,
+	`A schedule's settings, its next five slots (next_runs) and its most recent runs, newest first. A paused schedule has paused_at (when it was paused), no next_run_at and empty next_runs; next_runs_if_resumed are the slots it would run at if resumed now. A "skipped" run was not delivered: skip_reason "overlap" means the previous run was still going, "missed" that the server was down at that time. Start here to find out why a scheduled job didn't run or failed.`,
 	object(map[string]any{"schedule": scheduleProp}, "schedule"), readOnly,
 	func(ctx context.Context, api apiClient, args struct {
 		Schedule string `json:"schedule"`
@@ -51,12 +68,12 @@ var getSchedule = newTool("get_schedule", "Get schedule",
 		if err := api.do(ctx, "GET", apiPath("/v1/schedules/%s", args.Schedule), nil, nil, &schedule); err != nil {
 			return nil, err
 		}
-		truncateBody(schedule)
+		scheduleDetail(schedule)
 		var runs struct {
 			Runs []map[string]any `json:"runs"`
 		}
-		q := url.Values{"limit": {strconv.Itoa(recentRuns)}}
-		if err := api.do(ctx, "GET", apiPath("/v1/schedules/%s/runs", args.Schedule), q, nil, &runs); err != nil {
+		q := url.Values{"schedule": {args.Schedule}, "limit": {strconv.Itoa(recentRuns)}}
+		if err := api.do(ctx, "GET", "/v1/runs", q, nil, &runs); err != nil {
 			return nil, err
 		}
 		for i, r := range runs.Runs {
@@ -66,13 +83,13 @@ var getSchedule = newTool("get_schedule", "Get schedule",
 	})
 
 var listRuns = newTool("list_runs", "List runs",
-	"A schedule's runs, newest first, optionally only those in one state. Returns summaries; use get_run for attempts. Pass next_cursor as cursor for the next page.",
+	`Runs, newest first: one schedule's, or every schedule's if schedule is left out (e.g. state "failed" for failed runs anywhere), optionally only those in one state. Returns summaries, each with its schedule; use get_run for attempts. started_at is when the first attempt started and last_duration_ms how long the latest took. Pass next_cursor as cursor for the next page.`,
 	object(map[string]any{
-		"schedule": scheduleProp,
+		"schedule": prop("string", "Only this schedule's runs. Leave out for every schedule's."),
 		"state":    prop("string", "Only runs in this state.", "enum", runStates),
 		"limit":    prop("integer", "Runs per page (default 20).", "minimum", 1, "maximum", 100),
 		"cursor":   prop("string", "next_cursor from the previous page."),
-	}, "schedule"), readOnly,
+	}), readOnly,
 	func(ctx context.Context, api apiClient, args struct {
 		Schedule string `json:"schedule"`
 		State    string `json:"state"`
@@ -80,6 +97,9 @@ var listRuns = newTool("list_runs", "List runs",
 		Cursor   string `json:"cursor"`
 	}) (any, error) {
 		q := url.Values{"limit": {strconv.Itoa(cmp.Or(min(args.Limit, 100), 20))}}
+		if args.Schedule != "" {
+			q.Set("schedule", args.Schedule)
+		}
 		if args.State != "" {
 			q.Set("state", args.State)
 		}
@@ -90,7 +110,7 @@ var listRuns = newTool("list_runs", "List runs",
 			Runs       []map[string]any `json:"runs"`
 			NextCursor string           `json:"next_cursor,omitempty"`
 		}
-		if err := api.do(ctx, "GET", apiPath("/v1/schedules/%s/runs", args.Schedule), q, nil, &page); err != nil {
+		if err := api.do(ctx, "GET", "/v1/runs", q, nil, &page); err != nil {
 			return nil, err
 		}
 		for i, r := range page.Runs {
@@ -222,7 +242,7 @@ var triggerSchedule = newTool("trigger_schedule", "Run schedule now",
 	})
 
 var pauseSchedule = newTool("pause_schedule", "Pause schedule",
-	"Stops a schedule from running on its timetable. Runs already pending or in flight finish, and trigger_schedule still works.",
+	"Stops a schedule from running on its timetable. Runs already pending or in flight finish, and trigger_schedule still works. Returns the schedule, with paused_at.",
 	object(map[string]any{"schedule": scheduleProp}, "schedule"),
 	annotations{IdempotentHint: true},
 	func(ctx context.Context, api apiClient, args struct {
@@ -232,7 +252,7 @@ var pauseSchedule = newTool("pause_schedule", "Pause schedule",
 	})
 
 var resumeSchedule = newTool("resume_schedule", "Resume schedule",
-	"Resumes a paused schedule from its next slot. Slots that passed while it was paused are not run.",
+	"Resumes a paused schedule from its next slot. Slots that passed while it was paused are not run. Returns the schedule, with next_run_at and next_runs.",
 	object(map[string]any{"schedule": scheduleProp}, "schedule"),
 	annotations{IdempotentHint: true, OpenWorldHint: true},
 	func(ctx context.Context, api apiClient, args struct {
@@ -242,7 +262,7 @@ var resumeSchedule = newTool("resume_schedule", "Resume schedule",
 	})
 
 var retryRun = newTool("retry_run", "Retry run",
-	"Delivers a schedule run again now. A failed, succeeded, cancelled or skipped run is delivered with a fresh set of attempts; a pending one becomes due at once. Fails with invalid_state for a running run.",
+	"Delivers a schedule run again now. A failed, succeeded, cancelled or skipped run is delivered with a fresh set of attempts; a pending one becomes due at once. Returns the run; follow up with wait_for_run. Fails with invalid_state for a running run.",
 	object(map[string]any{"id": runIDProp}, "id"),
 	annotations{OpenWorldHint: true},
 	func(ctx context.Context, api apiClient, args struct {
@@ -252,7 +272,7 @@ var retryRun = newTool("retry_run", "Retry run",
 	})
 
 var cancelRun = newTool("cancel_run", "Cancel run",
-	"Cancels a pending or running schedule run, so it isn't delivered (again). A delivery in flight finishes but isn't retried.",
+	"Cancels a pending or running schedule run, so it isn't delivered (again). A delivery in flight finishes but isn't retried. Returns the run.",
 	object(map[string]any{"id": runIDProp}, "id"),
 	annotations{DestructiveHint: true, IdempotentHint: true},
 	func(ctx context.Context, api apiClient, args struct {
@@ -262,7 +282,7 @@ var cancelRun = newTool("cancel_run", "Cancel run",
 	})
 
 var updateSchedule = newTool("update_schedule", "Create or update schedule",
-	"Creates a schedule, or changes an existing one's settings. For an existing schedule only the settings given change. A new one needs cron and url. Returns the schedule with its next five slots (next_runs), to check the cron expression.",
+	"Creates a schedule, or changes an existing one's settings. For an existing schedule only the settings given change. A new one needs cron and url. Returns the schedule with its next five slots (next_runs, or next_runs_if_resumed while it is paused), to check the cron expression.",
 	object(map[string]any{
 		"schedule":            scheduleProp,
 		"cron":                prop("string", `Five fields (minute hour day-of-month month day-of-week), e.g. "0 3 * * *" or "*/15 * * * mon-fri", or @hourly, @daily, @weekly, @monthly, @yearly.`),
@@ -332,8 +352,7 @@ var updateSchedule = newTool("update_schedule", "Create or update schedule",
 		if err := api.do(ctx, "PUT", apiPath("/v1/schedules/%s", name), nil, config, &out); err != nil {
 			return nil, err
 		}
-		truncateBody(out)
-		return out, nil
+		return scheduleDetail(out), nil
 	})
 
 var scheduleFields = []string{
@@ -347,8 +366,7 @@ func scheduleAction(ctx context.Context, api apiClient, schedule, action string)
 	if err := api.do(ctx, "POST", apiPath("/v1/schedules/%s/", schedule)+action, nil, nil, &out); err != nil {
 		return nil, err
 	}
-	truncateBody(out)
-	return out, nil
+	return scheduleDetail(out), nil
 }
 
 func runAction(ctx context.Context, api apiClient, id, action string) (any, error) {
@@ -364,7 +382,8 @@ func runSummary(r map[string]any) map[string]any {
 	out := map[string]any{}
 	for _, k := range []string{
 		"id", "schedule", "state", "trigger", "scheduled_for", "skip_reason", "run_at", "attempt_count",
-		"last_status", "last_outcome", "last_error", "created_at", "finished_at", "last_attempt_at", "retried_at",
+		"last_status", "last_outcome", "last_error", "created_at", "started_at", "finished_at", "last_attempt_at",
+		"last_duration_ms", "retried_at",
 	} {
 		if v, ok := r[k]; ok {
 			out[k] = v

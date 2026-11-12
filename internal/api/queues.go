@@ -172,6 +172,7 @@ func (h Handlers) GetQueueActivity(ctx context.Context, req GetQueueActivityRequ
 	}
 	out := GetQueueActivity200JSONResponse{
 		Since: since.UTC(), Succeeded: a.Succeeded, Failed: a.Failed, Cancelled: a.Cancelled,
+		P50DurationMs: durationMillis(a.P50Duration), P95DurationMs: durationMillis(a.P95Duration),
 	}
 	if h.Retention > 0 {
 		r := seconds(h.Retention)

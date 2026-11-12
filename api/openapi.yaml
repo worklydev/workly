@@ -243,7 +243,8 @@ paths:
       operationId: getQueueActivity
       summary: Count a queue's finished tasks
       description: |
-        Counts the tasks that finished since `since`, by final state. Finished
+        Counts the tasks that finished since `since`, by final state, with
+        percentiles of how long their latest attempt took. Finished
         tasks are deleted after the server's retention period, so a `since`
         further back than `retention_seconds` only counts what is left.
       tags: [queues]
@@ -821,15 +822,21 @@ paths:
                 $ref: "#/components/schemas/Run"
         default:
           $ref: "#/components/responses/Error"
-  /v1/schedules/{schedule}/runs:
-    parameters:
-      - $ref: "#/components/parameters/ScheduleName"
+  /v1/runs:
     get:
       operationId: listRuns
-      summary: List a schedule's runs, newest first
+      summary: List runs, newest first
+      description: |
+        Runs of every schedule, or of one with `schedule`. A `schedule` that
+        doesn't exist is `schedule_not_found`.
       tags: [schedules]
       security: [{bearerAuth: []}]
       parameters:
+        - name: schedule
+          in: query
+          description: Only this schedule's runs.
+          schema:
+            type: string
         - name: state
           in: query
           schema:
@@ -1258,6 +1265,15 @@ components:
           type: integer
         cancelled:
           type: integer
+        p50_duration_ms:
+          type: integer
+          description: |
+            Median duration of the latest attempt of the succeeded and failed
+            tasks counted (at most the last 1,000 of each). Absent if none
+            has one.
+        p95_duration_ms:
+          type: integer
+          description: 95th percentile of the same durations.
         retention_seconds:
           type: number
           format: double
@@ -1520,6 +1536,16 @@ components:
           type: string
           format: date-time
           description: When the latest attempt finished. Absent before the first attempt.
+        started_at:
+          type: string
+          format: date-time
+          description: |
+            When the first delivery attempt started; `started_at` minus
+            `created_at` is how long the task waited in the queue. Retries by
+            hand don't change it. Absent before the first attempt.
+        last_duration_ms:
+          type: integer
+          description: How long the latest finished attempt took. Absent before the first attempt finishes.
         retried_at:
           type: string
           format: date-time
@@ -1864,13 +1890,27 @@ components:
           $ref: "#/components/schemas/MissedPolicy"
         paused:
           type: boolean
+        paused_at:
+          type: string
+          format: date-time
+          description: |
+            When a paused schedule was paused. Absent while it runs, and for
+            schedules paused before Workly recorded it.
         next_run_at:
           type: string
           format: date-time
           description: When the schedule next fires. Absent while paused.
         next_runs:
           type: array
-          description: The next five slots, also while paused (as if resumed now).
+          description: The next five slots. Empty while paused; see `next_runs_if_resumed`.
+          items:
+            type: string
+            format: date-time
+        next_runs_if_resumed:
+          type: array
+          description: |
+            While paused, the five slots the schedule would run at if resumed
+            now, to check its cron expression. Absent while it runs.
           items:
             type: string
             format: date-time
@@ -1987,6 +2027,13 @@ components:
         last_attempt_at:
           type: string
           format: date-time
+        started_at:
+          type: string
+          format: date-time
+          description: When the first delivery attempt started. Retries by hand don't change it. Absent before the first attempt.
+        last_duration_ms:
+          type: integer
+          description: How long the latest finished attempt took. Absent before the first attempt finishes.
         retried_at:
           type: string
           format: date-time

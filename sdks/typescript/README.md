@@ -153,7 +153,7 @@ const schedule = await workly.schedules.put('nightly-report', {
 console.log(schedule.nextRuns); // the next five times
 
 const run = await workly.schedules.trigger('nightly-report'); // run it now
-for await (const r of workly.schedules.runs('nightly-report', { state: 'failed' })) {
+for await (const r of workly.runs.list({ schedule: 'nightly-report', state: 'failed' })) {
   console.log(r.id, r.scheduledFor, r.lastError);
 }
 await workly.runs.attempts(run.id);

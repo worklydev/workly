@@ -75,6 +75,16 @@ func (s *Store) ts(t time.Time) any {
 	return t.UnixMilli()
 }
 
+// durationMillis is an attempt's duration in whole milliseconds, as its
+// stored start and finish give it, so it matches the attempt's duration_ms.
+func (s *Store) durationMillis(a store.Attempt) int64 {
+	precision := time.Millisecond
+	if s.opts.Postgres {
+		precision = time.Microsecond
+	}
+	return a.FinishedAt.Truncate(precision).Sub(a.StartedAt.Truncate(precision)).Milliseconds()
+}
+
 func (s *Store) tsOrNil(t *time.Time) any {
 	if t == nil {
 		return nil
@@ -174,6 +184,15 @@ func nullIfZero[T int | float64](v T) any {
 		return nil
 	}
 	return v
+}
+
+// millis is a nullable millisecond column as a duration.
+func millis(v sql.NullInt64) *time.Duration {
+	if !v.Valid {
+		return nil
+	}
+	d := time.Duration(v.Int64) * time.Millisecond
+	return &d
 }
 
 func nullMillis(p *time.Duration) any {
@@ -501,7 +520,49 @@ func (s *Store) QueueActivity(ctx context.Context, ws workspace.ID, queue string
 	err := s.queryRow(ctx, s.db, `SELECT `+count(store.TaskSucceeded)+`, `+count(store.TaskFailed)+`, `+
 		count(store.TaskCancelled), append(append(args, args...), args...)...).
 		Scan(&a.Succeeded, &a.Failed, &a.Cancelled)
-	return a, err
+	if err != nil {
+		return a, err
+	}
+	// Two scans of tasks_queue_finished, one per state, rather than an IN
+	// that would need the rows sorted afterwards.
+	rows, err := s.query(ctx, s.db, `SELECT d FROM (
+			SELECT last_duration_ms AS d, finished_at FROM tasks
+			WHERE workspace_id = ? AND queue = ? AND state = 'succeeded' AND finished_at >= ?
+				AND last_duration_ms IS NOT NULL ORDER BY finished_at DESC LIMIT ?) s
+		UNION ALL SELECT d FROM (
+			SELECT last_duration_ms AS d, finished_at FROM tasks
+			WHERE workspace_id = ? AND queue = ? AND state = 'failed' AND finished_at >= ?
+				AND last_duration_ms IS NOT NULL ORDER BY finished_at DESC LIMIT ?) f`,
+		ws, queue, s.ts(since), store.DurationSampleLimit, ws, queue, s.ts(since), store.DurationSampleLimit)
+	if err != nil {
+		return a, err
+	}
+	defer rows.Close()
+	var ms []int64
+	for rows.Next() {
+		var d int64
+		if err := rows.Scan(&d); err != nil {
+			return a, err
+		}
+		ms = append(ms, d)
+	}
+	if err := rows.Err(); err != nil {
+		return a, err
+	}
+	a.P50Duration, a.P95Duration = percentile(ms, 50), percentile(ms, 95)
+	return a, nil
+}
+
+// percentile is the nearest-rank percentile of millisecond durations, or nil
+// for none. It sorts ms.
+func percentile(ms []int64, p int) *time.Duration {
+	if len(ms) == 0 {
+		return nil
+	}
+	slices.Sort(ms)
+	rank := (p*len(ms) + 99) / 100 // ceil(p/100 * n)
+	d := time.Duration(ms[max(rank, 1)-1]) * time.Millisecond
+	return &d
 }
 
 // epochMillis is the SQL for a timestamp column as Unix milliseconds:
@@ -658,19 +719,22 @@ func (s *Store) updateTasks(ctx context.Context, tx *sql.Tx, query string, args 
 
 const taskColumns = `id, workspace_id, queue, state, method, url, headers, body, run_at,
 	attempt_count, replayed_attempts, max_attempts, timeout_ms, idempotency_key, trace_context, lease_expires_at,
-	last_status, last_outcome, last_error, created_at, updated_at, finished_at, last_attempt_at, retried_at, group_id`
+	last_status, last_outcome, last_error, created_at, updated_at, finished_at, last_attempt_at, retried_at, group_id,
+	started_at, last_duration_ms`
 
 func scanTask(row interface{ Scan(...any) error }) (store.Task, error) {
 	var (
 		t                                                  store.Task
 		headers                                            []byte
-		maxAttempts, timeoutMS, lastStatus                 sql.NullInt64
+		maxAttempts, timeoutMS, lastStatus, lastDuration   sql.NullInt64
 		idemKey, traceCtx, lastOutcome, lastError, groupID sql.NullString
 		runAt, lease, created, updated, fin, last, retried dbTime
+		started                                            dbTime
 	)
 	err := row.Scan(&t.ID, &t.WorkspaceID, &t.Queue, &t.State, &t.Method, &t.URL, &headers, &t.Body,
 		&runAt, &t.AttemptCount, &t.ReplayedAttempts, &maxAttempts, &timeoutMS, &idemKey, &traceCtx, &lease,
-		&lastStatus, &lastOutcome, &lastError, &created, &updated, &fin, &last, &retried, &groupID)
+		&lastStatus, &lastOutcome, &lastError, &created, &updated, &fin, &last, &retried, &groupID,
+		&started, &lastDuration)
 	if err != nil {
 		return t, err
 	}
@@ -696,6 +760,7 @@ func scanTask(row interface{ Scan(...any) error }) (store.Task, error) {
 	t.LastOutcome = store.Outcome(lastOutcome.String)
 	t.RunAt, t.CreatedAt, t.UpdatedAt = runAt.Time, created.Time, updated.Time
 	t.LeaseExpiresAt, t.FinishedAt, t.LastAttemptAt, t.RetriedAt = lease.ptr(), fin.ptr(), last.ptr(), retried.ptr()
+	t.StartedAt, t.LastDuration = started.ptr(), millis(lastDuration)
 	return t, nil
 }
 
@@ -1110,11 +1175,11 @@ func (s *Store) ClaimTasks(ctx context.Context, q store.Queue, limit int, now ti
 	}
 	query += `)
 		UPDATE tasks SET state = 'running', attempt_count = attempt_count + 1,
-			lease_expires_at = ` + lease + `, updated_at = ?
+			lease_expires_at = ` + lease + `, updated_at = ?, started_at = COALESCE(started_at, ?)
 		WHERE id IN (SELECT id FROM due)
 		RETURNING ` + taskColumns
 	tasks, err := s.listTasks(ctx, s.db, query, q.WorkspaceID, q.Name, s.ts(now), limit,
-		s.ts(now), q.Timeout.Milliseconds(), grace.Milliseconds(), s.ts(now))
+		s.ts(now), q.Timeout.Milliseconds(), grace.Milliseconds(), s.ts(now), s.ts(now))
 	if err != nil {
 		return nil, err
 	}
@@ -1158,12 +1223,12 @@ func (s *Store) FinishAttempts(ctx context.Context, rs []store.FinishedAttempt) 
 		}
 		rows[i] = row{
 			update: []any{r.Workspace, r.TaskID, r.Number, r.NextState, s.tsOrNil(runAt), nullInt(r.StatusCode),
-				r.Outcome, nullString(r.Error), s.ts(r.FinishedAt), s.tsOrNil(finishedAt)},
+				r.Outcome, nullString(r.Error), s.ts(r.FinishedAt), s.tsOrNil(finishedAt), s.durationMillis(r.Attempt)},
 			insert: []any{id.New("att"), r.TaskID, r.Workspace, r.Number, s.ts(r.StartedAt), s.ts(r.FinishedAt),
 				nullInt(r.StatusCode), r.Outcome, nullString(r.Error), nullString(r.ResponseBody), respHeaders},
 		}
 	}
-	updateCols := s.values("text", "text", "int", "text", "ts", "int", "text", "text", "ts", "ts")
+	updateCols := s.values("text", "text", "int", "text", "ts", "int", "text", "text", "ts", "ts", "int")
 	insertCols := s.values("text", "text", "text", "int", "ts", "ts", "int", "text", "text", "text", "json")
 
 	out := make([]store.FinishOutcome, len(rs))
@@ -1183,7 +1248,7 @@ func (s *Store) FinishAttempts(ctx context.Context, rs []store.FinishedAttempt) 
 					state = CASE WHEN tasks.state = 'cancelled' THEN tasks.state ELSE v.column4 END,
 					run_at = COALESCE(v.column5, tasks.run_at), lease_expires_at = NULL,
 					last_status = v.column6, last_outcome = v.column7, last_error = v.column8,
-					updated_at = v.column9, last_attempt_at = v.column9,
+					updated_at = v.column9, last_attempt_at = v.column9, last_duration_ms = v.column11,
 					finished_at = CASE WHEN tasks.state = 'cancelled' THEN tasks.finished_at ELSE v.column10 END
 				FROM (VALUES `+repeatRows(updateCols, len(chunk))+`) AS v
 				WHERE tasks.workspace_id = v.column1 AND tasks.id = v.column2

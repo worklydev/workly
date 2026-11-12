@@ -103,6 +103,17 @@ export type QueueActivity = {
     failed: number;
     cancelled: number;
     /**
+     * Median duration of the latest attempt of the succeeded and failed
+     * tasks counted (at most the last 1,000 of each). Absent if none
+     * has one.
+     *
+     */
+    p50_duration_ms?: number;
+    /**
+     * 95th percentile of the same durations.
+     */
+    p95_duration_ms?: number;
+    /**
      * How long the server keeps finished tasks (`WORKLY_RETENTION`).
      * Absent if it keeps them forever.
      *
@@ -323,6 +334,17 @@ export type Task = {
      * When the latest attempt finished. Absent before the first attempt.
      */
     last_attempt_at?: string;
+    /**
+     * When the first delivery attempt started; `started_at` minus
+     * `created_at` is how long the task waited in the queue. Retries by
+     * hand don't change it. Absent before the first attempt.
+     *
+     */
+    started_at?: string;
+    /**
+     * How long the latest finished attempt took. Absent before the first attempt finishes.
+     */
+    last_duration_ms?: number;
     /**
      * When the task was last retried by hand (`POST /v1/tasks/{id}/retry`
      * or `POST /v1/queues/{queue}/retry-failed`). Absent if never.
@@ -605,13 +627,25 @@ export type Schedule = {
     missed: MissedPolicy;
     paused: boolean;
     /**
+     * When a paused schedule was paused. Absent while it runs, and for
+     * schedules paused before Workly recorded it.
+     *
+     */
+    paused_at?: string;
+    /**
      * When the schedule next fires. Absent while paused.
      */
     next_run_at?: string;
     /**
-     * The next five slots, also while paused (as if resumed now).
+     * The next five slots. Empty while paused; see `next_runs_if_resumed`.
      */
     next_runs: Array<string>;
+    /**
+     * While paused, the five slots the schedule would run at if resumed
+     * now, to check its cron expression. Absent while it runs.
+     *
+     */
+    next_runs_if_resumed?: Array<string>;
     last_run?: LastRun;
     created_at: string;
     updated_at: string;
@@ -695,6 +729,14 @@ export type Run = {
      */
     finished_at?: string;
     last_attempt_at?: string;
+    /**
+     * When the first delivery attempt started. Retries by hand don't change it. Absent before the first attempt.
+     */
+    started_at?: string;
+    /**
+     * How long the latest finished attempt took. Absent before the first attempt finishes.
+     */
+    last_duration_ms?: number;
     /**
      * When the run was last retried by hand. Absent if never.
      */
@@ -2172,13 +2214,12 @@ export type TriggerScheduleResponse = TriggerScheduleResponses[keyof TriggerSche
 
 export type ListRunsData = {
     body?: never;
-    path: {
-        /**
-         * Schedule name. Lowercase letters, digits, `-` and `_`; at most 64 characters.
-         */
-        schedule: string;
-    };
+    path?: never;
     query?: {
+        /**
+         * Only this schedule's runs.
+         */
+        schedule?: string;
         state?: RunState;
         /**
          * The `next_cursor` of the previous page, requested with the same
@@ -2188,7 +2229,7 @@ export type ListRunsData = {
         cursor?: string;
         limit?: number;
     };
-    url: '/v1/schedules/{schedule}/runs';
+    url: '/v1/runs';
 };
 
 export type ListRunsErrors = {

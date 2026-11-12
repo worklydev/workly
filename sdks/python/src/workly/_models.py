@@ -66,6 +66,10 @@ class QueueActivity:
     cancelled: int
     retention_seconds: float | None
     """How long the server keeps finished tasks; None if forever. Older ones aren't counted."""
+    p50_duration_ms: int | None = None
+    """Median duration of the latest attempt of the succeeded and failed tasks counted."""
+    p95_duration_ms: int | None = None
+    """95th percentile of the same durations."""
 
     @classmethod
     def _from_json(cls, d: dict[str, Any]) -> QueueActivity:
@@ -75,6 +79,8 @@ class QueueActivity:
             failed=d["failed"],
             cancelled=d["cancelled"],
             retention_seconds=d.get("retention_seconds"),
+            p50_duration_ms=d.get("p50_duration_ms"),
+            p95_duration_ms=d.get("p95_duration_ms"),
         )
 
 
@@ -226,6 +232,10 @@ class Task:
     """When the task was last retried by hand."""
     group_id: str | None = None
     """The group the task belongs to, if any."""
+    started_at: datetime | None = None
+    """When the first delivery attempt started; minus `created_at`, the time spent waiting."""
+    last_duration_ms: int | None = None
+    """How long the latest finished attempt took."""
 
     @classmethod
     def _from_json(cls, d: dict[str, Any]) -> Task:
@@ -252,6 +262,8 @@ class Task:
             last_attempt_at=_opt_time(d.get("last_attempt_at")),
             retried_at=_opt_time(d.get("retried_at")),
             group_id=d.get("group_id"),
+            started_at=_opt_time(d.get("started_at")),
+            last_duration_ms=d.get("last_duration_ms"),
         )
 
 
@@ -376,10 +388,14 @@ class Schedule:
     next_run_at: datetime | None
     """When the schedule next fires; None while paused."""
     next_runs: list[datetime]
-    """The next five slots (as if resumed now, while paused)."""
+    """The next five slots. Empty while paused; see `next_runs_if_resumed`."""
     last_run: LastRun | None
     created_at: datetime
     updated_at: datetime
+    paused_at: datetime | None = None
+    """When a paused schedule was paused; None while it runs."""
+    next_runs_if_resumed: list[datetime] | None = None
+    """While paused, the five slots it would run at if resumed now; None while it runs."""
 
     @classmethod
     def _from_json(cls, d: dict[str, Any]) -> Schedule:
@@ -408,6 +424,12 @@ class Schedule:
             last_run=None if last is None else LastRun._from_json(last),
             created_at=_time(d["created_at"]),
             updated_at=_time(d["updated_at"]),
+            paused_at=_opt_time(d.get("paused_at")),
+            next_runs_if_resumed=(
+                None
+                if (resumed := d.get("next_runs_if_resumed")) is None
+                else [_time(t) for t in resumed]
+            ),
         )
 
 
@@ -438,6 +460,10 @@ class Run:
     finished_at: datetime | None
     last_attempt_at: datetime | None
     retried_at: datetime | None
+    started_at: datetime | None = None
+    """When the first delivery attempt started."""
+    last_duration_ms: int | None = None
+    """How long the latest finished attempt took."""
 
     @classmethod
     def _from_json(cls, d: dict[str, Any]) -> Run:
@@ -463,6 +489,8 @@ class Run:
             finished_at=_opt_time(d.get("finished_at")),
             last_attempt_at=_opt_time(d.get("last_attempt_at")),
             retried_at=_opt_time(d.get("retried_at")),
+            started_at=_opt_time(d.get("started_at")),
+            last_duration_ms=d.get("last_duration_ms"),
         )
 
 

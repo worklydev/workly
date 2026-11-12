@@ -113,7 +113,7 @@ workly queues ls
 workly queues failures demo       # the queue's failed tasks, grouped by error
 workly queues retry-failed demo   # after an outage: replay the queue's failed tasks
 workly schedules ls               # schedules with their next and last run
-workly schedules runs nightly     # a schedule's runs, newest first
+workly runs ls --schedule nightly # a schedule's runs, newest first
 workly groups ls                  # task groups with their progress
 ```
 

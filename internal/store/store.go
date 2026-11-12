@@ -374,7 +374,17 @@ type QueueActivity struct {
 	Succeeded int
 	Failed    int
 	Cancelled int
+	// P50Duration and P95Duration are percentiles of the latest attempt's
+	// duration over the succeeded and failed tasks counted: up to the
+	// DurationSampleLimit of each that finished last. Nil if none recorded
+	// one.
+	P50Duration *time.Duration
+	P95Duration *time.Duration
 }
+
+// DurationSampleLimit is how many of the latest succeeded, and of the latest
+// failed, tasks QueueActivity's duration percentiles are taken over.
+const DurationSampleLimit = 1000
 
 // FailureGroup is a set of failed tasks whose latest attempt ended the same
 // way.
@@ -454,6 +464,11 @@ type Task struct {
 	FinishedAt       *time.Time
 	// LastAttemptAt is when the latest attempt finished.
 	LastAttemptAt *time.Time
+	// StartedAt is when the first delivery attempt started (when the task
+	// was first claimed). Replays don't reset it.
+	StartedAt *time.Time
+	// LastDuration is how long the latest finished attempt took.
+	LastDuration *time.Duration
 	// RetriedAt is when the task was last retried by hand (RetryTask or
 	// RetryFailedTasks).
 	RetriedAt *time.Time

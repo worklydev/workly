@@ -463,7 +463,8 @@ class AsyncSchedules:
 
         Declarative: the schedule ends up with exactly these settings, and
         omitted ones are reset to their defaults. It doesn't change whether
-        the schedule is paused. `next_runs` on the result shows when it runs.
+        the schedule is paused. `next_runs` on the result shows when it runs
+        (`next_runs_if_resumed` while it is paused).
         """
         config = dict(
             cron=cron,
@@ -508,37 +509,43 @@ class AsyncSchedules:
         """Run the schedule now, even if paused. Doesn't change when it next fires."""
         return Run._from_json(await self._client._send(r.trigger_schedule(name)))
 
-    async def runs(
-        self, name: str, *, state: RunState | None = None, page_size: int | None = None
-    ) -> AsyncIterator[Run]:
-        """The schedule's runs, newest first, fetching pages as needed."""
-        cursor: str | None = None
-        while True:
-            page = await self.runs_page(name, state=state, cursor=cursor, limit=page_size)
-            for run in page.runs:
-                yield run
-            if page.next_cursor is None:
-                return
-            cursor = page.next_cursor
-
-    async def runs_page(
-        self,
-        name: str,
-        *,
-        state: RunState | None = None,
-        cursor: str | None = None,
-        limit: int | None = None,
-    ) -> RunPage:
-        """One page of `runs`. Pass the previous page's `next_cursor` as `cursor`."""
-        req = r.list_runs(name, state=state, cursor=cursor, limit=limit)
-        return RunPage._from_json(await self._client._send(req))
-
 
 class AsyncRuns:
     """Runs of schedules: one per firing, with its own attempts."""
 
     def __init__(self, client: AsyncWorkly) -> None:
         self._client = client
+
+    async def list(
+        self,
+        *,
+        schedule: str | None = None,
+        state: RunState | None = None,
+        page_size: int | None = None,
+    ) -> AsyncIterator[Run]:
+        """Runs of every schedule, or of one, newest first, fetching pages as needed."""
+        cursor: str | None = None
+        while True:
+            page = await self.list_page(
+                schedule=schedule, state=state, cursor=cursor, limit=page_size
+            )
+            for run in page.runs:
+                yield run
+            if page.next_cursor is None:
+                return
+            cursor = page.next_cursor
+
+    async def list_page(
+        self,
+        *,
+        schedule: str | None = None,
+        state: RunState | None = None,
+        cursor: str | None = None,
+        limit: int | None = None,
+    ) -> RunPage:
+        """One page of `list`. Pass the previous page's `next_cursor` as `cursor`."""
+        req = r.list_runs(schedule=schedule, state=state, cursor=cursor, limit=limit)
+        return RunPage._from_json(await self._client._send(req))
 
     async def get(self, run_id: str) -> Run:
         return Run._from_json(await self._client._send(r.get_run(run_id)))

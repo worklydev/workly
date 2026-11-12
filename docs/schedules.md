@@ -105,16 +105,18 @@ Retries are fewer and shorter than a queue's by default, so a failing run gives 
 Each run has a state: `pending`, `running`, `succeeded`, `failed`, `cancelled` or `skipped`. A run is created once per scheduled time, even if the server fails over at that moment; like tasks, its delivery is at least once.
 
 ```sh
-workly schedules runs nightly-report            # newest first
-workly schedules runs nightly-report --state failed
+workly runs ls --schedule nightly-report        # newest first
+workly runs ls --state failed                   # failed runs of every schedule
 workly runs get <run id>                        # the run and its attempts
 ```
+
+`GET /v1/runs` lists runs newest first, of every schedule or of one, optionally by state: `GET /v1/runs?schedule=nightly-report`, or `GET /v1/runs?state=failed` for every failed run. A run's `started_at` is when its first attempt started and `last_duration_ms` how long its latest attempt took.
 
 The run keeps the request as the schedule had it when the run was created, so its page shows exactly what was sent even after the schedule changes. Retries use the schedule's current retry settings.
 
 - **Run now:** `POST /v1/schedules/{name}/trigger` (or `workly schedules trigger`, or the dashboard's Run now) creates a run with `trigger: manual` and delivers it at once, even while the schedule is paused. It doesn't change when the schedule next runs.
 - **Retry a run:** `POST /v1/runs/{id}/retry` delivers a failed, cancelled, succeeded or skipped run again, with a fresh set of attempts. Retrying a skipped run delivers the time it skipped.
-- **Pause:** `POST /v1/schedules/{name}/pause` stops it from running; runs already pending finish. Resuming starts again from the next scheduled time. Times that pass while it's paused aren't run.
+- **Pause:** `POST /v1/schedules/{name}/pause` stops it from running; runs already pending finish. A paused schedule has `paused_at`, no `next_run_at` and empty `next_runs`; `next_runs_if_resumed` are the times it would run if resumed now. Resuming starts again from the next scheduled time. Times that pass while it's paused aren't run.
 - **Delete:** deleting a schedule deletes its runs.
 
 Finished runs are kept for `WORKLY_RUN_RETENTION` (by default the same as `WORKLY_RETENTION`, 7 days), except that each schedule's latest run is always kept, so a monthly job still shows how it last went.
