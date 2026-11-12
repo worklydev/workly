@@ -164,7 +164,7 @@ Runs are delivered with `Workly-Run-Id`, `Workly-Schedule` and `Workly-Scheduled
 
 ## Task groups
 
-A group tracks a set of tasks and enqueues a callback task once it's closed and they've all finished: a `POST` of the group's status and counts. See [Task groups](https://workly.run/docs/groups/). The callback goes to Workly's `_callbacks` queue unless it names a `queue`.
+A group tracks a set of tasks and enqueues a callback task once it's closed and they've all finished: a `POST` of the group's status and counts. See [Task groups](https://workly.run/docs/groups/). Like every callback, it goes to Workly's `_callbacks` queue.
 
 ```python
 from workly import Callback
@@ -191,6 +191,27 @@ for task in client.tasks.list(group_id=group.id, state="failed"):
 for group in client.groups.list(name="daily-stock-prices", status="failed"):
     print(group.id, group.finished_at)
 ```
+
+## Callbacks
+
+Tasks and schedules take the same `on_complete`: each time the task, or a run of the schedule, succeeds, fails or is cancelled, Workly POSTs a summary of it to the URL. See [Callbacks](https://workly.run/docs/callbacks/).
+
+```python
+client.tasks.enqueue(
+    "exports",
+    url="https://api.example.com/jobs/export",
+    payload={"export_id": 42},
+    on_complete=Callback(url="https://api.example.com/jobs/export-done"),
+)
+client.schedules.put(
+    "nightly-report",
+    cron="0 3 * * *",
+    url="https://api.example.com/reports/nightly",
+    on_complete={"url": "https://api.example.com/reports/nightly-done"},
+)
+```
+
+The summary arrives as the callback task's JSON body: `task_id`, `queue`, `state`, `attempt_count`, `last_status`, `last_error` and `finished_at` for a task; `run_id`, `schedule` and the same outcome fields for a run.
 
 ## Async
 

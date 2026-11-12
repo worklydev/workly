@@ -66,7 +66,7 @@ func claimAll(t *testing.T, s store.Store, ws workspace.ID, queue string) []stor
 // callbacks returns the tasks in the callback queue.
 func callbacks(t *testing.T, s store.Store, ws workspace.ID) []store.Task {
 	t.Helper()
-	tasks, _, err := s.ListTasks(t.Context(), ws, store.TaskFilter{Queue: "callbacks", Limit: 100})
+	tasks, _, err := s.ListTasks(t.Context(), ws, store.TaskFilter{Queue: store.CallbackQueue, Limit: 100})
 	if err != nil {
 		t.Fatalf("ListTasks: %v", err)
 	}
@@ -74,7 +74,7 @@ func callbacks(t *testing.T, s store.Store, ws workspace.ID) []store.Task {
 }
 
 func onComplete() *store.Callback {
-	return &store.Callback{Queue: "callbacks", URL: "http://example.test/done", Headers: map[string]string{"X-Job": "prices"}}
+	return &store.Callback{URL: "http://example.test/done", Headers: map[string]string{"X-Job": "prices"}}
 }
 
 func testGroups(t *testing.T, open func() store.Store) {
@@ -89,7 +89,7 @@ func testGroups(t *testing.T, open func() store.Store) {
 		g.ClosedAt != nil || g.FinishedAt != nil || g.CallbackTaskID != "" {
 		t.Fatalf("CreateGroup = %+v", g)
 	}
-	if cb := g.OnComplete; cb == nil || cb.Queue != "callbacks" || cb.URL != "http://example.test/done" || cb.Headers["X-Job"] != "prices" {
+	if cb := g.OnComplete; cb == nil || cb.URL != "http://example.test/done" || cb.Headers["X-Job"] != "prices" {
 		t.Fatalf("OnComplete = %+v", g.OnComplete)
 	}
 	if got := getGroup(t, s, g); !reflect.DeepEqual(got, g) {
@@ -346,7 +346,7 @@ func testGroupDeleteQueue(t *testing.T, open func() store.Store) {
 
 	// The callback queue is recreated if it was deleted.
 	g2 := mustCreateGroup(t, s, workspace.Default, store.NewGroup{OnComplete: onComplete()})
-	if err := s.DeleteQueue(ctx, workspace.Default, "callbacks"); err != nil {
+	if err := s.DeleteQueue(ctx, workspace.Default, store.CallbackQueue); err != nil {
 		t.Fatalf("DeleteQueue(callbacks): %v", err)
 	}
 	if g2 = closeGroup(t, s, g2); g2.CallbackTaskID == "" {

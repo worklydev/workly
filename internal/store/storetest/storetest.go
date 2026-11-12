@@ -74,6 +74,8 @@ func Run(t *testing.T, factory Factory) {
 		{"GroupDeleteQueue", testGroupDeleteQueue},
 		{"GroupConcurrency", testGroupConcurrency},
 		{"DeleteFinishedGroups", testDeleteFinishedGroups},
+		{"TaskCallbacks", testTaskCallbacks},
+		{"RunCallbacks", testRunCallbacks},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

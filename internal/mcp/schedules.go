@@ -301,6 +301,7 @@ var updateSchedule = newTool("update_schedule", "Create or update schedule",
 		"retry_on_4xx":        prop("boolean", "Retry 4xx responses. By default only 408 and 429 are retried."),
 		"overlap":             prop("string", "When a slot comes while the previous run is still going: skip it (default) or allow it.", "enum", []string{"skip", "allow"}),
 		"missed":              prop("string", "Slots missed while the server was down: skip them (default) or catch_up (run the latest once).", "enum", []string{"skip", "catch_up"}),
+		"on_complete":         onCompleteProp("Callback: each time a run succeeds, fails or is cancelled, Workly POSTs a JSON summary of it (run_id, schedule, state, attempt_count, last_status, last_error) to url, as a task in the _callbacks queue. null removes it."),
 	}, "schedule"),
 	annotations{IdempotentHint: true},
 	func(ctx context.Context, api apiClient, args map[string]json.RawMessage) (any, error) {
@@ -358,7 +359,7 @@ var updateSchedule = newTool("update_schedule", "Create or update schedule",
 var scheduleFields = []string{
 	"cron", "timezone", "url", "method", "headers", "payload", "body", "content_type",
 	"timeout_seconds", "max_attempts", "min_backoff_seconds", "max_backoff_seconds", "backoff_multiplier",
-	"retry_on_4xx", "overlap", "missed",
+	"retry_on_4xx", "overlap", "missed", "on_complete",
 }
 
 func scheduleAction(ctx context.Context, api apiClient, schedule, action string) (any, error) {
@@ -383,7 +384,7 @@ func runSummary(r map[string]any) map[string]any {
 	for _, k := range []string{
 		"id", "schedule", "state", "trigger", "scheduled_for", "skip_reason", "run_at", "attempt_count",
 		"last_status", "last_outcome", "last_error", "created_at", "started_at", "finished_at", "last_attempt_at",
-		"last_duration_ms", "retried_at",
+		"last_duration_ms", "retried_at", "callback_task_id",
 	} {
 		if v, ok := r[k]; ok {
 			out[k] = v

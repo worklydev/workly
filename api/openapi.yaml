@@ -1448,6 +1448,8 @@ components:
             Adds the task to this group, which must be open (`group_closed`
             otherwise). A task enqueued again with the same
             `idempotency_key` isn't added twice.
+        on_complete:
+          $ref: "#/components/schemas/Callback"
     BatchEnqueueRequest:
       type: object
       required: [tasks]
@@ -1555,6 +1557,38 @@ components:
         group_id:
           type: string
           description: The group the task belongs to, if any.
+        on_complete:
+          $ref: "#/components/schemas/Callback"
+        callback_task_id:
+          type: string
+          description: The callback task enqueued when the task last finished, if it has `on_complete`.
+    TaskSummary:
+      type: object
+      description: The body of a task's callback.
+      required: [task_id, queue, state, attempt_count, finished_at]
+      properties:
+        task_id:
+          type: string
+        queue:
+          type: string
+        state:
+          $ref: "#/components/schemas/TaskState"
+        attempt_count:
+          type: integer
+        last_status:
+          type: integer
+          description: HTTP status of the latest attempt, if it got a response.
+        last_outcome:
+          $ref: "#/components/schemas/Outcome"
+        last_error:
+          type: string
+        idempotency_key:
+          type: string
+        group_id:
+          type: string
+        finished_at:
+          type: string
+          format: date-time
     Delivery:
       type: object
       required: [method, url, headers, body]
@@ -1641,19 +1675,18 @@ components:
       type: object
       required: [url]
       description: |
-        A task Workly enqueues when something completes, such as a group: a
-        `POST` to `url` whose JSON body says what completed (for a group,
-        `GroupSummary`). It is delivered like any task in its queue, with the
-        queue's retries; if the queue has been deleted by then, it is created
-        again with default settings.
+        A task Workly enqueues when something completes: a `POST` to `url`
+        whose JSON body says what completed (`TaskSummary` for a task,
+        `RunSummary` for a schedule's run, `GroupSummary` for a group).
+        Callbacks go to `_callbacks`, a queue Workly creates for them,
+        and are delivered like any task in it, with its retries; its
+        settings can be changed like any queue's.
+
+        A task's or a schedule's callback is called each time the task or
+        a run succeeds, fails or is cancelled, and again if it is retried
+        by hand and finishes again; skipped runs don't call it. A group's
+        is called once, when the group completes.
       properties:
-        queue:
-          type: string
-          description: |
-            The queue to enqueue the callback into. Defaults to
-            `_callbacks`, a queue Workly creates for callbacks, whose
-            settings can be changed like any queue's. Always set in
-            responses.
         url:
           type: string
           description: The http(s) URL to deliver the callback to.
@@ -1827,6 +1860,8 @@ components:
           $ref: "#/components/schemas/OverlapPolicy"
         missed:
           $ref: "#/components/schemas/MissedPolicy"
+        on_complete:
+          $ref: "#/components/schemas/Callback"
     OverlapPolicy:
       type: string
       enum: [skip, allow]
@@ -1916,6 +1951,8 @@ components:
             format: date-time
         last_run:
           $ref: "#/components/schemas/LastRun"
+        on_complete:
+          $ref: "#/components/schemas/Callback"
         created_at:
           type: string
           format: date-time
@@ -2038,6 +2075,36 @@ components:
           type: string
           format: date-time
           description: When the run was last retried by hand. Absent if never.
+        callback_task_id:
+          type: string
+          description: The callback task enqueued when the run last finished, if its schedule has `on_complete`.
+    RunSummary:
+      type: object
+      description: The body of a schedule's callback.
+      required: [run_id, schedule, state, trigger, scheduled_for, attempt_count, finished_at]
+      properties:
+        run_id:
+          type: string
+        schedule:
+          type: string
+        state:
+          $ref: "#/components/schemas/RunState"
+        trigger:
+          $ref: "#/components/schemas/RunTrigger"
+        scheduled_for:
+          type: string
+          format: date-time
+        attempt_count:
+          type: integer
+        last_status:
+          type: integer
+        last_outcome:
+          $ref: "#/components/schemas/Outcome"
+        last_error:
+          type: string
+        finished_at:
+          type: string
+          format: date-time
     RunList:
       type: object
       required: [runs]

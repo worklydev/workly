@@ -16,6 +16,7 @@ The same binary runs everywhere: `workly dev` on your laptop (SQLite, no configu
 - [Concepts](concepts.md): queues, tasks, attempts, retries, delivery semantics and signing, including verifying signatures without an SDK.
 - [Schedules](schedules.md): call an endpoint on a cron timetable.
 - [Task groups](groups.md): fan out tasks and get one callback when they've all finished.
+- [Callbacks](callbacks.md): be called with the outcome each time a task or a schedule's run finishes.
 - [Alerts](alerts.md): hear about failed tasks and runs by email or in Slack.
 - [Configuration as code](deploy.md): keep queues and schedules in a `workly.yaml` and deploy it with `workly deploy`.
 - [Self-hosting](self-hosting.md): run it in production on Docker, Compose or Kubernetes.

@@ -132,7 +132,7 @@ Or from the CLI:
 
 ```sh
 group=$(workly groups create --name daily-stock-prices \
-  --callback-queue jobs --callback-url https://api.example.com/jobs/refresh-views)
+  --callback-url https://api.example.com/jobs/refresh-views)
 workly tasks enqueue stock-prices https://api.example.com/jobs/update-stock-price -d '{"symbol": "NET"}' --group $group
 workly groups close $group
 workly groups get $group
@@ -156,7 +156,7 @@ To try it locally, point the URLs at `http://localhost:7337/_dev/echo`.
 
 ## The callback
 
-`on_complete` is a callback: a URL, and optionally a queue and headers. When the group completes, Workly enqueues a task: a `POST` to the URL with the group's summary as its JSON body.
+`on_complete` is a [callback](callbacks.md): a URL, and optionally headers. Tasks and schedules take the same one. When the group completes, Workly enqueues a task: a `POST` to the URL with the group's summary as its JSON body.
 
 ```json
 {
@@ -172,9 +172,9 @@ To try it locally, point the URLs at `http://localhost:7337/_dev/echo`.
 
 It is enqueued once per group, and only once: the group completes in the same database transaction that finishes its last task (or closes it), and that transaction enqueues the callback. A crash can't leave a completed group without its callback, and two completions racing each other can't enqueue two.
 
-From there it is a normal task: it is delivered with its queue's retries, signed, and recorded, and the group's `callback_task_id` points to it. As with every task, delivery is at least once, so make the handler safe to run twice; `group_id` identifies the group. `headers` in `on_complete` are sent with the callback.
+From there it is a normal task: it is delivered with the `_callbacks` queue's retries, signed, and recorded, and the group's `callback_task_id` points to it. As with every task, delivery is at least once, so make the handler safe to run twice; `group_id` identifies the group. `headers` in `on_complete` are sent with the callback.
 
-Callbacks go to the `_callbacks` queue unless they name another. Workly creates it when a group first needs it, and only Workly enqueues into it, so everything in it is a callback. It has the default settings; to give callbacks more retries or a longer timeout, configure it like any queue, e.g. in [`workly.yaml`](deploy.md):
+Callbacks go to the `_callbacks` queue. Workly creates it when a callback first needs it, and only Workly enqueues into it, so everything in it is a callback. It has the default settings; to give callbacks more retries or a longer timeout, configure it like any queue, e.g. in [`workly.yaml`](deploy.md):
 
 ```yaml
 queues:
@@ -183,7 +183,7 @@ queues:
     timeout_seconds: 300
 ```
 
-To keep a callback with the rest of a job's tasks, name their queue: `Callback(url=…, queue="jobs")`. If the callback's queue has been deleted by the time the group completes, it is created again with default settings.
+If `_callbacks` has been deleted by the time the group completes, it is created again with default settings.
 
 The callback fires whether the group succeeded or failed: check `status`. A group without `on_complete` still completes, and you can poll it instead.
 

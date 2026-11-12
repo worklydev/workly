@@ -565,7 +565,7 @@ GROUP: dict[str, Any] = {
     "failed": 0,
     "cancelled": 0,
     "remaining": 2,
-    "on_complete": {"queue": "jobs", "url": "https://example.com/done"},
+    "on_complete": {"url": "https://example.com/done"},
     "created_at": "2026-10-19T10:00:00Z",
     "closed_at": "2026-10-19T10:00:01Z",
 }
@@ -581,19 +581,18 @@ def test_groups() -> None:
     c = client(handler)
     group = c.groups.create(
         name="daily-prices",
-        on_complete={"queue": "jobs", "url": "https://example.com/done", "headers": {"X-A": "1"}},
+        on_complete={"url": "https://example.com/done", "headers": {"X-A": "1"}},
     )
     assert (requests[0].method, requests[0].url.path) == ("POST", "/v1/groups")
     assert json.loads(requests[0].content) == {
         "name": "daily-prices",
         "on_complete": {
-            "queue": "jobs",
             "url": "https://example.com/done",
             "headers": {"X-A": "1"},
         },
     }
     assert group.remaining == 2 and group.finished_at is None
-    assert group.on_complete == workly.Callback(url="https://example.com/done", queue="jobs")
+    assert group.on_complete == workly.Callback(url="https://example.com/done")
 
     c.groups.close("grp_1")
     c.tasks.enqueue("prices", url="https://example.com/p", group_id="grp_1")
@@ -603,25 +602,38 @@ def test_groups() -> None:
     assert requests[3].url.params["group_id"] == "grp_1"
 
 
-def test_group_callback_forms() -> None:
-    requests, handler = recorder(*[httpx.Response(201, json=GROUP)] * 4)
+def test_callback_forms() -> None:
+    requests, handler = recorder(
+        *[httpx.Response(201, json=GROUP)] * 3,
+        httpx.Response(201, json=TASK),
+        httpx.Response(200, json={"results": [{"created": True, "task": TASK}]}),
+    )
     c = client(handler)
     c.groups.create(on_complete=workly.Callback(url="https://example.com/done"))
     c.groups.create(on_complete={"url": "https://example.com/done"})
     c.groups.create(
-        on_complete=workly.Callback(
-            url="https://example.com/done", queue="jobs", headers={"X-A": "1"}
-        )
+        on_complete=workly.Callback(url="https://example.com/done", headers={"X-A": "1"})
     )
-    c.groups.create(on_complete={"url": "https://example.com/done", "queue": "_callbacks"})
-    bodies = [json.loads(r.content)["on_complete"] for r in requests]
-    # The server fills in the default queue.
-    assert bodies == [
+    c.tasks.enqueue(
+        "jobs", url="https://example.com/j", on_complete={"url": "https://example.com/done"}
+    )
+    c.tasks.enqueue_many(
+        "jobs",
+        [
+            {
+                "url": "https://example.com/j",
+                "on_complete": workly.Callback(url="https://example.com/done"),
+            }
+        ],
+    )
+    bodies = [json.loads(r.content) for r in requests]
+    assert [b["on_complete"] for b in bodies[:4]] == [
         {"url": "https://example.com/done"},
         {"url": "https://example.com/done"},
-        {"url": "https://example.com/done", "queue": "jobs", "headers": {"X-A": "1"}},
+        {"url": "https://example.com/done", "headers": {"X-A": "1"}},
         {"url": "https://example.com/done"},
     ]
+    assert bodies[4]["tasks"][0]["on_complete"] == {"url": "https://example.com/done"}
     with pytest.raises(TypeError):
         workly.Callback("https://example.com/done")  # type: ignore[misc]
 

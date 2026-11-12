@@ -1,15 +1,14 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Lock } from 'lucide-react';
-import { Link, useParams, useSearchParams } from 'react-router';
+import { useParams, useSearchParams } from 'react-router';
 import {
   closeGroupMutation,
   getGroupOptions,
-  getTaskOptions,
   listQueuesOptions,
   searchTasksInfiniteOptions,
 } from '../../api/@tanstack/react-query.gen';
 import type { Group, SearchTasksData, TaskState } from '../../api';
-import { CodePanel } from '../../components/CodePanel';
+import { CallbackSection } from '../../components/CallbackSection';
 import { CopyButton } from '../../components/CopyButton';
 import { DisabledReason } from '../../components/DisabledReason';
 import { PageHeader } from '../../components/PageHeader';
@@ -18,13 +17,10 @@ import { ErrorText, Muted } from '../../components/QueryState';
 import { RelativeTime } from '../../components/RelativeTime';
 import { Section } from '../../components/Section';
 import { StatCard, StatStrip } from '../../components/StatCard';
-import { GroupStatusBadge, TaskStateBadge } from '../../components/states';
+import { GroupStatusBadge } from '../../components/states';
 import { TaskTable } from '../../components/TaskTable';
 import { PAGE_SIZE } from '../../hooks/useListPage';
-import { useNow } from '../../hooks/useNow';
 import { errorMessage, LIVE } from '../../lib/api';
-import { useFromHere } from '../../lib/from';
-import { displayState } from '../../lib/states';
 import { groupFinished } from '../../lib/groups';
 import { taskPaging } from '../../lib/tasks';
 import { useTaskSort } from '../../lib/taskSort';
@@ -134,34 +130,26 @@ function CloseGroup({ group }: { group: Group }) {
 }
 
 function Callback({ group: g }: { group: Group }) {
-  const cb = g.on_complete;
-  const headers = Object.entries(cb?.headers ?? {})
-    .map(([k, v]) => `${k}: ${v}`)
-    .join('\n');
-  return (
-    <Section title="Callback">
-      {cb ? (
-        <>
-          <CallbackStatus group={g} />
-          <CodePanel
-            title={
-              <span className="min-w-0 truncate font-mono" title={cb.url}>
-                POST {cb.url}
-              </span>
-            }
-          >
-            {headers && `${headers}\n\n`}
-            {JSON.stringify(summary(g), null, 2)}
-          </CodePanel>
-          <p className="text-xs text-faint">
-            Enqueued into <span className="font-mono">{cb.queue}</span> once, when the group completes, and delivered
-            with that queue's retries. The body has the counts at completion.
-          </p>
-        </>
-      ) : (
+  if (!g.on_complete) {
+    return (
+      <Section title="Callback">
         <Muted>No callback. Set on_complete when creating a group to have Workly call you when it completes.</Muted>
-      )}
-    </Section>
+      </Section>
+    );
+  }
+  return (
+    <CallbackSection
+      callback={g.on_complete}
+      taskId={g.callback_task_id}
+      body={summary(g)}
+      waiting="Waiting: it is enqueued when the group completes."
+      note={
+        <>
+          Enqueued into <span className="font-mono">_callbacks</span> once, when the group completes, and delivered with
+          that queue's retries. The body has the counts at completion.
+        </>
+      }
+    />
   );
 }
 
@@ -176,28 +164,6 @@ function summary(g: Group) {
     failed: g.failed,
     cancelled: g.cancelled,
   };
-}
-
-function CallbackStatus({ group: g }: { group: Group }) {
-  const id = g.callback_task_id ?? '';
-  const { data: task } = useQuery({
-    ...getTaskOptions({ path: { id } }),
-    enabled: id !== '',
-    ...LIVE,
-  });
-  const from = useFromHere();
-  const now = useNow(5_000);
-  if (!id) {
-    return <p className="text-sm text-muted-foreground">Waiting: it is enqueued when the group completes.</p>;
-  }
-  return (
-    <div className="flex items-center gap-2 text-sm">
-      {task ? <TaskStateBadge state={displayState(task, now)} /> : <span className="text-faint">…</span>}
-      <Link to={`/tasks/${id}`} state={from} className="font-mono text-xs underline underline-offset-4">
-        {id}
-      </Link>
-    </div>
-  );
 }
 
 function Tasks({ group }: { group: Group }) {

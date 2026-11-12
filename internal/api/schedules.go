@@ -78,6 +78,9 @@ func scheduleConfig(in ScheduleConfig, maxBody int64) (store.ScheduleConfig, cro
 	if in.Missed != nil {
 		cfg.Missed = store.MissedPolicy(*in.Missed)
 	}
+	if cfg.OnComplete, err = validateCallback(in.OnComplete, maxBody); err != nil {
+		return cfg, c, nil, err
+	}
 
 	switch {
 	case cfg.Timeout < minTimeout || cfg.Timeout > maxTimeout:
@@ -120,6 +123,7 @@ func toSchedule(sc store.Schedule, now time.Time) Schedule {
 		NextRuns:          []time.Time{},
 		CreatedAt:         sc.CreatedAt,
 		UpdatedAt:         sc.UpdatedAt,
+		OnComplete:        toCallback(sc.OnComplete),
 	}
 	out.Payload, out.Body = bodyFields(sc.Headers, sc.Body)
 	// A schedule saved by an older server can only fail to parse if its
@@ -180,6 +184,7 @@ func toRun(r store.Run) Run {
 		StartedAt:     r.StartedAt,
 		RetriedAt:     r.RetriedAt,
 	}
+	out.CallbackTaskId = optional(r.CallbackTaskID)
 	out.LastDurationMs = durationMillis(r.LastDuration)
 	out.Payload, out.Body = bodyFields(r.Headers, r.Body)
 	if r.SkipReason != "" {

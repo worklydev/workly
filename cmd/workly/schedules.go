@@ -150,6 +150,9 @@ separate (see pause and resume). --payload and --body take a value, @file, or
 			setIf(f.Changed("retry-on-4xx"), &cfg.RetryOn4xx, must(f.GetBool("retry-on-4xx")))
 			setIf(f.Changed("overlap"), &cfg.Overlap, client.OverlapPolicy(must(f.GetString("overlap"))))
 			setIf(f.Changed("missed"), &cfg.Missed, client.MissedPolicy(must(f.GetString("missed"))))
+			if f.Changed("on-complete") {
+				cfg.OnComplete = &client.Callback{Url: must(f.GetString("on-complete"))}
+			}
 
 			c, err := newClient(cmd)
 			if err != nil {
@@ -178,6 +181,7 @@ separate (see pause and resume). --payload and --body take a value, @file, or
 	f.Bool("retry-on-4xx", false, "retry 4xx responses (by default only 408 and 429 are retried)")
 	f.String("overlap", "skip", "a slot that comes while the previous run is still going: skip or allow")
 	f.String("missed", "skip", "slots missed while the server was down: skip, or catch_up (run the latest once)")
+	f.String("on-complete", "", "POST a summary of each run to this URL when it finishes")
 	_ = cmd.MarkFlagRequired("cron")
 	return cmd
 }
@@ -396,6 +400,9 @@ func printSchedule(w io.Writer, s *client.Schedule) {
 		{"Overlap", string(s.Overlap)},
 		{"Missed", string(s.Missed)},
 	}
+	if s.OnComplete != nil {
+		rows = append(rows, []string{"Callback", s.OnComplete.Url})
+	}
 	next, label := s.NextRuns, "Next runs"
 	if s.NextRunsIfResumed != nil {
 		next, label = *s.NextRunsIfResumed, "Next runs if resumed"
@@ -450,6 +457,9 @@ func printRun(w io.Writer, r *client.Run, attempts []client.Attempt) {
 	rows = append(rows, []string{"Attempts", strconv.Itoa(r.AttemptCount)})
 	if r.LastError != nil {
 		rows = append(rows, []string{"Last error", *r.LastError})
+	}
+	if r.CallbackTaskId != nil {
+		rows = append(rows, []string{"Callback", "task " + *r.CallbackTaskId})
 	}
 	if r.FinishedAt != nil {
 		rows = append(rows, []string{"Finished", r.FinishedAt.Local().Format(time.DateTime) + " (" + ago(*r.FinishedAt) + ")"})

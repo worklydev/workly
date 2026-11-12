@@ -88,6 +88,7 @@ export function SchedulePage() {
               value: schedule.missed === 'skip' ? 'skip, record it' : 'catch up once',
               prose: true,
             },
+            ...(schedule.on_complete ? [{ label: 'Callback', value: schedule.on_complete.url }] : []),
           ]}
         />
       </div>

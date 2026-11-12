@@ -526,6 +526,7 @@ var enqueueTask = newTool("enqueue_task", "Enqueue task",
 		"max_attempts":    prop("integer", "Overrides the queue's max_attempts.", "minimum", 1, "maximum", 1000),
 		"timeout_seconds": prop("number", "Overrides the queue's response timeout.", "minimum", 1, "maximum", 1800),
 		"group_id":        prop("string", "Adds the task to this task group, which must be open."),
+		"on_complete":     onCompleteProp("Callback: each time the task succeeds, fails or is cancelled, Workly POSTs a JSON summary of it (task_id, state, attempt_count, last_status, last_error) to url, as a task in the _callbacks queue."),
 	}, "queue", "url"),
 	annotations{OpenWorldHint: true},
 	func(ctx context.Context, api apiClient, args enqueueArgs) (any, error) {
@@ -556,6 +557,19 @@ type enqueueRequest struct {
 	MaxAttempts    *int              `json:"max_attempts,omitempty"`
 	TimeoutSeconds *float64          `json:"timeout_seconds,omitempty"`
 	GroupID        string            `json:"group_id,omitempty"`
+	OnComplete     json.RawMessage   `json:"on_complete,omitempty"`
+}
+
+func onCompleteProp(description string) map[string]any {
+	return map[string]any{
+		"type":        "object",
+		"description": description,
+		"properties": map[string]any{
+			"url":     prop("string", "The http(s) URL to POST the summary to."),
+			"headers": prop("object", "Headers sent with the callback. Workly-* headers are reserved.", "additionalProperties", map[string]any{"type": "string"}),
+		},
+		"required": []string{"url"},
+	}
 }
 
 var retryTask = newTool("retry_task", "Retry task",
@@ -718,7 +732,7 @@ func summary(t map[string]any) map[string]any {
 	for _, k := range []string{
 		"id", "queue", "state", "method", "url", "run_at", "attempt_count", "max_attempts", "last_status",
 		"last_outcome", "last_error", "idempotency_key", "group_id", "created_at", "started_at", "finished_at",
-		"last_attempt_at", "last_duration_ms", "retried_at",
+		"last_attempt_at", "last_duration_ms", "retried_at", "callback_task_id",
 	} {
 		if v, ok := t[k]; ok {
 			out[k] = v

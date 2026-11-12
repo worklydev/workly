@@ -269,6 +269,7 @@ export type EnqueueRequest = {
      *
      */
     group_id?: string;
+    on_complete?: Callback;
 };
 
 export type BatchEnqueueRequest = {
@@ -355,6 +356,30 @@ export type Task = {
      * The group the task belongs to, if any.
      */
     group_id?: string;
+    on_complete?: Callback;
+    /**
+     * The callback task enqueued when the task last finished, if it has `on_complete`.
+     */
+    callback_task_id?: string;
+};
+
+/**
+ * The body of a task's callback.
+ */
+export type TaskSummary = {
+    task_id: string;
+    queue: string;
+    state: TaskState;
+    attempt_count: number;
+    /**
+     * HTTP status of the latest attempt, if it got a response.
+     */
+    last_status?: number;
+    last_outcome?: Outcome;
+    last_error?: string;
+    idempotency_key?: string;
+    group_id?: string;
+    finished_at: string;
 };
 
 export type Delivery = {
@@ -426,22 +451,20 @@ export type AttemptList = {
 export type GroupStatus = 'open' | 'running' | 'succeeded' | 'failed';
 
 /**
- * A task Workly enqueues when something completes, such as a group: a
- * `POST` to `url` whose JSON body says what completed (for a group,
- * `GroupSummary`). It is delivered like any task in its queue, with the
- * queue's retries; if the queue has been deleted by then, it is created
- * again with default settings.
+ * A task Workly enqueues when something completes: a `POST` to `url`
+ * whose JSON body says what completed (`TaskSummary` for a task,
+ * `RunSummary` for a schedule's run, `GroupSummary` for a group).
+ * Callbacks go to `_callbacks`, a queue Workly creates for them,
+ * and are delivered like any task in it, with its retries; its
+ * settings can be changed like any queue's.
+ *
+ * A task's or a schedule's callback is called each time the task or
+ * a run succeeds, fails or is cancelled, and again if it is retried
+ * by hand and finishes again; skipped runs don't call it. A group's
+ * is called once, when the group completes.
  *
  */
 export type Callback = {
-    /**
-     * The queue to enqueue the callback into. Defaults to
-     * `_callbacks`, a queue Workly creates for callbacks, whose
-     * settings can be changed like any queue's. Always set in
-     * responses.
-     *
-     */
-    queue?: string;
     /**
      * The http(s) URL to deliver the callback to.
      */
@@ -581,6 +604,7 @@ export type ScheduleConfig = {
     retry_on_4xx?: boolean;
     overlap?: OverlapPolicy;
     missed?: MissedPolicy;
+    on_complete?: Callback;
 };
 
 /**
@@ -647,6 +671,7 @@ export type Schedule = {
      */
     next_runs_if_resumed?: Array<string>;
     last_run?: LastRun;
+    on_complete?: Callback;
     created_at: string;
     updated_at: string;
 };
@@ -741,6 +766,26 @@ export type Run = {
      * When the run was last retried by hand. Absent if never.
      */
     retried_at?: string;
+    /**
+     * The callback task enqueued when the run last finished, if its schedule has `on_complete`.
+     */
+    callback_task_id?: string;
+};
+
+/**
+ * The body of a schedule's callback.
+ */
+export type RunSummary = {
+    run_id: string;
+    schedule: string;
+    state: RunState;
+    trigger: RunTrigger;
+    scheduled_for: string;
+    attempt_count: number;
+    last_status?: number;
+    last_outcome?: Outcome;
+    last_error?: string;
+    finished_at: string;
 };
 
 export type RunList = {

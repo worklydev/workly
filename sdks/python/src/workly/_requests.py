@@ -15,7 +15,6 @@ from typing import Any, Required, TypedDict
 from urllib.parse import quote
 
 from ._models import (
-    CALLBACK_QUEUE,
     AlertChannelType,
     Callback,
     GroupStatus,
@@ -75,13 +74,13 @@ class TaskSpec(TypedDict, total=False):
     max_attempts: int
     timeout_seconds: float
     group_id: str
+    on_complete: Callback | CallbackDict
 
 
 class CallbackDict(TypedDict, total=False):
     """A `Callback` as a dict, with the same fields."""
 
     url: Required[str]
-    queue: str
     headers: Mapping[str, str]
 
 
@@ -91,12 +90,10 @@ GroupCallbackSpec = CallbackDict
 
 def callback_body(cb: Callback | CallbackDict) -> dict[str, Any]:
     if isinstance(cb, Callback):
-        url, queue, headers = cb.url, cb.queue, cb.headers
+        url, headers = cb.url, cb.headers
     else:
-        url, queue, headers = cb["url"], cb.get("queue", CALLBACK_QUEUE), cb.get("headers", {})
+        url, headers = cb["url"], cb.get("headers", {})
     body: dict[str, Any] = {"url": url}
-    if queue != CALLBACK_QUEUE:
-        body["queue"] = queue
     if headers:
         body["headers"] = dict(headers)
     return body
@@ -111,6 +108,8 @@ def task_body(spec: Mapping[str, Any]) -> dict[str, Any]:
             value = _timestamp(value, "run_at")
         elif key == "headers":
             value = dict(value)
+        elif key == "on_complete":
+            value = callback_body(value)
         body[key] = value
     if "payload" in body and "body" in body:
         raise ValueError("pass payload or body, not both")
@@ -326,7 +325,11 @@ def put_schedule(name: str, config: Mapping[str, Any]) -> Request:
     for key, value in config.items():
         if value is None:
             continue
-        body[key] = dict(value) if key == "headers" else value
+        if key == "headers":
+            value = dict(value)
+        elif key == "on_complete":
+            value = callback_body(value)
+        body[key] = value
     if "payload" in body and "body" in body:
         raise ValueError("pass payload or body, not both")
     return Request("PUT", f"/v1/schedules/{_q(name)}", json=body, idempotent=True)

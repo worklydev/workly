@@ -236,9 +236,14 @@ class Task:
     """When the first delivery attempt started; minus `created_at`, the time spent waiting."""
     last_duration_ms: int | None = None
     """How long the latest finished attempt took."""
+    on_complete: Callback | None = None
+    """Called each time the task finishes."""
+    callback_task_id: str | None = None
+    """The callback task enqueued when the task last finished, if it has `on_complete`."""
 
     @classmethod
     def _from_json(cls, d: dict[str, Any]) -> Task:
+        cb = d.get("on_complete")
         return cls(
             id=d["id"],
             queue=d["queue"],
@@ -264,6 +269,8 @@ class Task:
             group_id=d.get("group_id"),
             started_at=_opt_time(d.get("started_at")),
             last_duration_ms=d.get("last_duration_ms"),
+            on_complete=None if cb is None else Callback._from_json(cb),
+            callback_task_id=d.get("callback_task_id"),
         )
 
 
@@ -396,10 +403,13 @@ class Schedule:
     """When a paused schedule was paused; None while it runs."""
     next_runs_if_resumed: list[datetime] | None = None
     """While paused, the five slots it would run at if resumed now; None while it runs."""
+    on_complete: Callback | None = None
+    """Called each time a run finishes, except skipped runs."""
 
     @classmethod
     def _from_json(cls, d: dict[str, Any]) -> Schedule:
         last = d.get("last_run")
+        cb = d.get("on_complete")
         next_runs: list[str] = d.get("next_runs") or []
         return cls(
             name=d["name"],
@@ -430,6 +440,7 @@ class Schedule:
                 if (resumed := d.get("next_runs_if_resumed")) is None
                 else [_time(t) for t in resumed]
             ),
+            on_complete=None if cb is None else Callback._from_json(cb),
         )
 
 
@@ -464,6 +475,8 @@ class Run:
     """When the first delivery attempt started."""
     last_duration_ms: int | None = None
     """How long the latest finished attempt took."""
+    callback_task_id: str | None = None
+    """The callback task enqueued when the run last finished, if its schedule has `on_complete`."""
 
     @classmethod
     def _from_json(cls, d: dict[str, Any]) -> Run:
@@ -491,6 +504,7 @@ class Run:
             retried_at=_opt_time(d.get("retried_at")),
             started_at=_opt_time(d.get("started_at")),
             last_duration_ms=d.get("last_duration_ms"),
+            callback_task_id=d.get("callback_task_id"),
         )
 
 
@@ -546,22 +560,19 @@ CALLBACK_QUEUE = "_callbacks"
 class Callback:
     """A task Workly enqueues when something completes: a POST to `url` saying what completed.
 
-    A group's callback has the group's summary as its JSON body. It is
-    delivered like any task in its queue, with that queue's retries.
+    Its JSON body is a `TaskSummary` for a task, a `RunSummary` for a
+    schedule's run and a `GroupSummary` for a group. It is delivered as a task
+    in the `_callbacks` queue, with that queue's retries: configure it like
+    any queue to change them.
     """
 
     url: str
-    queue: str = CALLBACK_QUEUE
-    """The queue to enqueue the callback into. `_callbacks`, the default, is
-    created by Workly; configure it like any queue to change its retries."""
     headers: Mapping[str, str] = field(default_factory=dict[str, str])
     """Headers sent with the callback. `Workly-*` headers are reserved."""
 
     @classmethod
     def _from_json(cls, d: dict[str, Any]) -> Callback:
-        return cls(
-            url=d["url"], queue=d.get("queue") or CALLBACK_QUEUE, headers=d.get("headers") or {}
-        )
+        return cls(url=d["url"], headers=d.get("headers") or {})
 
 
 GroupCallback = Callback

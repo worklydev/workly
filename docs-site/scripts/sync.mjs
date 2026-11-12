@@ -40,6 +40,8 @@ const descriptions = {
     'Call an HTTP endpoint on a cron timetable, in your timezone, with retries, signed requests, run history and a run-now button: cron for HTTP endpoints.',
   'groups.md':
     "Fan out tasks and get one callback when they've all finished, with counts of what succeeded and failed: fan-out and fan-in for an HTTP task queue.",
+  'callbacks.md':
+    'Have Workly POST a summary to your endpoint each time a task or scheduled run succeeds, fails or is cancelled: callbacks for an HTTP task queue.',
   'alerts.md': "Get an email or a Slack message when Workly tasks or schedule runs fail, so you don't have to watch the dashboard.",
   'deploy.md':
     'Keep Workly queues and schedules in a workly.yaml next to your code: validate it in CI, see the plan, and apply it with workly deploy.',

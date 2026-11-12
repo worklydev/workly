@@ -506,20 +506,20 @@ type BatchEnqueueResult struct {
 	Task    Task `json:"task"`
 }
 
-// Callback A task Workly enqueues when something completes, such as a group: a
-// `POST` to `url` whose JSON body says what completed (for a group,
-// `GroupSummary`). It is delivered like any task in its queue, with the
-// queue's retries; if the queue has been deleted by then, it is created
-// again with default settings.
+// Callback A task Workly enqueues when something completes: a `POST` to `url`
+// whose JSON body says what completed (`TaskSummary` for a task,
+// `RunSummary` for a schedule's run, `GroupSummary` for a group).
+// Callbacks go to `_callbacks`, a queue Workly creates for them,
+// and are delivered like any task in it, with its retries; its
+// settings can be changed like any queue's.
+//
+// A task's or a schedule's callback is called each time the task or
+// a run succeeds, fails or is cancelled, and again if it is retried
+// by hand and finishes again; skipped runs don't call it. A group's
+// is called once, when the group completes.
 type Callback struct {
 	// Headers Headers sent with the callback. `Workly-*` headers are reserved.
 	Headers *map[string]string `json:"headers,omitempty"`
-
-	// Queue The queue to enqueue the callback into. Defaults to
-	// `_callbacks`, a queue Workly creates for callbacks, whose
-	// settings can be changed like any queue's. Always set in
-	// responses.
-	Queue *string `json:"queue,omitempty"`
 
 	// Url The http(s) URL to deliver the callback to.
 	//
@@ -578,6 +578,19 @@ type EnqueueRequest struct {
 	// MaxAttempts Overrides the queue's `max_attempts`.
 	MaxAttempts *int        `json:"max_attempts,omitempty"`
 	Method      *HTTPMethod `json:"method,omitempty"`
+
+	// OnComplete A task Workly enqueues when something completes: a `POST` to `url`
+	// whose JSON body says what completed (`TaskSummary` for a task,
+	// `RunSummary` for a schedule's run, `GroupSummary` for a group).
+	// Callbacks go to `_callbacks`, a queue Workly creates for them,
+	// and are delivered like any task in it, with its retries; its
+	// settings can be changed like any queue's.
+	//
+	// A task's or a schedule's callback is called each time the task or
+	// a run succeeds, fails or is cancelled, and again if it is retried
+	// by hand and finishes again; skipped runs don't call it. A group's
+	// is called once, when the group completes.
+	OnComplete *Callback `json:"on_complete,omitempty"`
 
 	// Payload A JSON body, sent with `Content-Type: application/json`. Use this or `body`.
 	Payload *json.RawMessage `json:"payload,omitempty"`
@@ -650,11 +663,17 @@ type Group struct {
 	IdempotencyKey *string `json:"idempotency_key,omitempty"`
 	Name           *string `json:"name,omitempty"`
 
-	// OnComplete A task Workly enqueues when something completes, such as a group: a
-	// `POST` to `url` whose JSON body says what completed (for a group,
-	// `GroupSummary`). It is delivered like any task in its queue, with the
-	// queue's retries; if the queue has been deleted by then, it is created
-	// again with default settings.
+	// OnComplete A task Workly enqueues when something completes: a `POST` to `url`
+	// whose JSON body says what completed (`TaskSummary` for a task,
+	// `RunSummary` for a schedule's run, `GroupSummary` for a group).
+	// Callbacks go to `_callbacks`, a queue Workly creates for them,
+	// and are delivered like any task in it, with its retries; its
+	// settings can be changed like any queue's.
+	//
+	// A task's or a schedule's callback is called each time the task or
+	// a run succeeds, fails or is cancelled, and again if it is retried
+	// by hand and finishes again; skipped runs don't call it. A group's
+	// is called once, when the group completes.
 	OnComplete *Callback `json:"on_complete,omitempty"`
 
 	// Remaining Tasks still pending or running.
@@ -737,11 +756,17 @@ type NewGroup struct {
 	// Example: daily-stock-prices
 	Name *string `json:"name,omitempty"`
 
-	// OnComplete A task Workly enqueues when something completes, such as a group: a
-	// `POST` to `url` whose JSON body says what completed (for a group,
-	// `GroupSummary`). It is delivered like any task in its queue, with the
-	// queue's retries; if the queue has been deleted by then, it is created
-	// again with default settings.
+	// OnComplete A task Workly enqueues when something completes: a `POST` to `url`
+	// whose JSON body says what completed (`TaskSummary` for a task,
+	// `RunSummary` for a schedule's run, `GroupSummary` for a group).
+	// Callbacks go to `_callbacks`, a queue Workly creates for them,
+	// and are delivered like any task in it, with its retries; its
+	// settings can be changed like any queue's.
+	//
+	// A task's or a schedule's callback is called each time the task or
+	// a run succeeds, fails or is cancelled, and again if it is retried
+	// by hand and finishes again; skipped runs don't call it. A group's
+	// is called once, when the group completes.
 	OnComplete *Callback `json:"on_complete,omitempty"`
 }
 
@@ -887,8 +912,11 @@ type Run struct {
 	AttemptCount int `json:"attempt_count"`
 
 	// Body The body, when it is not JSON.
-	Body      *string   `json:"body,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	Body *string `json:"body,omitempty"`
+
+	// CallbackTaskId The callback task enqueued when the run last finished, if its schedule has `on_complete`.
+	CallbackTaskId *string   `json:"callback_task_id,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
 
 	// FinishedAt When the run succeeded, failed, was cancelled or was skipped.
 	FinishedAt *time.Time        `json:"finished_at,omitempty"`
@@ -990,6 +1018,19 @@ type Schedule struct {
 	// now, to check its cron expression. Absent while it runs.
 	NextRunsIfResumed *[]time.Time `json:"next_runs_if_resumed,omitempty"`
 
+	// OnComplete A task Workly enqueues when something completes: a `POST` to `url`
+	// whose JSON body says what completed (`TaskSummary` for a task,
+	// `RunSummary` for a schedule's run, `GroupSummary` for a group).
+	// Callbacks go to `_callbacks`, a queue Workly creates for them,
+	// and are delivered like any task in it, with its retries; its
+	// settings can be changed like any queue's.
+	//
+	// A task's or a schedule's callback is called each time the task or
+	// a run succeeds, fails or is cancelled, and again if it is retried
+	// by hand and finishes again; skipped runs don't call it. A group's
+	// is called once, when the group completes.
+	OnComplete *Callback `json:"on_complete,omitempty"`
+
 	// Overlap What happens when a slot comes up while the previous run is still
 	// pending or running. `skip` records the slot as a `skipped` run;
 	// `allow` runs it alongside.
@@ -1045,6 +1086,19 @@ type ScheduleConfig struct {
 	// way, at most one run is created for the missed slots.
 	Missed *MissedPolicy `json:"missed,omitempty"`
 
+	// OnComplete A task Workly enqueues when something completes: a `POST` to `url`
+	// whose JSON body says what completed (`TaskSummary` for a task,
+	// `RunSummary` for a schedule's run, `GroupSummary` for a group).
+	// Callbacks go to `_callbacks`, a queue Workly creates for them,
+	// and are delivered like any task in it, with its retries; its
+	// settings can be changed like any queue's.
+	//
+	// A task's or a schedule's callback is called each time the task or
+	// a run succeeds, fails or is cancelled, and again if it is retried
+	// by hand and finishes again; skipped runs don't call it. A group's
+	// is called once, when the group completes.
+	OnComplete *Callback `json:"on_complete,omitempty"`
+
 	// Overlap What happens when a slot comes up while the previous run is still
 	// pending or running. `skip` records the slot as a `skipped` run;
 	// `allow` runs it alongside.
@@ -1086,8 +1140,11 @@ type Task struct {
 	AttemptCount int `json:"attempt_count"`
 
 	// Body The body, when it is not JSON.
-	Body      *string   `json:"body,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	Body *string `json:"body,omitempty"`
+
+	// CallbackTaskId The callback task enqueued when the task last finished, if it has `on_complete`.
+	CallbackTaskId *string   `json:"callback_task_id,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
 
 	// FinishedAt When the task succeeded, failed or was cancelled.
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
@@ -1118,6 +1175,19 @@ type Task struct {
 	// MaxAttempts Per-task override, if set.
 	MaxAttempts *int       `json:"max_attempts,omitempty"`
 	Method      HTTPMethod `json:"method"`
+
+	// OnComplete A task Workly enqueues when something completes: a `POST` to `url`
+	// whose JSON body says what completed (`TaskSummary` for a task,
+	// `RunSummary` for a schedule's run, `GroupSummary` for a group).
+	// Callbacks go to `_callbacks`, a queue Workly creates for them,
+	// and are delivered like any task in it, with its retries; its
+	// settings can be changed like any queue's.
+	//
+	// A task's or a schedule's callback is called each time the task or
+	// a run succeeds, fails or is cancelled, and again if it is retried
+	// by hand and finishes again; skipped runs don't call it. A group's
+	// is called once, when the group completes.
+	OnComplete *Callback `json:"on_complete,omitempty"`
 
 	// Payload The body, when it is JSON.
 	Payload *json.RawMessage `json:"payload,omitempty"`

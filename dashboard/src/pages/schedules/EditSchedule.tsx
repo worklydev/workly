@@ -19,7 +19,7 @@ import { Textarea } from '../../primitives/textarea';
 type NumberField =
   'timeout_seconds' | 'max_attempts' | 'min_backoff_seconds' | 'max_backoff_seconds' | 'backoff_multiplier';
 
-type Form = Record<NumberField | 'cron' | 'timezone' | 'url' | 'headers' | 'body', string> & {
+type Form = Record<NumberField | 'cron' | 'timezone' | 'url' | 'headers' | 'body' | 'callback_url', string> & {
   method: HttpMethod;
   retry_on_4xx: boolean;
   overlap: OverlapPolicy;
@@ -44,6 +44,7 @@ function toForm(s?: Schedule): Form {
       retry_on_4xx: false,
       overlap: 'skip',
       missed: 'skip',
+      callback_url: '',
     };
   }
   return {
@@ -61,6 +62,7 @@ function toForm(s?: Schedule): Form {
     retry_on_4xx: s.retry_on_4xx,
     overlap: s.overlap,
     missed: s.missed,
+    callback_url: s.on_complete?.url ?? '',
   };
 }
 
@@ -77,7 +79,7 @@ const LABELS: Record<NumberField, string> = {
  * as they were, so a body keeps its type; a JSON body without a Content-Type
  * is sent as a payload, so it gets application/json.
  */
-function toConfig(f: Form, creating: boolean): ScheduleConfig | string {
+function toConfig(f: Form, creating: boolean, current?: Schedule): ScheduleConfig | string {
   const config: ScheduleConfig = {
     cron: f.cron.trim(),
     timezone: f.timezone.trim() || 'UTC',
@@ -89,6 +91,9 @@ function toConfig(f: Form, creating: boolean): ScheduleConfig | string {
   };
   if (!config.cron) return 'Cron is required.';
   if (!config.url) return 'URL is required.';
+  // The form edits the callback's URL; headers set through the API stay.
+  const callback = f.callback_url.trim();
+  if (callback) config.on_complete = { ...current?.on_complete, url: callback };
   for (const key of Object.keys(LABELS) as NumberField[]) {
     const v = f[key].trim();
     const n = Number(v);
@@ -147,7 +152,7 @@ function ScheduleForm({ schedule, onClose }: { schedule?: Schedule; onClose: () 
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const config = toConfig(form, creating);
+    const config = toConfig(form, creating, schedule);
     if (typeof config === 'string') return setProblem(config);
     const target = creating ? name.trim() : schedule.name;
     if (creating) {
@@ -325,6 +330,20 @@ function ScheduleForm({ schedule, onClose }: { schedule?: Schedule; onClose: () 
                 className="w-24"
               />
             </Unit>
+          </FormRow>
+        </FormGroup>
+
+        <FormGroup title="Callback">
+          <FormRow
+            label="URL"
+            hint="Optional. Workly POSTs a summary of each run here when it succeeds, fails or is cancelled."
+          >
+            <Input
+              value={form.callback_url}
+              onChange={set('callback_url')}
+              placeholder="https://"
+              className="font-mono"
+            />
           </FormRow>
         </FormGroup>
 

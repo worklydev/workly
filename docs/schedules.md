@@ -2,7 +2,7 @@
 
 A schedule calls an HTTP endpoint on a cron timetable: a nightly report, a sync every 15 minutes, a weekly cleanup. Each call is a **run**, delivered, signed and retried like a task, with every attempt recorded. It's cron for HTTP endpoints, with a history and a "run now" button.
 
-Schedules are separate from queues. A schedule has its own settings (retries, timeout, what to do when runs overlap) and its own history, and it never creates tasks or uses a queue's limits.
+Schedules are separate from queues. A schedule has its own settings (retries, timeout, what to do when runs overlap) and its own history, and it never uses a queue's limits. Its only tasks are [callbacks](callbacks.md), if you ask for them.
 
 ```text
 Queue    → Task → Attempt
@@ -93,6 +93,7 @@ The expression is read in the schedule's `timezone`, an IANA name such as `Europ
 | `retry_on_4xx` | `false` | Retry 4xx responses other than 408 and 429. |
 | `overlap` | `skip` | What to do when a run is due while the previous one is still going. |
 | `missed` | `skip` | What to do about times missed while the server was down. |
+| `on_complete` | none | A [callback](callbacks.md), `{url, headers}`, called with a summary each time a run finishes. |
 
 Retries are fewer and shorter than a queue's by default, so a failing run gives up well before a frequent schedule's next one.
 

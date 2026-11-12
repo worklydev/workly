@@ -95,6 +95,9 @@ func TestParseErrors(t *testing.T) {
 		{"version: 1\nschedules:\n  a: {cron: '@daily', url: 'ftp://x.test'}", "schedules.a.url: must be an absolute http or https URL"},
 		{"version: 1\nschedules:\n  a: {cron: '@daily', url: 'https://x.test', headers: {Workly-X: y}}", `schedules.a: header "Workly-X" is reserved`},
 		{"version: 1\nschedules:\n  a: {cron: '@daily', url: 'https://x.test', payload: {}, body: x}", "schedules.a: use either payload or body, not both"},
+		{"version: 1\nschedules:\n  a: {cron: '@daily', url: 'https://x.test', on_complete: 'https://x.test/done'}", "schedules.a.on_complete: must be a mapping with url"},
+		{"version: 1\nschedules:\n  a: {cron: '@daily', url: 'https://x.test', on_complete: {url: 'https://x.test/done', queue: q}}", "schedules.a.on_complete: must be a mapping with url"},
+		{"version: 1\nschedules:\n  a: {cron: '@daily', url: 'https://x.test', on_complete: {url: 'ftp://x.test'}}", "schedules.a.on_complete: url must be an absolute http or https URL"},
 	} {
 		_, err := Parse("workly.yaml", []byte(tt.src), getenv)
 		var invalid *InvalidError
@@ -140,6 +143,7 @@ schedules:
     headers: {Authorization: "Bearer ${TOKEN}", X-New: "1"}
     payload: {a: 2}
     max_attempts: 3
+    on_complete: {url: "${API_URL}/done"}
 `)
 	queues := []api.Queue{
 		{Name: "same", MaxConcurrency: 10, MaxAttempts: 5, MinBackoffSeconds: 2, MaxBackoffSeconds: 3600, BackoffMultiplier: 2, TimeoutSeconds: 30},
@@ -174,7 +178,7 @@ schedules:
 		"queue changed 2 true [{rate_per_second no limit → 5} {max_concurrency 3 → 10}]",
 		"queue new 1 false []",
 		"schedule same 0 false []",
-		"schedule changed 2 false [{cron @hourly → 0 6 * * *} {headers.Authorization changed} {headers.X-New added} {body changed}]",
+		"schedule changed 2 false [{cron @hourly → 0 6 * * *} {on_complete.url none → https://api.example.com/done} {headers.Authorization changed} {headers.X-New added} {body changed}]",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("changes:\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

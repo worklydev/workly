@@ -155,6 +155,9 @@ export interface Task {
   retriedAt?: string;
   /** The group the task belongs to, if any. */
   groupId?: string;
+  onComplete?: Callback;
+  /** The callback task enqueued when the task last finished, if it has `onComplete`. */
+  callbackTaskId?: string;
 }
 
 export interface Attempt {
@@ -223,6 +226,11 @@ export interface TaskSpec {
   timeoutSeconds?: number | undefined;
   /** Adds the task to this group, which must be open. */
   groupId?: string | undefined;
+  /**
+   * Called each time the task succeeds, fails or is cancelled (again after a
+   * retry by hand), with a `TaskSummary` as its JSON body.
+   */
+  onComplete?: Callback | undefined;
 }
 
 /** Filters for `tasks.list`. All are optional and combine. */
@@ -282,6 +290,11 @@ export interface ScheduleConfig {
   overlap?: OverlapPolicy | undefined;
   /** Slots missed while the server was down: `skip` (default) or `catch_up` (run the latest once). */
   missed?: MissedPolicy | undefined;
+  /**
+   * Called each time a run succeeds, fails or is cancelled (not when it is
+   * skipped), with a `RunSummary` as its JSON body.
+   */
+  onComplete?: Callback | undefined;
 }
 
 /** A schedule's most recent run. */
@@ -324,6 +337,7 @@ export interface Schedule {
   /** While paused, the five slots it would run at if resumed now. Absent while it runs. */
   nextRunsIfResumed?: string[];
   lastRun?: LastRun;
+  onComplete?: Callback;
   createdAt: string;
   updatedAt: string;
 }
@@ -357,6 +371,8 @@ export interface Run {
   /** How long the latest finished attempt took. */
   lastDurationMs?: number;
   retriedAt?: string;
+  /** The callback task enqueued when the run last finished, if its schedule has `onComplete`. */
+  callbackTaskId?: string;
 }
 
 export interface RunPage {
@@ -387,14 +403,14 @@ export interface AlertChannelList {
  * what completed. A group's callback has the group's summary as its JSON body.
  * It is delivered like any task in its queue, with that queue's retries.
  */
+/**
+ * A `POST` Workly sends when a task, a schedule's run or a group finishes, as
+ * a task in the `_callbacks` queue (configure it like any queue to change its
+ * retries). Its JSON body is a `TaskSummary`, `RunSummary` or `GroupSummary`.
+ */
 export interface Callback {
   /** The http(s) URL to deliver the callback to. */
   url: string;
-  /**
-   * The queue to enqueue the callback into. `_callbacks`, the default, is
-   * created by Workly; configure it like any queue to change its retries.
-   */
-  queue?: string | undefined;
   /** Headers sent with the callback. `Workly-*` headers are reserved. */
   headers?: Record<string, string> | undefined;
 }
@@ -423,8 +439,7 @@ export interface Group {
   cancelled: number;
   /** Tasks still pending or running. */
   remaining: number;
-  /** Its `queue` is always set. */
-  onComplete?: Callback & { queue: string };
+  onComplete?: Callback;
   /** The callback task, once the group has completed. */
   callbackTaskId?: string;
   createdAt: string;
@@ -451,4 +466,35 @@ export interface GroupSummary {
   succeeded: number;
   failed: number;
   cancelled: number;
+}
+
+/**
+ * The JSON body of a task's callback. It is the task's payload, so its field
+ * names are as sent: snake_case.
+ */
+export interface TaskSummary {
+  task_id: string;
+  queue: string;
+  state: TaskState;
+  attempt_count: number;
+  last_status?: number;
+  last_outcome?: AttemptOutcome;
+  last_error?: string;
+  idempotency_key?: string;
+  group_id?: string;
+  finished_at: string;
+}
+
+/** The JSON body of a schedule's callback, in snake_case as sent. */
+export interface RunSummary {
+  run_id: string;
+  schedule: string;
+  state: RunState;
+  trigger: RunTrigger;
+  scheduled_for: string;
+  attempt_count: number;
+  last_status?: number;
+  last_outcome?: AttemptOutcome;
+  last_error?: string;
+  finished_at: string;
 }

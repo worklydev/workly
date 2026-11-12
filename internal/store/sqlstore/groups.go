@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/worklydev/workly/internal/id"
@@ -20,53 +19,46 @@ import (
 // under the row lock the count update took) makes it happen once.
 
 const groupColumns = `id, workspace_id, name, status, idempotency_key, total, succeeded, failed, cancelled,
-	callback_queue, callback_url, callback_headers, callback_task_id, created_at, closed_at, finished_at`
+	callback_url, callback_headers, callback_task_id, created_at, closed_at, finished_at`
 
 func scanGroup(row interface{ Scan(...any) error }) (store.Group, error) {
 	var (
-		g                                     store.Group
-		name, idemKey, cbQueue, cbURL, cbTask sql.NullString
-		cbHeaders                             []byte
-		created, closed, finished             dbTime
+		g                            store.Group
+		name, idemKey, cbURL, cbTask sql.NullString
+		cbHeaders                    []byte
+		created, closed, finished    dbTime
 	)
 	err := row.Scan(&g.ID, &g.WorkspaceID, &name, &g.Status, &idemKey, &g.Total, &g.Succeeded, &g.Failed, &g.Cancelled,
-		&cbQueue, &cbURL, &cbHeaders, &cbTask, &created, &closed, &finished)
+		&cbURL, &cbHeaders, &cbTask, &created, &closed, &finished)
 	if err != nil {
 		return g, err
 	}
 	g.Name, g.IdempotencyKey, g.CallbackTaskID = name.String, idemKey.String, cbTask.String
-	if cbURL.Valid {
-		g.OnComplete = &store.Callback{Queue: cbQueue.String, URL: cbURL.String}
-		if g.OnComplete.Headers, err = unmarshalHeaders(cbHeaders); err != nil {
-			return g, err
-		}
+	if g.OnComplete, err = scanCallback(cbURL, cbHeaders); err != nil {
+		return g, err
 	}
 	g.CreatedAt, g.ClosedAt, g.FinishedAt = created.Time, closed.ptr(), finished.ptr()
 	return g, nil
 }
 
 func (s *Store) CreateGroup(ctx context.Context, ws workspace.ID, ng store.NewGroup) (store.Group, bool, error) {
-	var cbQueue, cbURL, cbHeaders any
-	if cb := ng.OnComplete; cb != nil {
-		headers, err := marshalHeaders(cb.Headers)
-		if err != nil {
-			return store.Group{}, false, err
-		}
-		cbQueue, cbURL, cbHeaders = cb.Queue, cb.URL, headers
+	cbURL, cbHeaders, err := callbackArgs(ng.OnComplete)
+	if err != nil {
+		return store.Group{}, false, err
 	}
 	var (
 		g       store.Group
 		created bool
 	)
-	err := s.inTx(ctx, func(tx *sql.Tx) error {
+	err = s.inTx(ctx, func(tx *sql.Tx) error {
 		groupID := id.New("grp")
 		res, err := s.exec(ctx, tx, `INSERT INTO task_groups (id, workspace_id, name, status, idempotency_key,
-				callback_queue, callback_url, callback_headers, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+				callback_url, callback_headers, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (workspace_id, idempotency_key) WHERE idempotency_key IS NOT NULL
 			DO NOTHING`,
 			groupID, ws, nullString(ng.Name), store.GroupOpen, nullString(ng.IdempotencyKey),
-			cbQueue, cbURL, cbHeaders, s.ts(time.Now()))
+			cbURL, cbHeaders, s.ts(time.Now()))
 		if err != nil {
 			return err
 		}
@@ -192,26 +184,14 @@ func (s *Store) completeGroup(ctx context.Context, tx *sql.Tx, g *store.Group, n
 	if g.OnComplete == nil {
 		return false, nil
 	}
-	headers := map[string]string{"Content-Type": "application/json"}
-	for k, v := range g.OnComplete.Headers {
-		if strings.EqualFold(k, "Content-Type") {
-			delete(headers, "Content-Type")
-		}
-		headers[k] = v
-	}
 	// The group's ID as idempotency key is a second guard against a
-	// duplicate callback. The callback queue may have been deleted since
-	// the group was created; it is recreated rather than the callback
-	// dropped.
-	cb, _, err := s.createTask(ctx, tx, g.WorkspaceID, store.NewTask{
-		Queue: g.OnComplete.Queue, Method: "POST", URL: g.OnComplete.URL, Headers: headers,
-		Body: g.CallbackBody(), RunAt: now, IdempotencyKey: g.ID,
-	}, true)
+	// duplicate callback.
+	cbID, err := s.enqueueCallback(ctx, tx, g.WorkspaceID, *g.OnComplete, g.CallbackBody(), g.ID, now)
 	if err != nil {
 		return false, err
 	}
-	g.CallbackTaskID = cb.ID
-	_, err = s.exec(ctx, tx, `UPDATE task_groups SET callback_task_id = ? WHERE id = ?`, cb.ID, g.ID)
+	g.CallbackTaskID = cbID
+	_, err = s.exec(ctx, tx, `UPDATE task_groups SET callback_task_id = ? WHERE id = ?`, cbID, g.ID)
 	return err == nil, err
 }
 
