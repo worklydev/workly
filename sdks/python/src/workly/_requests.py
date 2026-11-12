@@ -355,16 +355,18 @@ def trigger_schedule(name: str) -> Request:
 
 
 def list_runs(
-    name: str, *, state: RunState | None, cursor: str | None, limit: int | None
+    *, schedule: str | None, state: RunState | None, cursor: str | None, limit: int | None
 ) -> Request:
     params: dict[str, str] = {}
+    if schedule is not None:
+        params["schedule"] = schedule
     if state is not None:
         params["state"] = state
     if cursor is not None:
         params["cursor"] = cursor
     if limit is not None:
         params["limit"] = str(limit)
-    return Request("GET", f"/v1/schedules/{_q(name)}/runs", params=params, idempotent=True)
+    return Request("GET", "/v1/runs", params=params, idempotent=True)
 
 
 def get_run(run_id: str) -> Request:

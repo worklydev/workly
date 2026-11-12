@@ -115,6 +115,7 @@ func toSchedule(sc store.Schedule, now time.Time) Schedule {
 		Overlap:           OverlapPolicy(sc.Overlap),
 		Missed:            MissedPolicy(sc.Missed),
 		Paused:            sc.Paused,
+		PausedAt:          sc.PausedAt,
 		NextRunAt:         sc.NextRunAt,
 		NextRuns:          []time.Time{},
 		CreatedAt:         sc.CreatedAt,
@@ -124,16 +125,24 @@ func toSchedule(sc store.Schedule, now time.Time) Schedule {
 	// A schedule saved by an older server can only fail to parse if its
 	// zoneinfo went away; it then lists no upcoming slots.
 	if c, loc, err := parseSchedule(sc.Cron, sc.Timezone); err == nil {
+		var next []time.Time
 		t := now
 		if sc.NextRunAt != nil {
-			out.NextRuns = append(out.NextRuns, *sc.NextRunAt)
+			next = append(next, *sc.NextRunAt)
 			t = *sc.NextRunAt
 		}
-		for len(out.NextRuns) < nextRunsShown {
+		for len(next) < nextRunsShown {
 			if t = c.Next(t, loc); t.IsZero() {
 				break
 			}
-			out.NextRuns = append(out.NextRuns, t)
+			next = append(next, t)
+		}
+		// A paused schedule won't run at these times, so they're only what
+		// would happen if it were resumed now.
+		if sc.Paused && next != nil {
+			out.NextRunsIfResumed = &next
+		} else if !sc.Paused && next != nil {
+			out.NextRuns = next
 		}
 	}
 	if l := sc.LastRun; l != nil {
@@ -168,8 +177,10 @@ func toRun(r store.Run) Run {
 		UpdatedAt:     r.UpdatedAt,
 		FinishedAt:    r.FinishedAt,
 		LastAttemptAt: r.LastAttemptAt,
+		StartedAt:     r.StartedAt,
 		RetriedAt:     r.RetriedAt,
 	}
+	out.LastDurationMs = durationMillis(r.LastDuration)
 	out.Payload, out.Body = bodyFields(r.Headers, r.Body)
 	if r.SkipReason != "" {
 		reason := SkipReason(r.SkipReason)
@@ -316,8 +327,8 @@ func (h Handlers) TriggerSchedule(ctx context.Context, req TriggerScheduleReques
 
 func (h Handlers) ListRuns(ctx context.Context, req ListRunsRequestObject) (ListRunsResponseObject, error) {
 	ws := workspaceID(ctx)
-	f := store.RunFilter{Schedule: req.Schedule, Limit: 50}
 	p := req.Params
+	f := store.RunFilter{Limit: 50}
 	if p.Limit != nil {
 		if *p.Limit < 1 || *p.Limit > 200 {
 			return nil, invalid("limit must be between 1 and 200")
@@ -335,11 +346,14 @@ func (h Handlers) ListRuns(ctx context.Context, req ListRunsRequestObject) (List
 	if p.Cursor != nil {
 		f.Cursor = *p.Cursor
 	}
-	// Distinguish a schedule with no runs from a missing one.
-	if _, err := h.Store.GetSchedule(ctx, ws, req.Schedule); errors.Is(err, store.ErrNotFound) {
-		return nil, scheduleNotFound(req.Schedule)
-	} else if err != nil {
-		return nil, err
+	if p.Schedule != nil {
+		f.Schedule = *p.Schedule
+		// Distinguish a schedule with no runs from a missing one.
+		if _, err := h.Store.GetSchedule(ctx, ws, f.Schedule); errors.Is(err, store.ErrNotFound) {
+			return nil, scheduleNotFound(f.Schedule)
+		} else if err != nil {
+			return nil, err
+		}
 	}
 	runs, cursor, err := h.Store.ListRuns(ctx, ws, f)
 	if err != nil {

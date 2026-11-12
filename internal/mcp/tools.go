@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"math"
 	"net/http"
 	"net/url"
 	"slices"
@@ -40,8 +42,9 @@ type annotations struct {
 
 var readOnly = annotations{ReadOnlyHint: true, IdempotentHint: true}
 
-// newTool builds a tool whose arguments decode into A. Unknown arguments are
-// rejected, so a misspelled filter isn't silently ignored.
+// newTool builds a tool whose arguments decode into A. Arguments are checked
+// against the schema first, so an error names the argument at fault, and
+// unknown ones are rejected, so a misspelled filter isn't silently ignored.
 func newTool[A any](name, title, description string, schema map[string]any, ann annotations,
 	run func(ctx context.Context, api apiClient, args A) (any, error),
 ) *tool {
@@ -49,6 +52,9 @@ func newTool[A any](name, title, description string, schema map[string]any, ann 
 	return &tool{
 		Name: name, Title: title, Description: description, InputSchema: schema, Annotations: ann,
 		run: func(ctx context.Context, api apiClient, raw json.RawMessage) (any, error) {
+			if err := checkArguments(schema, raw); err != nil {
+				return nil, argumentError{err}
+			}
 			var args A
 			if len(raw) > 0 && string(raw) != "null" {
 				dec := json.NewDecoder(bytes.NewReader(raw))
@@ -60,6 +66,96 @@ func newTool[A any](name, title, description string, schema map[string]any, ann 
 			return run(ctx, api, args)
 		},
 	}
+}
+
+// checkArguments checks arguments against a tool's input schema: required
+// ones are present, and each has the type, enum value and format the schema
+// gives. Ranges are left to the API, whose messages name the field.
+func checkArguments(schema map[string]any, raw json.RawMessage) error {
+	args := map[string]json.RawMessage{}
+	if len(raw) > 0 && string(raw) != "null" {
+		if err := json.Unmarshal(raw, &args); err != nil {
+			return errors.New("arguments must be a JSON object")
+		}
+	}
+	properties, _ := schema["properties"].(map[string]any)
+	required, _ := schema["required"].([]string)
+	for _, k := range required {
+		if v, ok := args[k]; !ok || string(v) == "null" || string(v) == `""` {
+			return fmt.Errorf("%s is required", k)
+		}
+	}
+	// Sorted, so the error is the same each time.
+	keys := slices.Sorted(maps.Keys(args))
+	for _, k := range keys {
+		p, ok := properties[k].(map[string]any)
+		if !ok {
+			continue // decoding reports unknown arguments
+		}
+		v := args[k]
+		got := jsonType(v)
+		if got == "null" {
+			// Some clients send null for arguments they leave out; decoding
+			// treats it as absent.
+			continue
+		}
+		if want, ok := p["type"].(string); ok && !typeMatches(want, got, v) {
+			return fmt.Errorf("%s must be %s, not %s", k, article(want), got)
+		}
+		if types, ok := p["type"].([]string); ok && !slices.ContainsFunc(types, func(t string) bool { return typeMatches(t, got, v) }) {
+			return fmt.Errorf("%s must be %s, not %s", k, article(types[0]), got)
+		}
+		var str string
+		if got == "string" {
+			_ = json.Unmarshal(v, &str)
+		}
+		if enum, ok := p["enum"].([]string); ok && got == "string" && !slices.Contains(enum, str) {
+			return fmt.Errorf("%s must be one of %s, not %q", k, strings.Join(enum, ", "), str)
+		}
+		if p["format"] == "date-time" && got == "string" {
+			if _, err := time.Parse(time.RFC3339Nano, str); err != nil {
+				return fmt.Errorf("%s must be an RFC 3339 time such as 2026-01-02T15:04:05Z, not %q", k, str)
+			}
+		}
+	}
+	return nil
+}
+
+// jsonType is the JSON Schema type of a JSON value ("number" for any number).
+func jsonType(v json.RawMessage) string {
+	v = bytes.TrimSpace(v)
+	if len(v) == 0 {
+		return "null"
+	}
+	switch v[0] {
+	case '"':
+		return "string"
+	case '{':
+		return "object"
+	case '[':
+		return "array"
+	case 't', 'f':
+		return "boolean"
+	case 'n':
+		return "null"
+	}
+	return "number"
+}
+
+func typeMatches(want, got string, v json.RawMessage) bool {
+	if want == "integer" {
+		var n float64
+		return got == "number" && json.Unmarshal(v, &n) == nil && n == math.Trunc(n)
+	}
+	return want == got
+}
+
+func article(typ string) string {
+	switch typ {
+	case "integer", "object", "array":
+		return "an " + typ
+	}
+	return "a " + typ
 }
 
 type argumentError struct{ err error }
@@ -151,16 +247,61 @@ func allTools() []*tool {
 // Read tools.
 
 var listQueues = newTool("list_queues", "List queues",
-	"All queues with their delivery policy and current work: due (waiting now), scheduled (later, including retries), running and failed task counts, and oldest_due_at (how far behind the queue is).",
+	"All queues, each with whether it is paused, its limits (rate_per_second, max_concurrency), its current work (stats: due now, scheduled for later including retries, running and failed task counts, and oldest_due_at, how far behind the queue is) and the last 24 hours (last_24h: tasks succeeded, failed and cancelled, and the median and 95th percentile duration of their latest attempt, p50_duration_ms and p95_duration_ms). Use get_queue for the rest of the delivery policy and failures.",
 	object(map[string]any{}), readOnly,
 	func(ctx context.Context, api apiClient, _ struct{}) (any, error) {
-		var out map[string]any
-		err := api.do(ctx, "GET", "/v1/queues", nil, nil, &out)
-		return out, err
+		var out struct {
+			Queues []map[string]any `json:"queues"`
+		}
+		if err := api.do(ctx, "GET", "/v1/queues", nil, nil, &out); err != nil {
+			return nil, err
+		}
+		for i, q := range out.Queues {
+			name, _ := q["name"].(string)
+			day, err := lastDay(ctx, api, name)
+			if err != nil {
+				return nil, err
+			}
+			out.Queues[i] = queueOverview(q, day)
+		}
+		return out, nil
 	})
 
+// queueOverview is what list_queues shows of a queue: enough to tell whether
+// it is healthy, without the retry policy.
+func queueOverview(q, lastDay map[string]any) map[string]any {
+	out := map[string]any{"last_24h": lastDay}
+	for _, k := range []string{"name", "paused", "rate_per_second", "max_concurrency", "stats"} {
+		if v, ok := q[k]; ok {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// lastDay is a queue's activity over the last 24 hours: how many tasks
+// finished each way, and how long their latest attempts took.
+func lastDay(ctx context.Context, api apiClient, queue string) (map[string]any, error) {
+	var a map[string]any
+	q := url.Values{"since": {time.Now().Add(-24 * time.Hour).UTC().Format(time.RFC3339Nano)}}
+	if err := api.do(ctx, "GET", apiPath("/v1/queues/%s/activity", queue), q, nil, &a); err != nil {
+		return nil, err
+	}
+	out := map[string]any{}
+	for _, k := range []string{"succeeded", "failed", "cancelled", "p50_duration_ms", "p95_duration_ms"} {
+		if v, ok := a[k]; ok {
+			out[k] = v
+		}
+	}
+	// Retention shorter than a day leaves fewer finished tasks to count.
+	if r, ok := a["retention_seconds"].(float64); ok && r < 24*60*60 {
+		out["retention_seconds"] = r
+	}
+	return out, nil
+}
+
 var getQueue = newTool("get_queue", "Get queue",
-	"A queue's delivery policy, current work (due, scheduled, running, failed), activity (how many tasks succeeded, failed and were cancelled since `since`; default the last 7 days, limited by the server's retention) and failures: its failed tasks grouped by error, most common first, each with a count, the latest task and the start of its response body. Start here to find out why a queue's tasks fail.",
+	"A queue's delivery policy, current work (due, scheduled, running, failed), the last 24 hours (last_24h, as in list_queues), activity (how many tasks succeeded, failed and were cancelled since `since`, default the last 7 days, limited by the server's retention, with p50_duration_ms and p95_duration_ms of their latest attempt) and failures: its failed tasks grouped by error, most common first, each with a count, the latest task and the start of its response body. Start here to find out why a queue's tasks fail.",
 	object(map[string]any{
 		"queue": queueProp,
 		"since": timeProp("Start of the activity period."),
@@ -183,11 +324,15 @@ var getQueue = newTool("get_queue", "Get queue",
 		if err := api.do(ctx, "GET", apiPath("/v1/queues/%s/failures", args.Queue), nil, nil, &failures); err != nil {
 			return nil, err
 		}
-		return map[string]any{"queue": queue, "activity": activity, "failures": failures["groups"]}, nil
+		day, err := lastDay(ctx, api, args.Queue)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"queue": queue, "last_24h": day, "activity": activity, "failures": failures["groups"]}, nil
 	})
 
 var listTasks = newTool("list_tasks", "List tasks",
-	`Tasks, newest first unless sorted otherwise, filtered by any of queue, state, group, idempotency key, last error and creation time. To see what runs next, list pending tasks sorted by run_at. Returns summaries (state, URL, attempts, last status and error); use get_task for payloads and attempt details. Pass next_cursor as cursor for the next page. A "pending" task whose run_at is in the future is scheduled or waiting to retry.`,
+	`Tasks, newest first unless sorted otherwise, filtered by any of queue, state, group, idempotency key, last error and creation time. To see what runs next, list pending tasks sorted by run_at. Returns summaries (state, URL, attempts, last status and error); use get_task for payloads and attempt details. started_at is when the first attempt started, so started_at minus created_at is time spent waiting in the queue; last_duration_ms is how long the latest attempt took in the handler. Pass next_cursor as cursor for the next page. A "pending" task whose run_at is in the future is scheduled or waiting to retry.`,
 	object(map[string]any{
 		"queue":           queueProp,
 		"state":           prop("string", "Only tasks in this state.", "enum", taskStates),
@@ -414,7 +559,7 @@ type enqueueRequest struct {
 }
 
 var retryTask = newTool("retry_task", "Retry task",
-	"Delivers a task again now. A pending task (e.g. waiting to retry) becomes due at once; a failed, succeeded or cancelled task is replayed with a fresh set of attempts. Fails with invalid_state for a running task.",
+	"Delivers a task again now. A pending task (e.g. waiting to retry) becomes due at once; a failed, succeeded or cancelled task is replayed with a fresh set of attempts. Returns the task; follow up with wait_for_task. Fails with invalid_state for a running task.",
 	object(map[string]any{"id": taskIDProp}, "id"),
 	annotations{OpenWorldHint: true},
 	func(ctx context.Context, api apiClient, args struct {
@@ -424,7 +569,7 @@ var retryTask = newTool("retry_task", "Retry task",
 	})
 
 var cancelTask = newTool("cancel_task", "Cancel task",
-	"Cancels a pending or running task, so it isn't delivered (again). A delivery already in flight finishes but isn't retried. Fails with invalid_state for a finished task.",
+	"Cancels a pending or running task, so it isn't delivered (again). A delivery already in flight finishes but isn't retried. Returns the task. Fails with invalid_state for a finished task.",
 	object(map[string]any{"id": taskIDProp}, "id"),
 	annotations{DestructiveHint: true, IdempotentHint: true},
 	func(ctx context.Context, api apiClient, args struct {
@@ -464,7 +609,7 @@ var cancelPendingTasks = newTool("cancel_pending_tasks", "Cancel pending tasks",
 	})
 
 var pauseQueue = newTool("pause_queue", "Pause queue",
-	"Stops delivering a queue's tasks. Deliveries in flight finish, and enqueueing still works; tasks wait until the queue is resumed.",
+	"Stops delivering a queue's tasks. Deliveries in flight finish, and enqueueing still works; tasks wait until the queue is resumed. Returns the queue.",
 	object(map[string]any{"queue": queueProp}, "queue"),
 	annotations{IdempotentHint: true},
 	func(ctx context.Context, api apiClient, args struct {
@@ -474,7 +619,7 @@ var pauseQueue = newTool("pause_queue", "Pause queue",
 	})
 
 var resumeQueue = newTool("resume_queue", "Resume queue",
-	"Resumes delivering a paused queue's tasks.",
+	"Resumes delivering a paused queue's tasks. Returns the queue.",
 	object(map[string]any{"queue": queueProp}, "queue"),
 	annotations{IdempotentHint: true, OpenWorldHint: true},
 	func(ctx context.Context, api apiClient, args struct {
@@ -572,7 +717,8 @@ func summary(t map[string]any) map[string]any {
 	out := map[string]any{}
 	for _, k := range []string{
 		"id", "queue", "state", "method", "url", "run_at", "attempt_count", "max_attempts", "last_status",
-		"last_outcome", "last_error", "idempotency_key", "group_id", "created_at", "finished_at", "last_attempt_at", "retried_at",
+		"last_outcome", "last_error", "idempotency_key", "group_id", "created_at", "started_at", "finished_at",
+		"last_attempt_at", "last_duration_ms", "retried_at",
 	} {
 		if v, ok := t[k]; ok {
 			out[k] = v

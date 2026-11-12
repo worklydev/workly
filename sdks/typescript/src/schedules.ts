@@ -3,12 +3,16 @@ import { seg } from './util.ts';
 import type { Attempt, CronPreview, Delivery, Run, RunPage, RunState, Schedule, ScheduleConfig } from './types.ts';
 
 export interface RunsOptions extends RequestOptions {
+  /** Only this schedule's runs. */
+  schedule?: string | undefined;
   state?: RunState | undefined;
   /** Runs per request, 1–200 (server default 50). */
   pageSize?: number | undefined;
 }
 
 export interface RunsPageOptions extends RequestOptions {
+  /** Only this schedule's runs. */
+  schedule?: string | undefined;
   state?: RunState | undefined;
   /** The previous page's `nextCursor`. */
   cursor?: string | undefined;
@@ -49,7 +53,8 @@ export class Schedules {
    *
    * Declarative: the schedule ends up with exactly these settings, and
    * omitted ones are reset to their defaults. It doesn't change whether the
-   * schedule is paused. `nextRuns` on the result shows when it runs.
+   * schedule is paused. `nextRuns` on the result shows when it runs
+   * (`nextRunsIfResumed` while it is paused).
    */
   async put(name: string, config: ScheduleConfig, options: RequestOptions = {}): Promise<Schedule> {
     if (config.payload !== undefined && config.body !== undefined)
@@ -103,38 +108,6 @@ export class Schedules {
     return this.#post(name, 'trigger', options, false);
   }
 
-  /**
-   * The schedule's runs, newest first, fetching pages as needed.
-   *
-   * ```ts
-   * for await (const run of workly.schedules.runs('nightly', { state: 'failed' })) { ... }
-   * ```
-   */
-  async *runs(name: string, options: RunsOptions = {}): AsyncGenerator<Run, void, undefined> {
-    const { pageSize, ...rest } = options;
-    let cursor: string | undefined;
-    do {
-      const page = await this.runsPage(name, {
-        ...rest,
-        ...(cursor && { cursor }),
-        ...(pageSize && { limit: pageSize }),
-      });
-      yield* page.runs;
-      cursor = page.nextCursor;
-    } while (cursor);
-  }
-
-  /** One page of `runs`. Pass the previous page's `nextCursor` as `cursor`. */
-  async runsPage(name: string, options: RunsPageOptions = {}): Promise<RunPage> {
-    return this.#client.send({
-      method: 'GET',
-      path: `/v1/schedules/${seg(name)}/runs`,
-      query: { state: options.state, cursor: options.cursor, limit: options.limit?.toString() },
-      idempotent: true,
-      signal: options.signal,
-    });
-  }
-
   async #post<T>(name: string, action: string, options: RequestOptions, idempotent: boolean): Promise<T> {
     return this.#client.send({
       method: 'POST',
@@ -151,6 +124,43 @@ export class Runs {
 
   constructor(client: Workly) {
     this.#client = client;
+  }
+
+  /**
+   * Runs of every schedule, or of one, newest first, fetching pages as needed.
+   *
+   * ```ts
+   * for await (const run of workly.runs.list({ state: 'failed' })) { ... }
+   * ```
+   */
+  async *list(options: RunsOptions = {}): AsyncGenerator<Run, void, undefined> {
+    const { pageSize, ...rest } = options;
+    let cursor: string | undefined;
+    do {
+      const page = await this.listPage({
+        ...rest,
+        ...(cursor && { cursor }),
+        ...(pageSize && { limit: pageSize }),
+      });
+      yield* page.runs;
+      cursor = page.nextCursor;
+    } while (cursor);
+  }
+
+  /** One page of `list`. Pass the previous page's `nextCursor` as `cursor`. */
+  async listPage(options: RunsPageOptions = {}): Promise<RunPage> {
+    return this.#client.send({
+      method: 'GET',
+      path: '/v1/runs',
+      query: {
+        schedule: options.schedule,
+        state: options.state,
+        cursor: options.cursor,
+        limit: options.limit?.toString(),
+      },
+      idempotent: true,
+      signal: options.signal,
+    });
   }
 
   async get(id: string, options: RequestOptions = {}): Promise<Run> {

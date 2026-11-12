@@ -362,13 +362,21 @@ def test_queue_activity() -> None:
     requests, handler = recorder(
         httpx.Response(
             200,
-            json={"since": "2026-09-20T10:00:00Z", "succeeded": 5, "failed": 1, "cancelled": 0},
+            json={
+                "since": "2026-09-20T10:00:00Z",
+                "succeeded": 5,
+                "failed": 1,
+                "cancelled": 0,
+                "p50_duration_ms": 80,
+                "p95_duration_ms": 950,
+            },
         )
     )
     a = client(handler).queues.activity("emails", since=datetime(2026, 9, 20, 10, tzinfo=UTC))
     assert requests[0].url.path == "/v1/queues/emails/activity"
     assert requests[0].url.params["since"].startswith("2026-09-20T10:00:00")
     assert (a.succeeded, a.failed, a.cancelled, a.retention_seconds) == (5, 1, 0, None)
+    assert (a.p50_duration_ms, a.p95_duration_ms) == (80, 950)
 
 
 def test_tasks_activity() -> None:
@@ -492,10 +500,23 @@ def test_runs() -> None:
         seen.append(req)
         return httpx.Response(200, json=pages[req.url.params.get("cursor")])
 
-    runs = list(client(handler).schedules.runs("nightly", state="skipped"))
+    runs = list(client(handler).runs.list(schedule="nightly", state="skipped"))
     assert [r.skip_reason for r in runs] == ["overlap", "overlap"]
-    assert seen[0].url.path == "/v1/schedules/nightly/runs"
-    assert seen[0].url.params["state"] == "skipped"
+    assert seen[0].url.path == "/v1/runs"
+    assert dict(seen[0].url.params) == {"schedule": "nightly", "state": "skipped"}
+
+    # Across schedules, with the new timing fields.
+    seen.clear()
+    pages[None] = {"runs": [{**RUN, "started_at": "2026-10-01T01:00:02Z", "last_duration_ms": 120}]}
+    runs = list(client(handler).runs.list(state="failed", page_size=10))
+    assert seen[0].url.path == "/v1/runs"
+    assert dict(seen[0].url.params) == {"state": "failed", "limit": "10"}
+    assert runs[0].started_at == datetime(2026, 10, 1, 1, 0, 2, tzinfo=UTC)
+    assert runs[0].last_duration_ms == 120
+    seen.clear()
+    client(handler).runs.list_page(schedule="nightly")
+    assert dict(seen[0].url.params) == {"schedule": "nightly"}
+    assert RUN.get("started_at") is None and workly.Run._from_json(RUN).started_at is None
 
     requests, retry_handler = recorder(httpx.Response(200, json=RUN))
     run = client(retry_handler).runs.retry("run_1")

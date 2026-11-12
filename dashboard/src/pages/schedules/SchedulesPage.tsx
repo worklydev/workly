@@ -61,10 +61,7 @@ const RECENT = 12;
 function useRecentRuns(schedules: Schedule[]): Map<string, Run[]> {
   const results = useQueries({
     queries: schedules.map((s) => ({
-      ...listRunsOptions({
-        path: { schedule: s.name },
-        query: { limit: RECENT },
-      }),
+      ...listRunsOptions({ query: { schedule: s.name, limit: RECENT } }),
       ...LIVE,
     })),
   });

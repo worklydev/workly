@@ -339,8 +339,16 @@ func TestMCPTools(t *testing.T) {
 		"unknown task":    {"get_task", map[string]any{"id": "task_nope"}, "task_not_found"},
 		"unknown queue":   {"get_queue", map[string]any{"queue": "nope"}, "queue_not_found"},
 		"unknown arg":     {"list_tasks", map[string]any{"queu": "emails"}, `unknown field "queu"`},
-		"wrong arg type":  {"get_task", map[string]any{"id": 5}, "invalid arguments"},
 		"unknown setting": {"update_queue_policy", map[string]any{"queue": "emails", "retries": 3}, `unknown setting "retries"`},
+		// Errors name the argument at fault.
+		"wrong arg type": {"get_task", map[string]any{"id": 5}, "id must be a string, not number"},
+		"missing arg":    {"get_task", map[string]any{}, "id is required"},
+		"empty arg":      {"get_queue", map[string]any{"queue": ""}, "queue is required"},
+		"not an integer": {"list_tasks", map[string]any{"limit": 2.5}, "limit must be an integer"},
+		"bad enum":       {"list_tasks", map[string]any{"state": "done"}, `state must be one of pending, running, succeeded, failed, cancelled, not "done"`},
+		"bad time":       {"enqueue_task", map[string]any{"queue": "emails", "url": "http://api.test", "run_at": "soon"}, `run_at must be an RFC 3339 time`},
+		"setting type":   {"update_queue_policy", map[string]any{"queue": "emails", "max_attempts": "3"}, "max_attempts must be an integer, not string"},
+		"setting range":  {"update_queue_policy", map[string]any{"queue": "emails", "backoff_multiplier": 0.5}, "backoff_multiplier must be at least 1"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			text, isError := c.callRaw(tc.tool, tc.args)
@@ -348,6 +356,11 @@ func TestMCPTools(t *testing.T) {
 				t.Errorf("%s = %v %q, want an error containing %q", tc.tool, isError, text, tc.want)
 			}
 		})
+	}
+
+	// Clients that send null for arguments they leave out still work.
+	if got := c.call("list_tasks", map[string]any{"queue": "emails", "state": nil, "cursor": nil}); len(got["tasks"].([]any)) != 1 {
+		t.Errorf("list_tasks with nulls = %v", got)
 	}
 
 	got := c.call("get_task", map[string]any{"id": id})
@@ -373,11 +386,29 @@ func TestMCPTools(t *testing.T) {
 
 	q := c.call("get_queue", map[string]any{"queue": "emails"})
 	if q["queue"].(map[string]any)["stats"].(map[string]any)["due"] != 1.0 || q["activity"].(map[string]any)["succeeded"] != 0.0 ||
-		len(q["failures"].([]any)) != 0 {
+		len(q["failures"].([]any)) != 0 || q["queue"].(map[string]any)["max_attempts"] == nil {
 		t.Errorf("get_queue = %v", q)
 	}
-	if qs := c.call("list_queues", nil); len(qs["queues"].([]any)) != 1 {
-		t.Errorf("list_queues = %v", qs)
+	if day, _ := q["last_24h"].(map[string]any); day["succeeded"] != 0.0 || day["failed"] != 0.0 || day["p50_duration_ms"] != nil {
+		t.Errorf("get_queue last_24h = %v", q["last_24h"])
+	}
+	// list_queues is an overview: current work, the last day and the
+	// limits, but not the retry policy.
+	c.call("update_queue_policy", map[string]any{"queue": "emails", "max_concurrency": 1, "rate_per_second": 1})
+	qs := c.call("list_queues", nil)["queues"].([]any)
+	if len(qs) != 1 {
+		t.Fatalf("list_queues = %v", qs)
+	}
+	overview := qs[0].(map[string]any)
+	if overview["name"] != "emails" || overview["paused"] != false || overview["max_concurrency"] != 1.0 ||
+		overview["rate_per_second"] != 1.0 || overview["stats"].(map[string]any)["due"] != 1.0 ||
+		overview["last_24h"].(map[string]any)["succeeded"] != 0.0 {
+		t.Errorf("list_queues queue = %v", overview)
+	}
+	for _, k := range []string{"max_attempts", "min_backoff_seconds", "timeout_seconds", "retry_on_4xx", "created_at"} {
+		if _, ok := overview[k]; ok {
+			t.Errorf("list_queues shows %s: %v", k, overview)
+		}
 	}
 
 	if q := c.call("pause_queue", map[string]any{"queue": "emails"}); q["paused"] != true {
@@ -458,6 +489,13 @@ func TestMCPWaitForTask(t *testing.T) {
 	if got["done"] != true || attempt["status_code"] != 503.0 || !strings.Contains(attempt["response_body"].(string), "database is down") {
 		t.Fatalf("wait_for_task = %v", got)
 	}
+	// The summary tells queue wait from handler time.
+	if s := got["task"].(map[string]any); s["started_at"] == nil || s["last_duration_ms"] != attempt["duration_ms"] {
+		t.Errorf("wait_for_task task = %v, latest attempt %v", s, attempt)
+	}
+	if s := c.call("list_tasks", map[string]any{"queue": "q"})["tasks"].([]any)[0].(map[string]any); s["started_at"] == nil || s["last_duration_ms"] == nil {
+		t.Errorf("list_tasks summary = %v", s)
+	}
 	// The first attempt already happened, so waiting again returns at once
 	// rather than waiting a minute for the retry.
 	start := time.Now()
@@ -504,15 +542,26 @@ func TestMCPSchedules(t *testing.T) {
 		t.Errorf("unknown setting = %q", text)
 	}
 
-	if got := c.call("pause_schedule", map[string]any{"schedule": "nightly"}); got["paused"] != true {
-		t.Errorf("pause_schedule = %v", got)
+	// A paused schedule's slots are only what would happen if resumed.
+	paused := c.call("pause_schedule", map[string]any{"schedule": "nightly"})
+	if paused["paused"] != true || paused["paused_at"] == nil || len(paused["next_runs"].([]any)) != 0 || paused["next_run_at"] != nil ||
+		len(paused["next_runs_if_resumed"].([]any)) != 5 {
+		t.Errorf("pause_schedule = %v", paused)
+	}
+	if got := c.call("get_schedule", map[string]any{"schedule": "nightly"})["schedule"].(map[string]any); len(got["next_runs"].([]any)) != 0 ||
+		got["next_runs_if_resumed"] == nil || got["paused_at"] != paused["paused_at"] {
+		t.Errorf("get_schedule while paused = %v", got)
+	}
+	if got := c.call("list_schedules", nil)["schedules"].([]any)[0].(map[string]any); got["paused_at"] != paused["paused_at"] || got["next_run_at"] != nil {
+		t.Errorf("list_schedules while paused = %v", got)
 	}
 	run := c.call("trigger_schedule", map[string]any{"schedule": "nightly"})
 	id, _ := run["id"].(string)
 	if !strings.HasPrefix(id, "run_") || run["trigger"] != "manual" || run["state"] != "pending" {
 		t.Fatalf("trigger_schedule = %v", run)
 	}
-	if got := c.call("resume_schedule", map[string]any{"schedule": "nightly"}); got["paused"] != false {
+	if got := c.call("resume_schedule", map[string]any{"schedule": "nightly"}); got["paused"] != false || got["paused_at"] != nil ||
+		len(got["next_runs"].([]any)) != 5 || got["next_runs_if_resumed"] != nil {
 		t.Errorf("resume_schedule = %v", got)
 	}
 
@@ -521,11 +570,32 @@ func TestMCPSchedules(t *testing.T) {
 	if got["schedule"].(map[string]any)["name"] != "nightly" || len(recent) != 1 || recent[0].(map[string]any)["id"] != id {
 		t.Errorf("get_schedule = %v", got)
 	}
-	if got := c.call("list_schedules", nil); len(got["schedules"].([]any)) != 1 {
-		t.Errorf("list_schedules = %v", got)
+	// list_schedules is a summary; the request and policy are in get_schedule.
+	list := c.call("list_schedules", nil)["schedules"].([]any)
+	if len(list) != 1 {
+		t.Fatalf("list_schedules = %v", list)
+	}
+	summary := list[0].(map[string]any)
+	if summary["name"] != "nightly" || summary["cron"] != "0 3 * * *" || summary["timezone"] != "Europe/Stockholm" ||
+		summary["url"] != "http://api.test/report" || summary["paused"] != false || summary["next_run_at"] == nil ||
+		summary["last_run"].(map[string]any)["id"] != id {
+		t.Errorf("list_schedules schedule = %v", summary)
+	}
+	for _, k := range []string{"headers", "body", "max_attempts", "timeout_seconds", "next_runs", "overlap"} {
+		if _, ok := summary[k]; ok {
+			t.Errorf("list_schedules shows %s: %v", k, summary)
+		}
 	}
 	if got := c.call("list_runs", map[string]any{"schedule": "nightly", "state": "pending"}); len(got["runs"].([]any)) != 1 {
 		t.Errorf("list_runs = %v", got)
+	}
+	// Without a schedule, runs of every schedule, newest first.
+	c.call("update_schedule", map[string]any{"schedule": "hourly", "cron": "@hourly", "url": "http://api.test/sync"})
+	hourly := c.call("trigger_schedule", map[string]any{"schedule": "hourly"})
+	all := c.call("list_runs", map[string]any{"state": "pending"})["runs"].([]any)
+	if len(all) != 2 || all[0].(map[string]any)["id"] != hourly["id"] || all[0].(map[string]any)["schedule"] != "hourly" ||
+		all[1].(map[string]any)["schedule"] != "nightly" {
+		t.Errorf("list_runs across schedules = %v", all)
 	}
 	if got := c.call("get_run", map[string]any{"id": id}); got["run"].(map[string]any)["id"] != id || len(got["attempts"].([]any)) != 0 {
 		t.Errorf("get_run = %v", got)
@@ -547,7 +617,8 @@ func TestMCPSchedules(t *testing.T) {
 	}{
 		"unknown schedule": {"get_schedule", map[string]any{"schedule": "nope"}, "schedule_not_found"},
 		"unknown run":      {"get_run", map[string]any{"id": "run_nope"}, "run_not_found"},
-		"bad state":        {"list_runs", map[string]any{"schedule": "nightly", "state": "done"}, "invalid_request"},
+		"bad state":        {"list_runs", map[string]any{"schedule": "nightly", "state": "done"}, "state must be one of"},
+		"runs of unknown":  {"list_runs", map[string]any{"schedule": "nope"}, "schedule_not_found"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			text, isError := c.callRaw(tc.tool, tc.args)
@@ -633,5 +704,15 @@ func TestMCPWaitForRun(t *testing.T) {
 	attempt, _ := got["latest_attempt"].(map[string]any)
 	if got["done"] != true || got["run"].(map[string]any)["state"] != "succeeded" || !strings.Contains(attempt["response_body"].(string), "42") {
 		t.Fatalf("wait_for_run = %v", got)
+	}
+	if r := got["run"].(map[string]any); r["started_at"] == nil || r["last_duration_ms"] != attempt["duration_ms"] {
+		t.Errorf("wait_for_run run = %v, latest attempt %v", r, attempt)
+	}
+	// After a success, the queue-like health numbers for the day.
+	q := c.call("enqueue_task", map[string]any{"queue": "fast", "url": target.URL})
+	c.call("wait_for_task", map[string]any{"id": q["id"], "timeout_seconds": 10})
+	day := c.call("list_queues", nil)["queues"].([]any)[0].(map[string]any)["last_24h"].(map[string]any)
+	if day["succeeded"] != 1.0 || day["p50_duration_ms"] == nil || day["p95_duration_ms"] == nil {
+		t.Errorf("list_queues last_24h = %v", day)
 	}
 }

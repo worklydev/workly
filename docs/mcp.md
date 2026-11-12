@@ -97,17 +97,17 @@ Read tools (marked read-only, so clients can run them without asking):
 
 | Tool | What it does |
 |---|---|
-| `list_queues` | All queues, with policy and current work: due, scheduled, running, failed, how far behind |
-| `get_queue` | One queue, plus how many tasks succeeded, failed and were cancelled recently, and its failed tasks grouped by error |
-| `list_tasks` | Task summaries, newest first, by queue, state, group, idempotency key, last error and creation time |
+| `list_queues` | All queues in summary: paused or not, rate and concurrency limits, current work (due, scheduled, running, failed, how far behind) and the last 24 hours (succeeded, failed, p50 and p95 attempt duration) |
+| `get_queue` | One queue with its full policy, the last 24 hours, how many tasks succeeded, failed and were cancelled recently, and its failed tasks grouped by error |
+| `list_tasks` | Task summaries, newest first, by queue, state, group, idempotency key, last error and creation time. Each says when its first attempt started and how long the latest took, so queue wait and handler time can be told apart |
 | `get_task` | A task with its attempts: outcomes, status codes, errors, response bodies, durations |
 | `get_task_delivery` | The exact signed request for a task, with a curl command to replay it against a local handler |
 | `wait_for_task` | Waits for the first attempt since the task was enqueued or retried, and returns how it went |
 | `list_groups` | [Task groups](groups.md), newest first, with their status and counts, by status and name |
 | `get_group` | One group: its counts, its most recently failed tasks and its callback task |
-| `list_schedules` | All [schedules](schedules.md), with their next run and how the last one went |
-| `get_schedule` | One schedule, its next five times and its recent runs, including skipped ones and why |
-| `list_runs` | A schedule's runs, newest first, optionally by state |
+| `list_schedules` | All [schedules](schedules.md) in summary: cron, timezone, URL, paused (and since when), next run and how the last one went |
+| `get_schedule` | One schedule, its next five times and its recent runs, including skipped ones and why. A paused schedule's times are `next_runs_if_resumed` |
+| `list_runs` | Runs of one schedule or of all of them, newest first, optionally by state |
 | `get_run` | A run with its attempts |
 | `get_run_delivery` | The exact signed request for a run, with a curl command |
 | `wait_for_run` | Waits for the first attempt of a run, and returns how it went |
@@ -128,7 +128,9 @@ Write tools (`WORKLY_MCP=full`):
 | `pause_schedule`, `resume_schedule` | Stops and restarts a schedule |
 | `retry_run`, `cancel_run` | Delivers a run again, or cancels it |
 
-Deleting queues isn't offered: it can't be undone, so it stays in the dashboard, CLI and API.
+Write tools that change one task, run, queue or schedule return it as changed, so an agent can confirm the change without reading it again. Deleting queues isn't offered: it can't be undone, so it stays in the dashboard, CLI and API.
+
+Arguments are checked against each tool's schema before anything runs, and errors name the argument at fault (`limit must be an integer, not string`, `state must be one of …`), so an agent can correct its call.
 
 ## What agents see
 

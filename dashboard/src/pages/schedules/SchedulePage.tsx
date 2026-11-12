@@ -104,7 +104,7 @@ export function SchedulePage() {
 /** When it runs next, how the last run went, and the latest dozen at a glance. */
 function Overview({ schedule }: { schedule: Schedule }) {
   const { data } = useQuery({
-    ...listRunsOptions({ path: { schedule: schedule.name }, query: { limit: 12 } }),
+    ...listRunsOptions({ query: { schedule: schedule.name, limit: 12 } }),
     ...LIVE,
   });
   const runs = data?.runs;
@@ -233,7 +233,7 @@ function Upcoming({ schedule }: { schedule: Schedule }) {
   return (
     <Section title={schedule.paused ? 'Upcoming, if resumed now' : 'Upcoming'}>
       <ol className="flex flex-col gap-1.5">
-        {schedule.next_runs.map((t) => (
+        {(schedule.next_runs_if_resumed ?? schedule.next_runs).map((t) => (
           <li key={t} className="flex items-center gap-3 text-sm">
             <span className="w-36 font-mono text-xs">{formatDate(t, { seconds: false })}</span>
             <span className="text-xs text-muted-foreground">
@@ -275,9 +275,10 @@ function Request({ schedule: s }: { schedule: Schedule }) {
 function Runs({ schedule }: { schedule: string }) {
   const [params, setParams] = useSearchParams();
   const state = (params.get('state') ?? 'all') as RunState | 'all';
-  const query: ListRunsData['query'] = state === 'all' ? { limit: PAGE_SIZE } : { state, limit: PAGE_SIZE };
+  const query: ListRunsData['query'] =
+    state === 'all' ? { schedule, limit: PAGE_SIZE } : { schedule, state, limit: PAGE_SIZE };
   const pages = useInfiniteQuery({
-    ...listRunsInfiniteOptions({ path: { schedule }, query }),
+    ...listRunsInfiniteOptions({ query }),
     ...runPaging,
     ...LIVE,
     placeholderData: keepPreviousData,

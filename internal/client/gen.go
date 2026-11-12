@@ -815,6 +815,14 @@ type QueueActivity struct {
 	Cancelled int `json:"cancelled"`
 	Failed    int `json:"failed"`
 
+	// P50DurationMs Median duration of the latest attempt of the succeeded and failed
+	// tasks counted (at most the last 1,000 of each). Absent if none
+	// has one.
+	P50DurationMs *int `json:"p50_duration_ms,omitempty"`
+
+	// P95DurationMs 95th percentile of the same durations.
+	P95DurationMs *int `json:"p95_duration_ms,omitempty"`
+
 	// RetentionSeconds How long the server keeps finished tasks (`WORKLY_RETENTION`).
 	// Absent if it keeps them forever.
 	RetentionSeconds *float64 `json:"retention_seconds,omitempty"`
@@ -906,7 +914,10 @@ type Run struct {
 	// Id Example: run_01J9ZK3M5Q8R2T4V6W8X0Y2Z4A
 	Id            string     `json:"id"`
 	LastAttemptAt *time.Time `json:"last_attempt_at,omitempty"`
-	LastError     *string    `json:"last_error,omitempty"`
+
+	// LastDurationMs How long the latest finished attempt took. Absent before the first attempt finishes.
+	LastDurationMs *int    `json:"last_duration_ms,omitempty"`
+	LastError      *string `json:"last_error,omitempty"`
 
 	// LastOutcome How a delivery attempt ended. `lost` means the result is unknown: the
 	// dispatcher crashed or shut down mid-delivery, and the endpoint may
@@ -934,6 +945,9 @@ type Run struct {
 	// policy `skip`). `missed`: the server was down at the slot (missed
 	// policy `skip`).
 	SkipReason *SkipReason `json:"skip_reason,omitempty"`
+
+	// StartedAt When the first delivery attempt started. Retries by hand don't change it. Absent before the first attempt.
+	StartedAt *time.Time `json:"started_at,omitempty"`
 
 	// State A `skipped` run was never delivered: see `skip_reason`. It can be
 	// retried to deliver it now.
@@ -986,14 +1000,22 @@ type Schedule struct {
 	// NextRunAt When the schedule next fires. Absent while paused.
 	NextRunAt *time.Time `json:"next_run_at,omitempty"`
 
-	// NextRuns The next five slots, also while paused (as if resumed now).
+	// NextRuns The next five slots. Empty while paused; see `next_runs_if_resumed`.
 	NextRuns []time.Time `json:"next_runs"`
+
+	// NextRunsIfResumed While paused, the five slots the schedule would run at if resumed
+	// now, to check its cron expression. Absent while it runs.
+	NextRunsIfResumed *[]time.Time `json:"next_runs_if_resumed,omitempty"`
 
 	// Overlap What happens when a slot comes up while the previous run is still
 	// pending or running. `skip` records the slot as a `skipped` run;
 	// `allow` runs it alongside.
 	Overlap OverlapPolicy `json:"overlap"`
 	Paused  bool          `json:"paused"`
+
+	// PausedAt When a paused schedule was paused. Absent while it runs, and for
+	// schedules paused before Workly recorded it.
+	PausedAt *time.Time `json:"paused_at,omitempty"`
 
 	// Payload The body, when it is JSON.
 	Payload        *json.RawMessage `json:"payload,omitempty"`
@@ -1097,7 +1119,10 @@ type Task struct {
 
 	// LastAttemptAt When the latest attempt finished. Absent before the first attempt.
 	LastAttemptAt *time.Time `json:"last_attempt_at,omitempty"`
-	LastError     *string    `json:"last_error,omitempty"`
+
+	// LastDurationMs How long the latest finished attempt took. Absent before the first attempt finishes.
+	LastDurationMs *int    `json:"last_duration_ms,omitempty"`
+	LastError      *string `json:"last_error,omitempty"`
 
 	// LastOutcome How a delivery attempt ended. `lost` means the result is unknown: the
 	// dispatcher crashed or shut down mid-delivery, and the endpoint may
@@ -1121,6 +1146,11 @@ type Task struct {
 
 	// RunAt When the task is next eligible for delivery.
 	RunAt time.Time `json:"run_at"`
+
+	// StartedAt When the first delivery attempt started; `started_at` minus
+	// `created_at` is how long the task waited in the queue. Retries by
+	// hand don't change it. Absent before the first attempt.
+	StartedAt *time.Time `json:"started_at,omitempty"`
 
 	// State A `pending` task with `run_at` in the future is scheduled. A `failed`
 	// task has exhausted its attempts or got a non-retryable response.
@@ -1270,7 +1300,9 @@ type CreateTasksParams struct {
 
 // ListRunsParams defines parameters for ListRuns.
 type ListRunsParams struct {
-	State *RunState `form:"state,omitempty" json:"state,omitempty"`
+	// Schedule Only this schedule's runs.
+	Schedule *string   `form:"schedule,omitempty" json:"schedule,omitempty"`
+	State    *RunState `form:"state,omitempty" json:"state,omitempty"`
 
 	// Cursor The `next_cursor` of the previous page, requested with the same
 	// filters and order.
@@ -1590,7 +1622,8 @@ type ClientInterface interface {
 
 	// GetQueueActivity Count a queue's finished tasks
 	//
-	// Counts the tasks that finished since `since`, by final state. Finished
+	// Counts the tasks that finished since `since`, by final state, with
+	// percentiles of how long their latest attempt took. Finished
 	// tasks are deleted after the server's retention period, so a `since`
 	// further back than `retention_seconds` only counts what is left.
 	//
@@ -1703,6 +1736,14 @@ type ClientInterface interface {
 	// Corresponds with POST /v1/queues/{queue}/tasks:batch (the `CreateTasks` operationId).
 	CreateTasks(ctx context.Context, queue QueueName, params *CreateTasksParams, body CreateTasksJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListRuns List runs, newest first
+	//
+	// Runs of every schedule, or of one with `schedule`. A `schedule` that
+	// doesn't exist is `schedule_not_found`.
+	//
+	// Corresponds with GET /v1/runs (the `ListRuns` operationId).
+	ListRuns(ctx context.Context, params *ListRunsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetRun Get a run
 	//
 	// Corresponds with GET /v1/runs/{id} (the `GetRun` operationId).
@@ -1806,11 +1847,6 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /v1/schedules/{schedule}/resume (the `ResumeSchedule` operationId).
 	ResumeSchedule(ctx context.Context, schedule ScheduleName, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	// ListRuns List a schedule's runs, newest first
-	//
-	// Corresponds with GET /v1/schedules/{schedule}/runs (the `ListRuns` operationId).
-	ListRuns(ctx context.Context, schedule ScheduleName, params *ListRunsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// TriggerSchedule Run a schedule now
 	//
@@ -2239,7 +2275,8 @@ func (c *Client) PutQueue(ctx context.Context, queue QueueName, body PutQueueJSO
 
 // GetQueueActivity Count a queue's finished tasks
 //
-// Counts the tasks that finished since `since`, by final state. Finished
+// Counts the tasks that finished since `since`, by final state, with
+// percentiles of how long their latest attempt took. Finished
 // tasks are deleted after the server's retention period, so a `since`
 // further back than `retention_seconds` only counts what is left.
 //
@@ -2452,6 +2489,24 @@ func (c *Client) CreateTasksWithBody(ctx context.Context, queue QueueName, param
 // Corresponds with POST /v1/queues/{queue}/tasks:batch (the `CreateTasks` operationId).
 func (c *Client) CreateTasks(ctx context.Context, queue QueueName, params *CreateTasksParams, body CreateTasksJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCreateTasksRequest(c.Server, queue, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListRuns List runs, newest first
+//
+// Runs of every schedule, or of one with `schedule`. A `schedule` that
+// doesn't exist is `schedule_not_found`.
+//
+// Corresponds with GET /v1/runs (the `ListRuns` operationId).
+func (c *Client) ListRuns(ctx context.Context, params *ListRunsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListRunsRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2676,21 +2731,6 @@ func (c *Client) PauseSchedule(ctx context.Context, schedule ScheduleName, reqEd
 // Corresponds with POST /v1/schedules/{schedule}/resume (the `ResumeSchedule` operationId).
 func (c *Client) ResumeSchedule(ctx context.Context, schedule ScheduleName, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewResumeScheduleRequest(c.Server, schedule)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-// ListRuns List a schedule's runs, newest first
-//
-// Corresponds with GET /v1/schedules/{schedule}/runs (the `ListRuns` operationId).
-func (c *Client) ListRuns(ctx context.Context, schedule ScheduleName, params *ListRunsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListRunsRequest(c.Server, schedule, params)
 	if err != nil {
 		return nil, err
 	}
@@ -4008,6 +4048,96 @@ func NewCreateTasksRequestWithBody(server string, queue QueueName, params *Creat
 	return req, nil
 }
 
+// NewListRunsRequest constructs an http.Request for the ListRuns method
+func NewListRunsRequest(server string, params *ListRunsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/runs")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Schedule != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "schedule", *params.Schedule, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.State != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "state", *params.State, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Cursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "cursor", *params.Cursor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewGetRunRequest constructs an http.Request for the GetRun method
 func NewGetRunRequest(server string, id RunID) (*http.Request, error) {
 	var err error
@@ -4381,91 +4511,6 @@ func NewResumeScheduleRequest(server string, schedule ScheduleName) (*http.Reque
 	}
 
 	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	return req, nil
-}
-
-// NewListRunsRequest constructs an http.Request for the ListRuns method
-func NewListRunsRequest(server string, schedule ScheduleName, params *ListRunsParams) (*http.Request, error) {
-	var err error
-
-	var pathParam0 string
-
-	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "schedule", schedule, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
-	if err != nil {
-		return nil, err
-	}
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/v1/schedules/%s/runs", pathParam0)
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	if params != nil {
-		// queryValues collects non-styled parameters (passthrough, JSON)
-		// that are safe to round-trip through url.Values.Encode().
-		queryValues := queryURL.Query()
-		// rawQueryFragments collects pre-encoded query fragments from
-		// styled parameters, preserving literal commas as delimiters
-		// per the OpenAPI spec (e.g. "color=blue,black,brown").
-		var rawQueryFragments []string
-
-		if params.State != nil {
-
-			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "state", *params.State, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
-				return nil, err
-			} else {
-				for _, qp := range strings.Split(queryFrag, "&") {
-					rawQueryFragments = append(rawQueryFragments, qp)
-				}
-			}
-
-		}
-
-		if params.Cursor != nil {
-
-			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "cursor", *params.Cursor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
-				return nil, err
-			} else {
-				for _, qp := range strings.Split(queryFrag, "&") {
-					rawQueryFragments = append(rawQueryFragments, qp)
-				}
-			}
-
-		}
-
-		if params.Limit != nil {
-
-			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
-				return nil, err
-			} else {
-				for _, qp := range strings.Split(queryFrag, "&") {
-					rawQueryFragments = append(rawQueryFragments, qp)
-				}
-			}
-
-		}
-
-		if encoded := queryValues.Encode(); encoded != "" {
-			rawQueryFragments = append(rawQueryFragments, encoded)
-		}
-		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
-	}
-
-	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -5095,7 +5140,8 @@ type ClientWithResponsesInterface interface {
 
 	// GetQueueActivityWithResponse Count a queue's finished tasks
 	//
-	// Counts the tasks that finished since `since`, by final state. Finished
+	// Counts the tasks that finished since `since`, by final state, with
+	// percentiles of how long their latest attempt took. Finished
 	// tasks are deleted after the server's retention period, so a `since`
 	// further back than `retention_seconds` only counts what is left.
 	//
@@ -5222,6 +5268,16 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /v1/queues/{queue}/tasks:batch (the `CreateTasks` operationId).
 	CreateTasksWithResponse(ctx context.Context, queue QueueName, params *CreateTasksParams, body CreateTasksJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateTasksResponse, error)
 
+	// ListRunsWithResponse List runs, newest first
+	//
+	// Runs of every schedule, or of one with `schedule`. A `schedule` that
+	// doesn't exist is `schedule_not_found`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /v1/runs (the `ListRuns` operationId).
+	ListRunsWithResponse(ctx context.Context, params *ListRunsParams, reqEditors ...RequestEditorFn) (*ListRunsResponse, error)
+
 	// GetRunWithResponse Get a run
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -5345,13 +5401,6 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /v1/schedules/{schedule}/resume (the `ResumeSchedule` operationId).
 	ResumeScheduleWithResponse(ctx context.Context, schedule ScheduleName, reqEditors ...RequestEditorFn) (*ResumeScheduleResponse, error)
-
-	// ListRunsWithResponse List a schedule's runs, newest first
-	//
-	// Returns a wrapper object for the known response body format(s).
-	//
-	// Corresponds with GET /v1/schedules/{schedule}/runs (the `ListRuns` operationId).
-	ListRunsWithResponse(ctx context.Context, schedule ScheduleName, params *ListRunsParams, reqEditors ...RequestEditorFn) (*ListRunsResponse, error)
 
 	// TriggerScheduleWithResponse Run a schedule now
 	//
@@ -6623,6 +6672,54 @@ func (r CreateTasksResponse) ContentType() string {
 	return ""
 }
 
+type ListRunsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *RunList
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListRunsResponse) GetJSON200() *RunList {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ListRunsResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ListRunsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListRunsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListRunsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListRunsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type GetRunResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -7145,54 +7242,6 @@ func (r ResumeScheduleResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r ResumeScheduleResponse) ContentType() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Header.Get("Content-Type")
-	}
-	return ""
-}
-
-type ListRunsResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *RunList
-	// JSONDefault the response for an HTTP default `application/json` response
-	JSONDefault *Error
-}
-
-// GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r ListRunsResponse) GetJSON200() *RunList {
-	return r.JSON200
-}
-
-// GetJSONDefault returns the response for an HTTP default `application/json` response
-func (r ListRunsResponse) GetJSONDefault() *Error {
-	return r.JSONDefault
-}
-
-// GetBody returns the raw response body bytes
-func (r ListRunsResponse) GetBody() []byte {
-	return r.Body
-}
-
-// Status returns HTTPResponse.Status
-func (r ListRunsResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r ListRunsResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
-func (r ListRunsResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -7849,7 +7898,8 @@ func (c *ClientWithResponses) PutQueueWithResponse(ctx context.Context, queue Qu
 
 // GetQueueActivityWithResponse Count a queue's finished tasks
 //
-// Counts the tasks that finished since `since`, by final state. Finished
+// Counts the tasks that finished since `since`, by final state, with
+// percentiles of how long their latest attempt took. Finished
 // tasks are deleted after the server's retention period, so a `since`
 // further back than `retention_seconds` only counts what is left.
 //
@@ -8040,6 +8090,22 @@ func (c *ClientWithResponses) CreateTasksWithResponse(ctx context.Context, queue
 		return nil, err
 	}
 	return ParseCreateTasksResponse(rsp)
+}
+
+// ListRunsWithResponse List runs, newest first
+//
+// Runs of every schedule, or of one with `schedule`. A `schedule` that
+// doesn't exist is `schedule_not_found`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /v1/runs (the `ListRuns` operationId).
+func (c *ClientWithResponses) ListRunsWithResponse(ctx context.Context, params *ListRunsParams, reqEditors ...RequestEditorFn) (*ListRunsResponse, error) {
+	rsp, err := c.ListRuns(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListRunsResponse(rsp)
 }
 
 // GetRunWithResponse Get a run
@@ -8236,19 +8302,6 @@ func (c *ClientWithResponses) ResumeScheduleWithResponse(ctx context.Context, sc
 		return nil, err
 	}
 	return ParseResumeScheduleResponse(rsp)
-}
-
-// ListRunsWithResponse List a schedule's runs, newest first
-//
-// Returns a wrapper object for the known response body format(s).
-//
-// Corresponds with GET /v1/schedules/{schedule}/runs (the `ListRuns` operationId).
-func (c *ClientWithResponses) ListRunsWithResponse(ctx context.Context, schedule ScheduleName, params *ListRunsParams, reqEditors ...RequestEditorFn) (*ListRunsResponse, error) {
-	rsp, err := c.ListRuns(ctx, schedule, params, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseListRunsResponse(rsp)
 }
 
 // TriggerScheduleWithResponse Run a schedule now
@@ -9196,6 +9249,39 @@ func ParseCreateTasksResponse(rsp *http.Response) (*CreateTasksResponse, error) 
 	return response, nil
 }
 
+// ParseListRunsResponse parses an HTTP response from a ListRunsWithResponse call
+func ParseListRunsResponse(rsp *http.Response) (*ListRunsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListRunsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest RunList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseGetRunResponse parses an HTTP response from a GetRunWithResponse call
 func ParseGetRunResponse(rsp *http.Response) (*GetRunResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -9545,39 +9631,6 @@ func ParseResumeScheduleResponse(rsp *http.Response) (*ResumeScheduleResponse, e
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest Schedule
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON200 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
-		var dest Error
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSONDefault = &dest
-
-	}
-
-	return response, nil
-}
-
-// ParseListRunsResponse parses an HTTP response from a ListRunsWithResponse call
-func ParseListRunsResponse(rsp *http.Response) (*ListRunsResponse, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &ListRunsResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest RunList
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

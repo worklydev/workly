@@ -254,6 +254,7 @@ func TestSchedules(t *testing.T) {
 	}
 
 	contains(t, mustRun(t, "schedules", "pause", "nightly"), "Schedule nightly paused.")
+	contains(t, mustRun(t, "schedules", "get", "nightly"), "Next runs if resumed:")
 	contains(t, mustRun(t, "schedules", "ls"), "nightly", "paused")
 	contains(t, mustRun(t, "schedules", "resume", "nightly"), "Schedule nightly resumed. Next run in")
 
@@ -261,12 +262,16 @@ func TestSchedules(t *testing.T) {
 	if !strings.HasPrefix(id, "run_") {
 		t.Fatalf("trigger printed %q, want a run ID", id)
 	}
-	contains(t, mustRun(t, "schedules", "runs", "nightly"), id, "pending", "manual")
+	contains(t, mustRun(t, "runs", "ls", "--schedule", "nightly"), id, "nightly", "pending", "manual")
+	contains(t, mustRun(t, "runs", "ls"), id, "nightly")
 	contains(t, mustRun(t, "schedules", "get", "nightly"), "Recent runs:", id)
 	contains(t, mustRun(t, "runs", "get", id), "Schedule:", "nightly", "Trigger:", "manual")
 	contains(t, mustRun(t, "runs", "cancel", id), "Run "+id+" is cancelled.")
 	contains(t, mustRun(t, "runs", "retry", id), "Run "+id+" is pending.")
-	contains(t, mustRun(t, "schedules", "runs", "nightly", "--state", "failed"), "No runs.")
+	contains(t, mustRun(t, "runs", "ls", "--state", "failed"), "No runs.")
+	if r := cli(t, "", "runs", "ls", "--schedule", "nope"); r.err == nil || !strings.HasPrefix(r.err.Error(), "schedule_not_found") {
+		t.Fatalf("runs ls --schedule nope err = %v", r.err)
+	}
 
 	var s struct {
 		Name     string   `json:"name"`

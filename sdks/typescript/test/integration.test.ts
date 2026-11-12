@@ -58,8 +58,11 @@ describe('integration', { skip: server ? false : 'set WORKLY_BIN or install Go' 
     assert.equal(rest.length, 0);
     assert.deepEqual([attempt?.number, attempt?.outcome, attempt?.statusCode], [1, 'success', 200]);
     assert.equal(task.lastAttemptAt, attempt?.finishedAt);
+    assert.ok(task.startedAt);
+    assert.equal(task.lastDurationMs, attempt?.durationMs);
     const activity = await workly.queues.activity(queue);
     assert.deepEqual([activity.succeeded, activity.failed], [1, 0]);
+    assert.deepEqual([activity.p50DurationMs, activity.p95DurationMs], [attempt?.durationMs, attempt?.durationMs]);
   });
 
   test('task delivery', async () => {
@@ -237,7 +240,11 @@ describe('integration', { skip: server ? false : 'set WORKLY_BIN or install Go' 
       assert.equal(schedule.nextRunAt, schedule.nextRuns[0]);
       assert.deepEqual(schedule.payload, { kind: 'daily' });
 
-      assert.equal((await workly.schedules.pause(name)).nextRunAt, undefined);
+      const paused = await workly.schedules.pause(name);
+      assert.equal(paused.nextRunAt, undefined);
+      assert.ok(paused.pausedAt);
+      assert.deepEqual(paused.nextRuns, []);
+      assert.equal(paused.nextRunsIfResumed?.length, 5);
       let run = await workly.schedules.trigger(name); // runs even while paused
       const deadline = Date.now() + 10_000;
       while (!FINISHED.has(run.state)) {
@@ -251,10 +258,18 @@ describe('integration', { skip: server ? false : 'set WORKLY_BIN or install Go' 
       await verifySignature(delivery.body, delivery.headers, DEV_SIGNING_SECRET);
 
       const failed: string[] = [];
-      for await (const r of workly.schedules.runs(name, { state: 'failed' })) failed.push(r.id);
+      for await (const r of workly.runs.list({ schedule: name, state: 'failed' })) failed.push(r.id);
       assert.deepEqual(failed, [run.id]);
+      const anywhere: string[] = [];
+      for await (const r of workly.runs.list({ state: 'failed' })) anywhere.push(r.id);
+      assert.ok(anywhere.includes(run.id));
+      assert.ok(run.startedAt && run.lastDurationMs !== undefined);
       assert.equal((await workly.schedules.get(name)).lastRun?.id, run.id);
-      assert.ok((await workly.schedules.resume(name)).nextRunAt);
+      const resumed = await workly.schedules.resume(name);
+      assert.ok(resumed.nextRunAt);
+      assert.equal(resumed.pausedAt, undefined);
+      assert.equal(resumed.nextRuns.length, 5);
+      assert.equal(resumed.nextRunsIfResumed, undefined);
 
       const err = await workly.schedules.put(name, { cron: 'every day', url }).catch((e: unknown) => e);
       assert.ok(err instanceof BadRequestError);

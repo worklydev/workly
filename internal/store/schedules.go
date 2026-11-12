@@ -76,6 +76,9 @@ type Schedule struct {
 	Name        string
 	ScheduleConfig
 	Paused bool
+	// PausedAt is when a paused schedule was paused; nil while it runs,
+	// and for schedules paused before it was recorded.
+	PausedAt *time.Time
 	// NextRunAt is the next slot to fire; nil while paused.
 	NextRunAt *time.Time
 	// LastRun is the most recent run, if any. Only GetSchedule and
@@ -150,14 +153,20 @@ type Run struct {
 	UpdatedAt        time.Time
 	FinishedAt       *time.Time
 	LastAttemptAt    *time.Time
-	RetriedAt        *time.Time
+	// StartedAt is when the first delivery attempt started. Replays don't
+	// reset it.
+	StartedAt *time.Time
+	// LastDuration is how long the latest finished attempt took.
+	LastDuration *time.Duration
+	RetriedAt    *time.Time
 }
 
 // AttemptsSinceReplay is the number of attempts counted against the
 // schedule's MaxAttempts.
 func (r Run) AttemptsSinceReplay() int { return r.AttemptCount - r.ReplayedAttempts }
 
-// RunFilter selects a schedule's runs. Zero fields match everything.
+// RunFilter selects runs. Zero fields match everything: with Schedule
+// empty, runs of every schedule in the workspace.
 type RunFilter struct {
 	Schedule string
 	State    RunState

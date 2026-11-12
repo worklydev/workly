@@ -76,6 +76,10 @@ export interface QueueActivity {
   succeeded: number;
   failed: number;
   cancelled: number;
+  /** Median duration of the latest attempt of the succeeded and failed tasks counted. */
+  p50DurationMs?: number;
+  /** 95th percentile of the same durations. */
+  p95DurationMs?: number;
   /** How long the server keeps finished tasks; absent if forever. Older ones aren't counted. */
   retentionSeconds?: number;
 }
@@ -143,6 +147,10 @@ export interface Task {
   finishedAt?: string;
   /** When the latest attempt finished. */
   lastAttemptAt?: string;
+  /** When the first delivery attempt started; minus `createdAt`, the time spent waiting. */
+  startedAt?: string;
+  /** How long the latest finished attempt took. */
+  lastDurationMs?: number;
   /** When the task was last retried by hand. */
   retriedAt?: string;
   /** The group the task belongs to, if any. */
@@ -307,10 +315,14 @@ export interface Schedule {
   overlap: OverlapPolicy;
   missed: MissedPolicy;
   paused: boolean;
+  /** When a paused schedule was paused. Absent while it runs. */
+  pausedAt?: string;
   /** When the schedule next fires. Absent while paused. */
   nextRunAt?: string;
-  /** The next five slots (as if resumed now, while paused). */
+  /** The next five slots. Empty while paused; see `nextRunsIfResumed`. */
   nextRuns: string[];
+  /** While paused, the five slots it would run at if resumed now. Absent while it runs. */
+  nextRunsIfResumed?: string[];
   lastRun?: LastRun;
   createdAt: string;
   updatedAt: string;
@@ -340,6 +352,10 @@ export interface Run {
   updatedAt: string;
   finishedAt?: string;
   lastAttemptAt?: string;
+  /** When the first delivery attempt started. */
+  startedAt?: string;
+  /** How long the latest finished attempt took. */
+  lastDurationMs?: number;
   retriedAt?: string;
 }
 

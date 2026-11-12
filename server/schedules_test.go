@@ -61,13 +61,16 @@ func TestSchedules(t *testing.T) {
 		t.Fatalf("PUT existing schedule = %d %s", res.status, res.body)
 	}
 
-	// Paused: no next_run_at, but next_runs still previews.
+	// Paused: no next_run_at or next_runs, but next_runs_if_resumed
+	// previews, and paused_at says since when.
 	res = do(t, h, "POST", "/v1/schedules/nightly/pause", "")
-	if nr, _ := res.json["next_runs"].([]any); res.status != 200 || res.json["paused"] != true || res.json["next_run_at"] != nil || len(nr) != 5 {
+	if nr, _ := res.json["next_runs"].([]any); res.status != 200 || res.json["paused"] != true || res.json["next_run_at"] != nil ||
+		nr == nil || len(nr) != 0 || len(res.json["next_runs_if_resumed"].([]any)) != 5 || res.json["paused_at"] == nil {
 		t.Fatalf("pause = %d %s", res.status, res.body)
 	}
 	res = do(t, h, "POST", "/v1/schedules/nightly/resume", "")
-	if res.status != 200 || res.json["paused"] != false || res.json["next_run_at"] == nil {
+	if nr, _ := res.json["next_runs"].([]any); res.status != 200 || res.json["paused"] != false || res.json["next_run_at"] == nil ||
+		res.json["paused_at"] != nil || len(nr) != 5 || res.json["next_runs_if_resumed"] != nil {
 		t.Fatalf("resume = %d %s", res.status, res.body)
 	}
 
@@ -124,7 +127,7 @@ func TestSchedules(t *testing.T) {
 		{"POST", "/v1/schedules/nightly/pause"},
 		{"POST", "/v1/schedules/nightly/resume"},
 		{"POST", "/v1/schedules/nightly/trigger"},
-		{"GET", "/v1/schedules/nightly/runs"},
+		{"GET", "/v1/runs?schedule=nightly"},
 	} {
 		if res = do(t, h, r.method, r.path, ""); res.status != 404 || errorCode(res) != "schedule_not_found" {
 			t.Fatalf("%s %s = %d %s", r.method, r.path, res.status, res.body)
@@ -172,16 +175,16 @@ func TestRunsAPI(t *testing.T) {
 	}
 
 	do(t, h, "POST", "/v1/schedules/nightly/trigger", "")
-	res = do(t, h, "GET", "/v1/schedules/nightly/runs?limit=1", "")
+	res = do(t, h, "GET", "/v1/runs?schedule=nightly&limit=1", "")
 	runs, _ := res.json["runs"].([]any)
 	if res.status != 200 || len(runs) != 1 || res.json["next_cursor"] == nil {
 		t.Fatalf("runs page 1 = %d %s", res.status, res.body)
 	}
-	res = do(t, h, "GET", "/v1/schedules/nightly/runs?state=skipped", "")
+	res = do(t, h, "GET", "/v1/runs?schedule=nightly&state=skipped", "")
 	if runs, _ := res.json["runs"].([]any); res.status != 200 || len(runs) != 0 {
 		t.Fatalf("skipped runs = %d %s", res.status, res.body)
 	}
-	if res = do(t, h, "GET", "/v1/schedules/nightly/runs?state=bogus", ""); res.status != 400 {
+	if res = do(t, h, "GET", "/v1/runs?state=bogus", ""); res.status != 400 {
 		t.Fatalf("bad state = %d %s", res.status, res.body)
 	}
 	res = do(t, h, "GET", "/v1/schedules/nightly", "")
@@ -190,6 +193,31 @@ func TestRunsAPI(t *testing.T) {
 	}
 	if res = do(t, h, "GET", "/v1/runs/"+id+"/attempts", ""); res.status != 200 || len(res.json["attempts"].([]any)) != 0 {
 		t.Fatalf("attempts = %d %s", res.status, res.body)
+	}
+
+	// Runs across schedules, newest first, each naming its schedule.
+	doBody(t, h, "PUT", "/v1/schedules/hourly", "", `{"cron": "@hourly", "url": "https://api.example.test/sync"}`)
+	hourly := do(t, h, "POST", "/v1/schedules/hourly/trigger", "").json["id"]
+	res = do(t, h, "GET", "/v1/runs?limit=2", "")
+	runs, _ = res.json["runs"].([]any)
+	if res.status != 200 || len(runs) != 2 || res.json["next_cursor"] == nil {
+		t.Fatalf("all runs = %d %s", res.status, res.body)
+	}
+	if first := runs[0].(map[string]any); first["id"] != hourly || first["schedule"] != "hourly" || runs[1].(map[string]any)["schedule"] != "nightly" {
+		t.Fatalf("all runs = %v", runs)
+	}
+	res = do(t, h, "GET", "/v1/runs?cursor="+res.json["next_cursor"].(string), "")
+	if runs, _ := res.json["runs"].([]any); res.status != 200 || len(runs) != 1 || res.json["next_cursor"] != nil {
+		t.Fatalf("all runs page 2 = %d %s", res.status, res.body)
+	}
+	if res = do(t, h, "GET", "/v1/runs?schedule=hourly", ""); len(res.json["runs"].([]any)) != 1 {
+		t.Fatalf("runs of hourly = %d %s", res.status, res.body)
+	}
+	if res = do(t, h, "GET", "/v1/runs?state=cancelled", ""); len(res.json["runs"].([]any)) != 0 {
+		t.Fatalf("cancelled runs = %d %s", res.status, res.body)
+	}
+	if res = do(t, h, "GET", "/v1/runs?schedule=nope", ""); res.status != 404 || errorCode(res) != "schedule_not_found" {
+		t.Fatalf("runs of a missing schedule = %d %s", res.status, res.body)
 	}
 }
 
@@ -244,6 +272,16 @@ func TestScheduleEndToEnd(t *testing.T) {
 	attempts := call("GET", "/v1/runs/"+id+"/attempts", "")["attempts"].([]any)
 	if len(attempts) != 2 || run["last_status"] != 500.0 {
 		t.Fatalf("run = %v, %d attempts", run, len(attempts))
+	}
+	// started_at is the first attempt's start; last_duration_ms the latest's.
+	first, last := attempts[0].(map[string]any), attempts[1].(map[string]any)
+	if run["started_at"] == nil || run["last_duration_ms"] != last["duration_ms"] {
+		t.Fatalf("run started_at = %v, last_duration_ms = %v; attempts %v", run["started_at"], run["last_duration_ms"], attempts)
+	}
+	started, _ := time.Parse(time.RFC3339Nano, run["started_at"].(string))
+	firstStart, _ := time.Parse(time.RFC3339Nano, first["started_at"].(string))
+	if d := firstStart.Sub(started); d < 0 || d > time.Second {
+		t.Fatalf("started_at = %v, first attempt started %v", started, firstStart)
 	}
 	var echo map[string]any
 	if err := json.Unmarshal([]byte(attempts[0].(map[string]any)["response_body"].(string)), &echo); err != nil {

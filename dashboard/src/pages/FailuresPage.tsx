@@ -6,7 +6,6 @@ import {
   listAlertChannelsOptions,
   listQueuesOptions,
   listRunsOptions,
-  listSchedulesOptions,
   retryFailedTasksMutation,
 } from '../api/@tanstack/react-query.gen';
 import type { FailureGroup, Run } from '../api';
@@ -94,48 +93,40 @@ function QueueFailures() {
   );
 }
 
-/** How many failed runs are looked at per schedule; more shows as "50+". */
-const RUN_LIMIT = 50;
+/** How many of the latest failed runs are grouped; if there are more, counts show as "12+". */
+const RUN_LIMIT = 200;
 
 type RunGroup = { schedule: string; error: string; count: number; more: boolean; latest: Run };
 
 /**
  * Failed runs of every schedule, grouped like the queues' failures. The API
- * has no failure summary for schedules, so this groups each schedule's
- * latest failed runs here.
+ * has no failure summary for schedules, so this groups the latest failed
+ * runs here.
  */
 function ScheduleFailures() {
   const from = useFromHere();
-  const schedules = useQuery({ ...listSchedulesOptions(), ...LIVE });
-  const names = (schedules.data?.schedules ?? []).map((s) => s.name);
-  const runs = useQueries({
-    queries: names.map((name) => ({
-      ...listRunsOptions({ path: { schedule: name }, query: { state: 'failed', limit: RUN_LIMIT } }),
-      refetchInterval: 15_000,
-    })),
+  const runs = useQuery({
+    ...listRunsOptions({ query: { state: 'failed', limit: RUN_LIMIT } }),
+    refetchInterval: 15_000,
   });
-  const groups: RunGroup[] = runs
-    .flatMap((r, i) => {
-      const byError = new Map<string, RunGroup>();
-      for (const run of r.data?.runs ?? []) {
-        const error = run.last_error ?? '';
-        const g = byError.get(error);
-        if (g) g.count++;
-        // Newest first, so the first run of each error is its latest.
-        else byError.set(error, { schedule: names[i], error, count: 1, more: false, latest: run });
-      }
-      if (r.data?.next_cursor) byError.forEach((g) => (g.more = true));
-      return [...byError.values()];
-    })
-    .sort((a, b) => b.count - a.count || lastFailed(b) - lastFailed(a));
+  const byKey = new Map<string, RunGroup>();
+  // Newest first, so the first run of each group is its latest.
+  for (const run of runs.data?.runs ?? []) {
+    const error = run.last_error ?? '';
+    const key = `${run.schedule}\n${error}`;
+    const g = byKey.get(key);
+    if (g) g.count++;
+    else byKey.set(key, { schedule: run.schedule, error, count: 1, more: false, latest: run });
+  }
+  if (runs.data?.next_cursor) byKey.forEach((g) => (g.more = true));
+  const groups = [...byKey.values()].sort((a, b) => b.count - a.count || lastFailed(b) - lastFailed(a));
   const list = usePage(groups);
-  const error = schedules.error ?? runs.find((r) => r.error)?.error;
 
   return (
     <Section title="Schedules">
-      {error ? (
-        <ErrorText error={error} />
-      ) : schedules.isPending || runs.some((r) => r.isPending) ? (
+      {runs.error ? (
+        <ErrorText error={runs.error} />
+      ) : runs.isPending ? (
         <Muted>Loading…</Muted>
       ) : groups.length === 0 ? (
         <Muted>No failed schedule runs.</Muted>

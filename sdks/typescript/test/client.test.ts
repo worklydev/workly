@@ -13,6 +13,7 @@ import {
   RateLimitError,
   VERSION,
   Workly,
+  type Run,
 } from '../src/index.ts';
 
 interface Sent {
@@ -625,11 +626,30 @@ describe('schedules', () => {
   test('runs paginate', async () => {
     const { fetch, sent } = fakeFetch(json({ runs: [run], next_cursor: 'c1' }), json({ runs: [run] }));
     const ids: string[] = [];
-    for await (const r of new Workly({ fetch }).schedules.runs('nightly', { state: 'failed' })) ids.push(r.id);
+    for await (const r of new Workly({ fetch }).runs.list({ schedule: 'nightly', state: 'failed' })) ids.push(r.id);
     assert.deepEqual(ids, ['run_1', 'run_1']);
-    assert.equal(sent[0]!.url.pathname, '/v1/schedules/nightly/runs');
-    assert.equal(sent[0]!.url.searchParams.get('state'), 'failed');
+    assert.equal(sent[0]!.url.pathname, '/v1/runs');
+    assert.equal(sent[0]!.url.search, '?schedule=nightly&state=failed');
     assert.equal(sent[1]!.url.searchParams.get('cursor'), 'c1');
+  });
+
+  test('runs across schedules', async () => {
+    const timed = { ...run, started_at: '2026-10-01T01:00:02Z', last_duration_ms: 120 };
+    const { fetch, sent } = fakeFetch(
+      json({ runs: [timed], next_cursor: 'c1' }),
+      json({ runs: [] }),
+      json({ runs: [] }),
+    );
+    const workly = new Workly({ fetch });
+    const runs: Run[] = [];
+    for await (const r of workly.runs.list({ state: 'failed', pageSize: 10 })) runs.push(r);
+    assert.equal(sent[0]!.url.pathname, '/v1/runs');
+    assert.equal(sent[0]!.url.search, '?state=failed&limit=10');
+    assert.equal(sent[1]!.url.searchParams.get('cursor'), 'c1');
+    assert.equal(runs[0]!.startedAt, '2026-10-01T01:00:02Z');
+    assert.equal(runs[0]!.lastDurationMs, 120);
+    await workly.runs.listPage({ schedule: 'nightly' });
+    assert.equal(sent[2]!.url.search, '?schedule=nightly');
   });
 
   test('runs', async () => {

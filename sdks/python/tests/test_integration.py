@@ -53,8 +53,10 @@ def test_delivery(client: workly.Workly, server_url: str, queue: str) -> None:
     [attempt] = client.tasks.attempts(task.id)
     assert (attempt.number, attempt.outcome, attempt.status_code) == (1, "success", 200)
     assert task.last_attempt_at == attempt.finished_at
+    assert task.started_at is not None and task.last_duration_ms == attempt.duration_ms
     activity = client.queues.activity(queue)
     assert (activity.succeeded, activity.failed) == (1, 0)
+    assert activity.p50_duration_ms == activity.p95_duration_ms == attempt.duration_ms
 
 
 def test_task_delivery(client: workly.Workly, queue: str) -> None:
@@ -267,7 +269,9 @@ def test_schedules(client: workly.Workly, server_url: str) -> None:
         assert len(s.next_runs) == 5 and s.next_run_at == s.next_runs[0]
         assert s.payload == {"kind": "daily"}
 
-        assert client.schedules.pause(name).next_run_at is None
+        paused = client.schedules.pause(name)
+        assert paused.next_run_at is None and paused.paused_at is not None
+        assert paused.next_runs == [] and len(paused.next_runs_if_resumed or []) == 5
         run = client.schedules.trigger(name)  # runs even while paused
         run = wait_run_finished(client, run.id)
         assert (run.state, run.trigger, run.attempt_count, run.last_status) == (
@@ -281,10 +285,14 @@ def test_schedules(client: workly.Workly, server_url: str) -> None:
         assert d.headers["Workly-Run-Id"] == run.id
         workly.verify_signature(d.body, d.headers, DEV_SIGNING_SECRET)
 
-        assert [r.id for r in client.schedules.runs(name, state="failed")] == [run.id]
+        assert [r.id for r in client.runs.list(schedule=name, state="failed")] == [run.id]
+        assert run.id in [r.id for r in client.runs.list(state="failed")]
+        assert run.started_at is not None and run.last_duration_ms is not None
         last = client.schedules.get(name).last_run
         assert last is not None and last.id == run.id
-        assert client.schedules.resume(name).next_run_at is not None
+        resumed = client.schedules.resume(name)
+        assert resumed.next_run_at is not None and resumed.paused_at is None
+        assert len(resumed.next_runs) == 5 and resumed.next_runs_if_resumed is None
         assert [x.name for x in client.schedules.list()].count(name) == 1
 
         with pytest.raises(workly.BadRequestError):

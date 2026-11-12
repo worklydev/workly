@@ -152,11 +152,34 @@ func testQueueActivity(t *testing.T, open func() store.Store) {
 	attempt(t, s, mustCreate(t, s, otherWorkspace, store.NewTask{Queue: "emails"}), store.TaskSucceeded)
 
 	got, err := s.QueueActivity(ctx, workspace.Default, "emails", start)
-	if want := (store.QueueActivity{Succeeded: 2, Failed: 1, Cancelled: 1}); err != nil || got != want {
-		t.Fatalf("QueueActivity = %+v, %v; want %+v", got, err, want)
+	if err != nil || got.Succeeded != 2 || got.Failed != 1 || got.Cancelled != 1 {
+		t.Fatalf("QueueActivity = %+v, %v; want 2 succeeded, 1 failed, 1 cancelled", got, err)
+	}
+	// Every attempt above took 0ms.
+	if got.P50Duration == nil || *got.P50Duration != 0 || got.P95Duration == nil || *got.P95Duration != 0 {
+		t.Fatalf("QueueActivity durations = %v, %v; want 0, 0", got.P50Duration, got.P95Duration)
 	}
 	if got, err := s.QueueActivity(ctx, workspace.Default, "emails", now().Add(time.Minute)); err != nil || got != (store.QueueActivity{}) {
 		t.Fatalf("QueueActivity since the future = %+v, %v; want zero", got, err)
+	}
+
+	// Percentiles of the latest attempt's duration, over succeeded and
+	// failed tasks: 10ms, 20ms, … 200ms.
+	for i := 1; i <= 20; i++ {
+		next := store.TaskSucceeded
+		if i%5 == 0 {
+			next = store.TaskFailed
+		}
+		task := mustCreate(t, s, workspace.Default, store.NewTask{Queue: "reports"})
+		finishTook(t, s, claim(t, s, task), next, time.Duration(i)*10*time.Millisecond)
+	}
+	got, err = s.QueueActivity(ctx, workspace.Default, "reports", start)
+	if err != nil || got.P50Duration == nil || *got.P50Duration != 100*time.Millisecond ||
+		got.P95Duration == nil || *got.P95Duration != 190*time.Millisecond {
+		t.Fatalf("QueueActivity = %+v, %v; want p50 100ms, p95 190ms", got, err)
+	}
+	if got, err := s.QueueActivity(ctx, workspace.Default, "reports", now().Add(time.Minute)); err != nil || got.P50Duration != nil {
+		t.Fatalf("QueueActivity durations since the future = %v, %v; want nil", got.P50Duration, err)
 	}
 }
 

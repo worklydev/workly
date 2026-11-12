@@ -16,18 +16,18 @@ import (
 
 const scheduleColumns = `workspace_id, name, cron, timezone, method, url, headers, body,
 	timeout_ms, max_attempts, min_backoff_ms, max_backoff_ms, backoff_multiplier, retry_on_4xx,
-	overlap, missed, paused, next_run_at, created_at, updated_at`
+	overlap, missed, paused, next_run_at, created_at, updated_at, paused_at`
 
 func scanSchedule(row interface{ Scan(...any) error }) (store.Schedule, error) {
 	var (
-		sc                              store.Schedule
-		headers                         []byte
-		timeout, minBackoff, maxBackoff int64
-		next, created, updated          dbTime
+		sc                               store.Schedule
+		headers                          []byte
+		timeout, minBackoff, maxBackoff  int64
+		next, created, updated, pausedAt dbTime
 	)
 	err := row.Scan(&sc.WorkspaceID, &sc.Name, &sc.Cron, &sc.Timezone, &sc.Method, &sc.URL, &headers, &sc.Body,
 		&timeout, &sc.MaxAttempts, &minBackoff, &maxBackoff, &sc.BackoffMultiplier, &sc.RetryOn4xx,
-		&sc.Overlap, &sc.Missed, &sc.Paused, &next, &created, &updated)
+		&sc.Overlap, &sc.Missed, &sc.Paused, &next, &created, &updated, &pausedAt)
 	if err != nil {
 		return sc, err
 	}
@@ -40,7 +40,7 @@ func scanSchedule(row interface{ Scan(...any) error }) (store.Schedule, error) {
 	sc.Timeout = time.Duration(timeout) * time.Millisecond
 	sc.MinBackoff = time.Duration(minBackoff) * time.Millisecond
 	sc.MaxBackoff = time.Duration(maxBackoff) * time.Millisecond
-	sc.NextRunAt, sc.CreatedAt, sc.UpdatedAt = next.ptr(), created.Time, updated.Time
+	sc.NextRunAt, sc.CreatedAt, sc.UpdatedAt, sc.PausedAt = next.ptr(), created.Time, updated.Time, pausedAt.ptr()
 	return sc, nil
 }
 
@@ -67,7 +67,7 @@ func (s *Store) PutSchedule(ctx context.Context, ws workspace.ID, name string, c
 		now := s.ts(time.Now())
 		// A paused schedule stays paused, with no next slot.
 		_, err = s.exec(ctx, tx, `INSERT INTO schedules (`+scheduleColumns+`)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
 			ON CONFLICT (workspace_id, name) DO UPDATE SET
 				cron = excluded.cron, timezone = excluded.timezone, method = excluded.method,
 				url = excluded.url, headers = excluded.headers, body = excluded.body,
@@ -204,14 +204,17 @@ func (s *Store) DeleteSchedule(ctx context.Context, ws workspace.ID, name string
 func (s *Store) SetSchedulePaused(ctx context.Context, ws workspace.ID, name string, paused bool, nextRunAt time.Time) (store.Schedule, error) {
 	var sc store.Schedule
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
-		query, args := `UPDATE schedules SET paused = ?, next_run_at = NULL, updated_at = ?
-			WHERE workspace_id = ? AND name = ?`, []any{true, s.ts(time.Now()), ws, name}
+		now := s.ts(time.Now())
+		// Pausing a paused schedule keeps when it was first paused.
+		query, args := `UPDATE schedules SET paused = ?, next_run_at = NULL, updated_at = ?,
+				paused_at = CASE WHEN paused THEN paused_at ELSE ? END
+			WHERE workspace_id = ? AND name = ?`, []any{true, now, now, ws, name}
 		if !paused {
 			// Only a paused schedule restarts from nextRunAt.
 			query, args = `UPDATE schedules SET
 					next_run_at = CASE WHEN paused THEN ? ELSE next_run_at END,
-					paused = ?, updated_at = ?
-				WHERE workspace_id = ? AND name = ?`, []any{s.ts(nextRunAt), false, s.ts(time.Now()), ws, name}
+					paused = ?, paused_at = NULL, updated_at = ?
+				WHERE workspace_id = ? AND name = ?`, []any{s.ts(nextRunAt), false, now, ws, name}
 		}
 		res, err := s.exec(ctx, tx, query, args...)
 		if err != nil {
@@ -287,19 +290,21 @@ func (s *Store) insertRun(ctx context.Context, tx *sql.Tx, sc store.Schedule, tr
 
 const runColumns = `id, workspace_id, schedule, state, trigger_type, scheduled_for, skip_reason,
 	method, url, headers, body, run_at, attempt_count, replayed_attempts, lease_expires_at,
-	last_status, last_outcome, last_error, created_at, updated_at, finished_at, last_attempt_at, retried_at`
+	last_status, last_outcome, last_error, created_at, updated_at, finished_at, last_attempt_at, retried_at,
+	started_at, last_duration_ms`
 
 func scanRun(row interface{ Scan(...any) error }) (store.Run, error) {
 	var (
 		r                                                        store.Run
 		headers                                                  []byte
-		lastStatus                                               sql.NullInt64
+		lastStatus, lastDuration                                 sql.NullInt64
 		skipReason, lastOutcome, lastError                       sql.NullString
 		slot, runAt, lease, created, updated, fin, last, retried dbTime
+		started                                                  dbTime
 	)
 	err := row.Scan(&r.ID, &r.WorkspaceID, &r.Schedule, &r.State, &r.Trigger, &slot, &skipReason,
 		&r.Method, &r.URL, &headers, &r.Body, &runAt, &r.AttemptCount, &r.ReplayedAttempts, &lease,
-		&lastStatus, &lastOutcome, &lastError, &created, &updated, &fin, &last, &retried)
+		&lastStatus, &lastOutcome, &lastError, &created, &updated, &fin, &last, &retried, &started, &lastDuration)
 	if err != nil {
 		return r, err
 	}
@@ -316,6 +321,7 @@ func scanRun(row interface{ Scan(...any) error }) (store.Run, error) {
 	r.SkipReason, r.LastOutcome, r.LastError = store.SkipReason(skipReason.String), store.Outcome(lastOutcome.String), lastError.String
 	r.ScheduledFor, r.RunAt, r.CreatedAt, r.UpdatedAt = slot.Time, runAt.Time, created.Time, updated.Time
 	r.LeaseExpiresAt, r.FinishedAt, r.LastAttemptAt, r.RetriedAt = lease.ptr(), fin.ptr(), last.ptr(), retried.ptr()
+	r.StartedAt, r.LastDuration = started.ptr(), millis(lastDuration)
 	return r, nil
 }
 
@@ -332,8 +338,12 @@ func (s *Store) getRun(ctx context.Context, q querier, ws workspace.ID, id strin
 }
 
 func (s *Store) ListRuns(ctx context.Context, ws workspace.ID, f store.RunFilter) ([]store.Run, string, error) {
-	query := `SELECT ` + runColumns + ` FROM runs WHERE workspace_id = ? AND schedule = ?`
-	args := []any{ws, f.Schedule}
+	query := `SELECT ` + runColumns + ` FROM runs WHERE workspace_id = ?`
+	args := []any{ws}
+	if f.Schedule != "" {
+		query += ` AND schedule = ?`
+		args = append(args, f.Schedule)
+	}
 	if f.State != "" {
 		query += ` AND state = ?`
 		args = append(args, f.State)
@@ -531,9 +541,14 @@ func (s *Store) ClaimRuns(ctx context.Context, limit int, now time.Time, grace t
 			}
 			lease := now.Add(sc.Timeout + grace).UTC()
 			if _, err := s.exec(ctx, tx, `UPDATE runs
-				SET state = 'running', attempt_count = attempt_count + 1, lease_expires_at = ?, updated_at = ?
-				WHERE id = ?`, s.ts(lease), s.ts(now), r.ID); err != nil {
+				SET state = 'running', attempt_count = attempt_count + 1, lease_expires_at = ?, updated_at = ?,
+					started_at = COALESCE(started_at, ?)
+				WHERE id = ?`, s.ts(lease), s.ts(now), s.ts(now), r.ID); err != nil {
 				return err
+			}
+			if r.StartedAt == nil {
+				started := now.UTC()
+				r.StartedAt = &started
 			}
 			r.State = store.RunRunning
 			r.AttemptCount++
@@ -568,11 +583,13 @@ func (s *Store) FinishRunAttempt(ctx context.Context, ws workspace.ID, r store.R
 				state = CASE WHEN state = 'cancelled' THEN state ELSE ? END,
 				run_at = COALESCE(?, run_at), lease_expires_at = NULL,
 				last_status = ?, last_outcome = ?, last_error = ?, updated_at = ?, last_attempt_at = ?,
+				last_duration_ms = ?,
 				finished_at = CASE WHEN state = 'cancelled' THEN finished_at ELSE ? END
 			WHERE workspace_id = ? AND id = ? AND lease_expires_at IS NOT NULL AND attempt_count = ?
 			RETURNING state`,
 			r.NextState, s.tsOrNil(runAt), nullInt(r.StatusCode), r.Outcome, nullString(r.Error),
-			s.ts(r.FinishedAt), s.ts(r.FinishedAt), s.tsOrNil(finishedAt), ws, r.RunID, r.Number,
+			s.ts(r.FinishedAt), s.ts(r.FinishedAt), s.durationMillis(r.Attempt),
+			s.tsOrNil(finishedAt), ws, r.RunID, r.Number,
 		).Scan(&state)
 		if errors.Is(err, sql.ErrNoRows) {
 			return store.ErrLeaseLost

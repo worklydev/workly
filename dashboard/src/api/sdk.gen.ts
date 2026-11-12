@@ -150,7 +150,8 @@ export const getQueueFailures = <ThrowOnError extends boolean = false>(options: 
 /**
  * Count a queue's finished tasks
  *
- * Counts the tasks that finished since `since`, by final state. Finished
+ * Counts the tasks that finished since `since`, by final state, with
+ * percentiles of how long their latest attempt took. Finished
  * tasks are deleted after the server's retention period, so a `since`
  * further back than `retention_seconds` only counts what is left.
  *
@@ -474,11 +475,15 @@ export const triggerSchedule = <ThrowOnError extends boolean = false>(options: O
 });
 
 /**
- * List a schedule's runs, newest first
+ * List runs, newest first
+ *
+ * Runs of every schedule, or of one with `schedule`. A `schedule` that
+ * doesn't exist is `schedule_not_found`.
+ *
  */
-export const listRuns = <ThrowOnError extends boolean = false>(options: Options<ListRunsData, ThrowOnError>): RequestResult<ListRunsResponses, ListRunsErrors, ThrowOnError> => (options.client ?? client).get<ListRunsResponses, ListRunsErrors, ThrowOnError>({
+export const listRuns = <ThrowOnError extends boolean = false>(options?: Options<ListRunsData, ThrowOnError>): RequestResult<ListRunsResponses, ListRunsErrors, ThrowOnError> => (options?.client ?? client).get<ListRunsResponses, ListRunsErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
-    url: '/v1/schedules/{schedule}/runs',
+    url: '/v1/runs',
     ...options
 });
 

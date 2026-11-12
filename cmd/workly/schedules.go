@@ -27,7 +27,7 @@ attempts and retries. Schedules are separate from queues and tasks.`,
 	cmd.AddCommand(schedulesListCmd(), schedulesGetCmd(), schedulesPutCmd(),
 		scheduleActionCmd("pause", "Stop a schedule from running on its timetable"),
 		scheduleActionCmd("resume", "Resume a paused schedule from its next slot"),
-		schedulesTriggerCmd(), schedulesRunsCmd(), schedulesDeleteCmd())
+		schedulesTriggerCmd(), schedulesDeleteCmd())
 	return cmd
 }
 
@@ -38,7 +38,7 @@ func runsCmd() *cobra.Command {
 		Short:   "Inspect, retry and cancel schedule runs",
 	}
 	addClientFlags(cmd)
-	cmd.AddCommand(runsGetCmd(),
+	cmd.AddCommand(runsListCmd(), runsGetCmd(),
 		runActionCmd("retry", "Deliver a run now; a finished or skipped run gets fresh attempts"),
 		runActionCmd("cancel", "Cancel a pending or running run"))
 	return cmd
@@ -98,7 +98,7 @@ func schedulesGetCmd() *cobra.Command {
 			if asJSON, _ := cmd.Flags().GetBool("json"); asJSON {
 				return output(cmd, res.Body, nil)
 			}
-			runs, err := c.ListRunsWithResponse(cmd.Context(), args[0], &client.ListRunsParams{Limit: ptr(10)})
+			runs, err := c.ListRunsWithResponse(cmd.Context(), &client.ListRunsParams{Schedule: &args[0], Limit: ptr(10)})
 			if err := check(runs, err); err != nil {
 				return err
 			}
@@ -246,22 +246,25 @@ flight. It doesn't change when the schedule next runs.`,
 	}
 }
 
-func schedulesRunsCmd() *cobra.Command {
+func runsListCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "runs NAME",
-		Short:   "List a schedule's runs, newest first",
-		Example: `  workly schedules runs nightly-report --state failed`,
-		Args:    cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Use:     "ls",
+		Aliases: []string{"list"},
+		Short:   "List runs of every schedule, or of one, newest first",
+		Example: `  workly runs ls --state failed
+  workly runs ls --schedule nightly-report`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			c, err := newClient(cmd)
 			if err != nil {
 				return err
 			}
 			f := cmd.Flags()
 			params := client.ListRunsParams{Limit: ptr(must(f.GetInt("limit")))}
+			setIf(f.Changed("schedule"), &params.Schedule, must(f.GetString("schedule")))
 			setIf(f.Changed("state"), &params.State, client.RunState(must(f.GetString("state"))))
 			setIf(f.Changed("cursor"), &params.Cursor, must(f.GetString("cursor")))
-			res, err := c.ListRunsWithResponse(cmd.Context(), args[0], &params)
+			res, err := c.ListRunsWithResponse(cmd.Context(), &params)
 			if err := check(res, err); err != nil {
 				return err
 			}
@@ -279,6 +282,7 @@ func schedulesRunsCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
+	f.String("schedule", "", "only this schedule's runs")
 	f.String("state", "", "only runs in this state: pending, running, succeeded, failed, cancelled or skipped")
 	f.Int("limit", 20, "runs per page (at most 200)")
 	f.String("cursor", "", "continue from a previous page")
@@ -392,13 +396,13 @@ func printSchedule(w io.Writer, s *client.Schedule) {
 		{"Overlap", string(s.Overlap)},
 		{"Missed", string(s.Missed)},
 	}
-	for i, t := range s.NextRuns {
-		label := ""
-		if i == 0 {
-			label = "Next runs"
-			if s.Paused {
-				label = "Next runs if resumed"
-			}
+	next, label := s.NextRuns, "Next runs"
+	if s.NextRunsIfResumed != nil {
+		next, label = *s.NextRunsIfResumed, "Next runs if resumed"
+	}
+	for i, t := range next {
+		if i > 0 {
+			label = ""
 		}
 		rows = append(rows, []string{label, t.Local().Format(time.DateTime) + " (" + ago(t) + ")"})
 	}
@@ -418,10 +422,10 @@ func printRuns(w io.Writer, runs []client.Run) {
 		if r.SkipReason != nil {
 			state += " (" + string(*r.SkipReason) + ")"
 		}
-		rows = append(rows, []string{r.Id, state, string(r.Trigger), r.ScheduledFor.Local().Format(time.DateTime),
+		rows = append(rows, []string{r.Id, r.Schedule, state, string(r.Trigger), r.ScheduledFor.Local().Format(time.DateTime),
 			strconv.Itoa(r.AttemptCount), deref(r.LastStatus, "-"), deref(r.LastError, "")})
 	}
-	table(w, "ID\tSTATE\tTRIGGER\tSCHEDULED FOR\tATTEMPTS\tSTATUS\tERROR", rows)
+	table(w, "ID\tSCHEDULE\tSTATE\tTRIGGER\tSCHEDULED FOR\tATTEMPTS\tSTATUS\tERROR", rows)
 }
 
 func printRun(w io.Writer, r *client.Run, attempts []client.Attempt) {
