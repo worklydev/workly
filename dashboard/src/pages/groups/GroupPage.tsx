@@ -13,11 +13,11 @@ import { CodePanel } from '../../components/CodePanel';
 import { CopyButton } from '../../components/CopyButton';
 import { DisabledReason } from '../../components/DisabledReason';
 import { PageHeader } from '../../components/PageHeader';
-import { Properties, Property, PropertyGroups } from '../../components/Properties';
+import { InlineFields } from '../../components/InlineFields';
 import { ErrorText, Muted } from '../../components/QueryState';
 import { RelativeTime } from '../../components/RelativeTime';
 import { Section } from '../../components/Section';
-import { SortSummary } from '../../components/SortSummary';
+import { StatCard, StatStrip } from '../../components/StatCard';
 import { GroupStatusBadge, TaskStateBadge } from '../../components/states';
 import { TaskTable } from '../../components/TaskTable';
 import { PAGE_SIZE } from '../../hooks/useListPage';
@@ -43,60 +43,48 @@ export function GroupPage() {
 
   return (
     <>
-      <PageHeader
-        title={
-          <span className="flex min-w-0 items-center gap-1">
-            {group.name ? (
-              <span className="truncate">{group.name}</span>
-            ) : (
-              <span className="truncate font-mono text-base">{group.id}</span>
-            )}
-            <CopyButton text={group.id} title="Copy group ID" />
-          </span>
-        }
-        description={group.name && <span className="font-mono text-xs">{group.id}</span>}
-        badge={<GroupStatusBadge status={group.status} />}
-      >
-        <CloseGroup group={group} />
-      </PageHeader>
+      <div className="flex flex-col gap-3">
+        <PageHeader
+          title={
+            <span className="flex min-w-0 items-center gap-1">
+              {group.name ? (
+                <span className="truncate">{group.name}</span>
+              ) : (
+                <span className="truncate font-mono text-base">{group.id}</span>
+              )}
+              <CopyButton text={group.id} title="Copy group ID" />
+            </span>
+          }
+          description={group.name && <span className="font-mono text-xs">{group.id}</span>}
+          badge={<GroupStatusBadge status={group.status} />}
+        >
+          <CloseGroup group={group} />
+        </PageHeader>
+        <InlineFields
+          items={[
+            { label: 'Created', value: <RelativeTime iso={group.created_at} /> },
+            { label: 'Closed', value: group.closed_at ? <RelativeTime iso={group.closed_at} /> : <None /> },
+            { label: 'Completed', value: group.finished_at ? <RelativeTime iso={group.finished_at} /> : <None /> },
+            { label: 'Idempotency key', value: group.idempotency_key ?? <None /> },
+          ]}
+        />
+      </div>
       <Notice group={group} />
-      <PropertyGroups>
-        <Properties title="Tasks">
-          <Property label="Progress">
-            <GroupProgress group={group} />
-          </Property>
-          <Property label="Succeeded">
-            <Count n={group.succeeded} />
-          </Property>
-          <Property label="Failed">
-            <Count n={group.failed} danger />
-          </Property>
-          <Property label="Cancelled">
-            <Count n={group.cancelled} danger />
-          </Property>
-          <Property label="Remaining">
-            <Count n={group.remaining} />
-          </Property>
-        </Properties>
-        <Properties title="Timing">
-          <Property label="Created">
-            <RelativeTime iso={group.created_at} />
-          </Property>
-          <Property label="Closed">{group.closed_at ? <RelativeTime iso={group.closed_at} /> : <None />}</Property>
-          <Property label="Completed">
-            {group.finished_at ? <RelativeTime iso={group.finished_at} /> : <None />}
-          </Property>
-          <Property label="Idempotency key">
-            {group.idempotency_key ? (
-              <span className="font-mono text-xs" title={group.idempotency_key}>
-                {group.idempotency_key}
-              </span>
-            ) : (
-              <None />
-            )}
-          </Property>
-        </Properties>
-      </PropertyGroups>
+      <StatStrip className="grid-cols-2 sm:grid-cols-6">
+        <StatCard
+          className="col-span-2"
+          label="Progress"
+          value={
+            <div className="flex h-7 items-center">
+              <GroupProgress group={group} />
+            </div>
+          }
+        />
+        <StatCard label="Succeeded" value={group.succeeded} />
+        <StatCard label="Failed" value={group.failed} tone={group.failed > 0 ? 'danger' : undefined} />
+        <StatCard label="Cancelled" value={group.cancelled} tone={group.cancelled > 0 ? 'danger' : undefined} />
+        <StatCard label="Remaining" value={group.remaining} />
+      </StatStrip>
       <Callback group={group} />
       <Tasks group={group} />
     </>
@@ -105,10 +93,6 @@ export function GroupPage() {
 
 function None() {
   return <span className="text-faint">—</span>;
-}
-
-function Count({ n, danger }: { n: number; danger?: boolean }) {
-  return <span className={danger && n > 0 ? 'font-mono text-xs text-destructive' : 'font-mono text-xs'}>{n}</span>;
 }
 
 /** What the group is waiting for, so an open group isn't mistaken for a stuck one. */
@@ -267,7 +251,6 @@ function Tasks({ group }: { group: Group }) {
             ))}
           </TabsList>
         </Tabs>
-        <SortSummary sorting={sorting} />
       </div>
       <TaskTable
         pages={pages}

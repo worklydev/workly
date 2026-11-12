@@ -218,7 +218,7 @@ function GroupRow({ group: g }: { group: Group }) {
 
   return (
     <TableRow>
-      <TableCell className="font-medium">
+      <TableCell className="max-w-48 truncate font-medium" title={g.queue}>
         <Link to={`/queues/${encodeURIComponent(g.queue)}`}>{g.queue}</Link>
       </TableCell>
       <TableCell className="text-right font-mono text-xs">
@@ -226,10 +226,10 @@ function GroupRow({ group: g }: { group: Group }) {
           {formatCount(g.count)}
         </Link>
       </TableCell>
-      <TableCell className="max-w-72 truncate" title={g.error}>
+      <TableCell className="max-w-60 truncate" title={g.error}>
         {g.error || <span className="text-faint">No error recorded</span>}
       </TableCell>
-      <TableCell className="max-w-0 min-w-48 truncate font-mono text-xs text-muted-foreground">
+      <TableCell className="max-w-0 min-w-32 truncate font-mono text-xs text-muted-foreground">
         <Link
           to={`/tasks/${g.latest_task_id}`}
           state={from}

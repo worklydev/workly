@@ -136,4 +136,8 @@
   .font-mono {
     font-variant-numeric: tabular-nums;
   }
+  /* Set by useTheme while the theme changes, so nothing fades between themes. */
+  .theme-switching * {
+    transition: none !important;
+  }
 }

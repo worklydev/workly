@@ -22,12 +22,12 @@ import { usePage } from '../../hooks/usePage';
 import { useRange, useRangeSince } from '../../hooks/useRange';
 import { RangeTabs } from '../../components/RangeTabs';
 import { DisabledReason } from '../../components/DisabledReason';
-import { Field, Fields } from '../../components/Field';
+import { InlineFields } from '../../components/InlineFields';
 import { PageHeader } from '../../components/PageHeader';
 import { ErrorText, Muted } from '../../components/QueryState';
 import { RelativeTime } from '../../components/RelativeTime';
 import { Section } from '../../components/Section';
-import { StatCard } from '../../components/StatCard';
+import { StatCard, StatStrip } from '../../components/StatCard';
 import { TaskTable } from '../../components/TaskTable';
 import { taskPaging } from '../../lib/tasks';
 import { useFromHere } from '../../lib/from';
@@ -39,7 +39,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Tabs, TabsList, TabsTab } from '../../primitives/tabs';
 import { LONGEST_WAIT_TITLE, LongestWait } from './LongestWait';
 import { PendingCard } from './PendingCard';
-import { SortSummary } from '../../components/SortSummary';
 import { useTaskSort } from '../../lib/taskSort';
 import { EditPolicy } from './EditPolicy';
 import { EnqueueTask } from './EnqueueTask';
@@ -56,39 +55,29 @@ export function QueuePage() {
 
   return (
     <>
-      <PageHeader title={queue.name} badge={queue.paused && <Badge variant="warning">paused</Badge>}>
-        <QueueActions queue={queue} />
-      </PageHeader>
-      <Section title="Backlog">
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-          <PendingCard due={queue.stats?.due ?? 0} scheduled={queue.stats?.scheduled ?? 0} to="?state=pending" />
-          <StatCard
-            label="Running"
-            value={formatCount(queue.stats?.running ?? 0)}
-            to={queue.stats?.running ? '?state=running' : undefined}
-          />
-          <StatCard
-            label="Longest wait"
-            value={<LongestWait since={queue.stats?.oldest_due_at} />}
-            detail={queue.stats?.oldest_due_at ? 'oldest task past its run time' : 'nothing waiting'}
-            title={LONGEST_WAIT_TITLE}
-          />
-        </div>
-      </Section>
-      <Activity queue={queue.name} />
+      {/* The policy sits with the title: it's what the queue is, the rest is how it's doing. */}
+      <div className="flex flex-col gap-3">
+        <PageHeader title={queue.name} badge={queue.paused && <Badge variant="warning">paused</Badge>}>
+          <QueueActions queue={queue} />
+        </PageHeader>
+        <Policy queue={queue} />
+      </div>
+      <Overview queue={queue} />
       <Failures queue={queue} />
-      <Policy queue={queue} />
       <QueueTasks queue={queue} />
     </>
   );
 }
 
-/** Finished tasks over the page's range (useRange), or as much of it as retention keeps. */
-function Activity({ queue }: { queue: string }) {
+/**
+ * The backlog now, then finished tasks over the page's range (useRange), or
+ * as much of it as retention keeps, as one strip.
+ */
+function Overview({ queue }: { queue: Queue }) {
   const { value: range, seconds, query } = useRange();
   const since = useRangeSince();
   const { data, error } = useQuery({
-    ...getQueueActivityOptions({ path: { queue }, query: { since } }),
+    ...getQueueActivityOptions({ path: { queue: queue.name }, query: { since } }),
     refetchInterval: 15_000,
     placeholderData: keepPreviousData,
   });
@@ -97,43 +86,69 @@ function Activity({ queue }: { queue: string }) {
   const finished = data ? data.succeeded + data.failed : 0;
   // Keeps the range when filtering the task list below.
   const tasks = (state: TaskState) => `${query ? `${query}&` : '?'}state=${state}`;
+  const kept =
+    retention === undefined
+      ? `Finished tasks are kept forever${setting('WORKLY_RETENTION')}.`
+      : `Finished tasks are kept for ${formatDays(retention)}${setting('WORKLY_RETENTION')}.`;
+  const inRange = (label: string) => (
+    <>
+      {label} <span className="text-faint">· {range}</span>
+    </>
+  );
 
   return (
-    <Section title={`Activity · last ${range}`} actions={<RangeTabs />}>
-      {error ? (
-        <ErrorText error={error} />
-      ) : (
-        <>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <StatCard
-              label="Succeeded"
-              value={data ? formatCount(data.succeeded) : '…'}
-              to={data?.succeeded ? tasks('succeeded') : undefined}
-            />
-            <StatCard
-              label="Failed"
-              value={data ? formatCount(data.failed) : '…'}
-              tone={data?.failed ? 'danger' : undefined}
-              to={data?.failed ? tasks('failed') : undefined}
-            />
-            <StatCard
-              label="Cancelled"
-              value={data ? formatCount(data.cancelled) : '…'}
-              to={data?.cancelled ? tasks('cancelled') : undefined}
-            />
-            <StatCard label="Success rate" value={finished > 0 ? `${formatRate(data!.succeeded / finished)}` : '—'} />
-          </div>
-          {data && (
-            <p className="flex items-center gap-1.5 text-xs text-faint">
-              <Info className="size-3.5 shrink-0" />
-              {retention === undefined
-                ? `Finished tasks are kept forever${setting('WORKLY_RETENTION')}.`
-                : retention < seconds
-                  ? `Finished tasks are kept for ${formatDays(retention)}${setting('WORKLY_RETENTION')}, so older activity isn't counted.`
-                  : `Finished tasks are kept for ${formatDays(retention)}${setting('WORKLY_RETENTION')}.`}
-            </p>
-          )}
-        </>
+    <Section title="Overview" actions={<RangeTabs />}>
+      <StatStrip className="grid-cols-2 sm:grid-cols-4 xl:grid-cols-7">
+        {/* Below xl Pending takes two columns, so seven stats fill the grid's rows. */}
+        <PendingCard
+          className="col-span-2 xl:col-span-1"
+          due={queue.stats?.due ?? 0}
+          scheduled={queue.stats?.scheduled ?? 0}
+          to="?state=pending"
+        />
+        <StatCard
+          label="Running"
+          value={formatCount(queue.stats?.running ?? 0)}
+          to={queue.stats?.running ? '?state=running' : undefined}
+        />
+        <StatCard
+          label="Longest wait"
+          value={<LongestWait since={queue.stats?.oldest_due_at} />}
+          detail={queue.stats?.oldest_due_at ? 'past its run time' : 'nothing waiting'}
+          title={LONGEST_WAIT_TITLE}
+        />
+        <StatCard
+          label={inRange('Succeeded')}
+          value={data ? formatCount(data.succeeded) : '…'}
+          to={data?.succeeded ? tasks('succeeded') : undefined}
+          title={kept}
+        />
+        <StatCard
+          label={inRange('Failed')}
+          value={data ? formatCount(data.failed) : '…'}
+          tone={data?.failed ? 'danger' : undefined}
+          to={data?.failed ? tasks('failed') : undefined}
+          title={kept}
+        />
+        <StatCard
+          label={inRange('Cancelled')}
+          value={data ? formatCount(data.cancelled) : '…'}
+          to={data?.cancelled ? tasks('cancelled') : undefined}
+          title={kept}
+        />
+        <StatCard
+          label={inRange('Success rate')}
+          value={finished > 0 ? `${formatRate(data!.succeeded / finished)}` : '—'}
+          title={kept}
+        />
+      </StatStrip>
+      {error && <ErrorText error={error} />}
+      {/* Only worth saying when it changes what the numbers mean. */}
+      {retention !== undefined && retention < seconds && (
+        <p className="flex items-center gap-1.5 text-xs text-faint">
+          <Info className="size-3.5 shrink-0" />
+          {kept.slice(0, -1)}, so older activity isn't counted.
+        </p>
       )}
     </Section>
   );
@@ -339,43 +354,37 @@ function FailureRow({ queue, group: g }: { queue: string; group: FailureGroup })
   );
 }
 
+/** One line of label–value pairs: compact enough to sit under the title. */
 function Policy({ queue }: { queue: Queue }) {
   // The generated type keeps QueueConfig's fields optional, but a queue
   // always has its full policy.
   const q = queue as Queue & Required<Pick<Queue, 'min_backoff_seconds' | 'max_backoff_seconds' | 'timeout_seconds'>>;
-  const backoff = `${formatSeconds(q.min_backoff_seconds)} → ${formatSeconds(q.max_backoff_seconds)}, ×${q.backoff_multiplier}`;
-  const rate = q.rate_per_second === undefined ? 'unlimited' : `${q.rate_per_second}/s`;
   const [editing, setEditing] = useState(false);
+  const items = [
+    { label: 'Max attempts', value: String(q.max_attempts) },
+    {
+      label: 'Backoff',
+      value: `${formatSeconds(q.min_backoff_seconds)} → ${formatSeconds(q.max_backoff_seconds)}, ×${q.backoff_multiplier}`,
+    },
+    { label: 'Timeout', value: formatSeconds(q.timeout_seconds) },
+    { label: 'Retry 4xx', value: q.retry_on_4xx ? 'yes' : 'only 408 and 429' },
+    { label: 'Rate', value: q.rate_per_second === undefined ? 'unlimited' : `${q.rate_per_second}/s` },
+    { label: 'Concurrency', value: String(q.max_concurrency) },
+  ];
   return (
-    <Section
-      title="Policy"
-      actions={
-        <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>
-          <Pencil />
-          Edit
-        </Button>
-      }
-    >
+    <InlineFields items={items}>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="-ml-2 size-6 [&_svg]:size-3.5"
+        title="Edit policy"
+        aria-label="Edit policy"
+        onClick={() => setEditing(true)}
+      >
+        <Pencil />
+      </Button>
       <EditPolicy queue={queue} open={editing} onClose={() => setEditing(false)} />
-      <Fields>
-        <Field label="Max attempts">
-          <span className="font-mono text-xs">{q.max_attempts}</span>
-        </Field>
-        <Field label="Backoff">
-          <span className="font-mono text-xs">{backoff}</span>
-        </Field>
-        <Field label="Timeout">
-          <span className="font-mono text-xs">{formatSeconds(q.timeout_seconds)}</span>
-        </Field>
-        <Field label="Retry 4xx">{q.retry_on_4xx ? 'yes' : 'only 408 and 429'}</Field>
-        <Field label="Rate">
-          <span className="font-mono text-xs">{rate}</span>
-        </Field>
-        <Field label="Concurrency">
-          <span className="font-mono text-xs">{q.max_concurrency}</span>
-        </Field>
-      </Fields>
-    </Section>
+    </InlineFields>
   );
 }
 
@@ -428,7 +437,6 @@ function QueueTasks({ queue }: { queue: Queue }) {
               ))}
             </TabsList>
           </Tabs>
-          <SortSummary sorting={sorting} />
         </div>
         {lastError !== null && (
           <div className="flex min-w-0 items-center gap-2 text-xs">

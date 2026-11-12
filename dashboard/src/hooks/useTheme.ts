@@ -18,12 +18,20 @@ export function useTheme() {
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
 
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', theme === 'dark');
+    // Every color changes at once; without this, elements with a color
+    // transition fade over while the rest has already switched.
+    const root = document.documentElement;
+    root.classList.add('theme-switching');
+    root.classList.toggle('dark', theme === 'dark');
+    // Apply the new colors while transitions are off, then allow them again.
+    void getComputedStyle(document.body).color;
+    const done = setTimeout(() => root.classList.remove('theme-switching'), 0);
     try {
       localStorage.setItem(STORAGE_KEY, theme);
     } catch {
       // Not persisted; the toggle still works for this page load.
     }
+    return () => clearTimeout(done);
   }, [theme]);
 
   const toggleTheme = () => setTheme((current) => (current === 'dark' ? 'light' : 'dark'));

@@ -13,7 +13,7 @@ import { RelativeTime } from '../../components/RelativeTime';
 import { StatusCode, TaskStateBadge } from '../../components/states';
 import { useNow } from '../../hooks/useNow';
 import { errorMessage } from '../../lib/api';
-import { formatDate } from '../../lib/format';
+import { formatDate, shortId } from '../../lib/format';
 import { useFromHere } from '../../lib/from';
 import { displayState } from '../../lib/states';
 import { Button } from '../../primitives/button';
@@ -49,8 +49,8 @@ export function RunTable({ pages, empty }: { pages: RunPages; empty: string }) {
           {runs.map((r) => (
             <TableRow key={r.id} className="cursor-pointer" onClick={() => navigate(`/runs/${r.id}`, { state: from })}>
               <TableCell className="font-mono text-xs">
-                <Link to={`/runs/${r.id}`} state={from} onClick={(e) => e.stopPropagation()}>
-                  {r.id}
+                <Link to={`/runs/${r.id}`} state={from} title={r.id} onClick={(e) => e.stopPropagation()}>
+                  {shortId(r.id)}
                 </Link>
               </TableCell>
               <TableCell>

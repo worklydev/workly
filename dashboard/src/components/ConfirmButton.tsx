@@ -24,7 +24,7 @@ export function ConfirmButton({ children, confirmLabel, onConfirm, disabled, siz
           ? undefined
           : size === 'icon'
             ? 'text-muted-foreground hover:bg-destructive/12 hover:text-destructive'
-            : 'text-destructive hover:bg-destructive/12'
+            : 'text-destructive hover:bg-destructive/12 disabled:text-muted-foreground'
       }
       disabled={disabled}
       onClick={() => {

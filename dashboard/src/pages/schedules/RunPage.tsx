@@ -16,10 +16,11 @@ import { ConfirmButton } from '../../components/ConfirmButton';
 import { CopyButton } from '../../components/CopyButton';
 import { DisabledReason } from '../../components/DisabledReason';
 import { PageHeader } from '../../components/PageHeader';
-import { Properties, Property, PropertyGroups } from '../../components/Properties';
+import { InlineFields } from '../../components/InlineFields';
 import { ErrorText, Muted } from '../../components/QueryState';
 import { RelativeTime } from '../../components/RelativeTime';
 import { Section } from '../../components/Section';
+import { StatCard, StatStrip } from '../../components/StatCard';
 import { StatusCode, TaskStateBadge } from '../../components/states';
 import { useNow } from '../../hooks/useNow';
 import { errorMessage, LIVE } from '../../lib/api';
@@ -45,56 +46,53 @@ export function RunPage() {
 
   return (
     <>
-      <PageHeader
-        title={
-          <span className="flex min-w-0 items-center gap-1">
-            <span className="truncate font-mono text-base">{run.id}</span>
-            <CopyButton text={run.id} title="Copy run ID" />
-          </span>
-        }
-        badge={<TaskStateBadge state={displayState(run, now)} />}
-      >
-        <RunActions run={run} />
-      </PageHeader>
+      <div className="flex flex-col gap-3">
+        <PageHeader
+          title={
+            <span className="flex min-w-0 items-center gap-1">
+              <span className="truncate font-mono text-base">{run.id}</span>
+              <CopyButton text={run.id} title="Copy run ID" />
+            </span>
+          }
+          badge={<TaskStateBadge state={displayState(run, now)} />}
+        >
+          <RunActions run={run} />
+        </PageHeader>
+        <InlineFields
+          items={[
+            {
+              label: 'Schedule',
+              value: (
+                <Link
+                  to={`/schedules/${run.schedule}`}
+                  className="underline decoration-border underline-offset-4 hover:text-primary hover:decoration-primary"
+                >
+                  {run.schedule}
+                </Link>
+              ),
+            },
+            { label: 'Trigger', value: run.trigger === 'manual' ? 'run by hand' : 'timetable' },
+            { label: 'Scheduled for', value: formatDate(run.scheduled_for) },
+            { label: 'Created', value: <RelativeTime iso={run.created_at} /> },
+          ]}
+        />
+      </div>
       <Notice run={run} schedule={schedule} />
-      <PropertyGroups>
-        <Properties title="Run">
-          <Property label="Schedule">
-            <Link
-              to={`/schedules/${run.schedule}`}
-              className="underline decoration-border underline-offset-4 hover:text-primary hover:decoration-primary"
-            >
-              {run.schedule}
-            </Link>
-          </Property>
-          <Property label="Trigger">{run.trigger === 'manual' ? 'run by hand' : 'timetable'}</Property>
-          <Property label="Scheduled for">
-            <span title={formatDate(run.scheduled_for)}>
-              <RelativeTime iso={run.scheduled_for} />
-            </span>
-          </Property>
-          <Property label="Created">
-            <RelativeTime iso={run.created_at} />
-          </Property>
-          <Property label="Finished">{run.finished_at ? <RelativeTime iso={run.finished_at} /> : <None />}</Property>
-        </Properties>
-        <Properties title="Delivery">
-          <Property label="Attempts">
-            <span className="font-mono text-xs">{run.attempt_count}</span>
-          </Property>
-          <Property label="Max attempts">
-            <span className="font-mono text-xs">{schedule?.max_attempts ?? '…'}</span>
-          </Property>
-          <Property label="Last status">
-            <span className="font-mono text-xs">
-              <StatusCode code={run.last_status} />
-            </span>
-          </Property>
-          <Property label="Next attempt">
-            {run.state === 'pending' ? <RelativeTime iso={run.run_at} /> : <None />}
-          </Property>
-        </Properties>
-      </PropertyGroups>
+      <StatStrip className="grid-cols-2 sm:grid-cols-4">
+        <StatCard label="Attempts" value={run.attempt_count} detail={`max ${schedule?.max_attempts ?? '…'}`} />
+        <StatCard
+          label="Last status"
+          value={<StatusCode code={run.last_status} />}
+          detail={run.last_error?.replace(/^HTTP \d{3} /, '') ?? run.last_outcome?.replace('_', ' ')}
+          title={run.last_error}
+        />
+        <StatCard
+          label="Finished"
+          value={run.finished_at ? <RelativeTime iso={run.finished_at} /> : <None />}
+          detail={run.finished_at ? formatDate(run.finished_at, { seconds: false }) : undefined}
+        />
+        <StatCard label="Next attempt" value={run.state === 'pending' ? <RelativeTime iso={run.run_at} /> : <None />} />
+      </StatStrip>
       <Request run={run} />
       <Section title="Attempts">
         <Attempts run={run} />

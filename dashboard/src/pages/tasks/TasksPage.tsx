@@ -5,7 +5,6 @@ import { useNavigate, useSearchParams } from 'react-router';
 import { listQueuesOptions, searchTasksInfiniteOptions } from '../../api/@tanstack/react-query.gen';
 import type { SearchTasksData, TaskState } from '../../api';
 import { PageHeader } from '../../components/PageHeader';
-import { SortSummary } from '../../components/SortSummary';
 import { TaskTable } from '../../components/TaskTable';
 import { taskPaging } from '../../lib/tasks';
 import { useTaskSort } from '../../lib/taskSort';
@@ -102,9 +101,6 @@ export function TasksPage() {
           <Filter items={queueItems} value={queue} onChange={(v) => set('queue', v)} className="w-40" />
           <Filter items={STATE_ITEMS} value={state} onChange={(v) => set('state', v)} className="w-36" />
           <Filter items={SINCE_ITEMS} value={since} onChange={(v) => set('since', v)} className="w-40" />
-          <div className="ml-auto">
-            <SortSummary sorting={sorting} />
-          </div>
         </div>
         <TaskTable pages={pages} showQueue sorting={sorting} paused={(q) => paused.has(q)} empty="No tasks match." />
       </div>

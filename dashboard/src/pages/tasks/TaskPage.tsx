@@ -17,11 +17,12 @@ import { CodePanel } from '../../components/CodePanel';
 import { ConfirmButton } from '../../components/ConfirmButton';
 import { DisabledReason } from '../../components/DisabledReason';
 import { CopyButton } from '../../components/CopyButton';
-import { Properties, Property, PropertyGroups } from '../../components/Properties';
+import { InlineFields } from '../../components/InlineFields';
 import { PageHeader } from '../../components/PageHeader';
 import { ErrorText, Muted } from '../../components/QueryState';
 import { RelativeTime } from '../../components/RelativeTime';
 import { Section } from '../../components/Section';
+import { StatCard, StatStrip } from '../../components/StatCard';
 import { StatusCode, TaskStateBadge } from '../../components/states';
 import { NextRun } from '../../components/TaskTable';
 import { EnqueueTask } from '../queues/EnqueueTask';
@@ -29,7 +30,7 @@ import { hasDoubleSlash, toCurl } from '../../lib/curl';
 import { useNow } from '../../hooks/useNow';
 import { displayState } from '../../lib/states';
 import { errorMessage, LIVE } from '../../lib/api';
-import { formatDuration, prettyBody } from '../../lib/format';
+import { formatDate, formatDuration, prettyBody } from '../../lib/format';
 import { Button } from '../../primitives/button';
 import { AttemptTable } from './AttemptTable';
 
@@ -55,72 +56,67 @@ export function TaskPage() {
 
   return (
     <>
-      <PageHeader
-        title={
-          <span className="flex min-w-0 items-center gap-1">
-            <span className="truncate font-mono text-base">{task.id}</span>
-            <CopyButton text={task.id} title="Copy task ID" />
-          </span>
-        }
-        badge={<TaskStateBadge state={displayState(task, now)} />}
-      >
-        <TaskActions task={task} />
-      </PageHeader>
-      <Notices task={task} queue={queue} attempts={attempts?.attempts} />
-      <PropertyGroups>
-        <Properties title="Timing">
-          <Property label="Created">
-            <RelativeTime iso={task.created_at} />
-          </Property>
-          <Property label="First attempt">
-            {firstAttempt ? <RelativeTime iso={firstAttempt.started_at} /> : <None />}
-          </Property>
-          <Property label="Last run finished">
-            {task.last_attempt_at ? <RelativeTime iso={task.last_attempt_at} /> : <None />}
-          </Property>
-          <Property label="Next run">
-            <NextRun task={task} now={now} paused={queue?.paused} />
-          </Property>
-          <Property label="Total time">
-            <Duration task={task} />
-          </Property>
-        </Properties>
-        <Properties title="Delivery">
-          <Property label="Queue">
-            <Link
-              to={`/queues/${task.queue}`}
-              className="underline decoration-border underline-offset-4 hover:text-primary hover:decoration-primary"
-            >
-              {task.queue}
-            </Link>
-          </Property>
-          <Property label="Attempts">
-            <span className="font-mono text-xs">{task.attempt_count}</span>
-          </Property>
-          {/* Not "n of max": a retried task gets a fresh budget but keeps counting attempts. */}
-          <Property label="Max attempts">
-            <span className="font-mono text-xs">{task.max_attempts ?? queue?.max_attempts ?? '…'}</span>
-          </Property>
-          <Property label="Last status">
-            <span className="font-mono text-xs">
-              <StatusCode code={task.last_status} />
+      {/* What the task is sits with its ID; below, how its delivery is going. */}
+      <div className="flex flex-col gap-3">
+        <PageHeader
+          title={
+            <span className="flex min-w-0 items-center gap-1">
+              <span className="truncate font-mono text-base">{task.id}</span>
+              <CopyButton text={task.id} title="Copy task ID" />
             </span>
-          </Property>
-          <Property label="Timeout">
-            <span className="font-mono text-xs">{task.timeout_seconds ?? queue?.timeout_seconds ?? '…'}s</span>
-          </Property>
-          <Property label="Group">{task.group_id ? <GroupLink id={task.group_id} /> : <None />}</Property>
-          <Property label="Idempotency key">
-            {task.idempotency_key ? (
-              <span className="font-mono text-xs" title={task.idempotency_key}>
-                {task.idempotency_key}
-              </span>
-            ) : (
-              <None />
-            )}
-          </Property>
-        </Properties>
-      </PropertyGroups>
+          }
+          badge={<TaskStateBadge state={displayState(task, now)} />}
+        >
+          <TaskActions task={task} />
+        </PageHeader>
+        <InlineFields
+          items={[
+            {
+              label: 'Queue',
+              value: (
+                <Link
+                  to={`/queues/${task.queue}`}
+                  className="underline decoration-border underline-offset-4 hover:text-primary hover:decoration-primary"
+                >
+                  {task.queue}
+                </Link>
+              ),
+            },
+            { label: 'Group', value: task.group_id ? <GroupLink id={task.group_id} /> : <None /> },
+            { label: 'Created', value: <RelativeTime iso={task.created_at} /> },
+            { label: 'First attempt', value: firstAttempt ? <RelativeTime iso={firstAttempt.started_at} /> : <None /> },
+            { label: 'Timeout', value: `${task.timeout_seconds ?? queue?.timeout_seconds ?? '…'}s` },
+            { label: 'Idempotency key', value: task.idempotency_key ?? <None /> },
+          ]}
+        />
+      </div>
+      <Notices task={task} queue={queue} attempts={attempts?.attempts} />
+      <StatStrip className="grid-cols-2 sm:grid-cols-5">
+        {/* Not "n of max": a retried task gets a fresh budget but keeps counting attempts. */}
+        <StatCard
+          className="col-span-2 sm:col-span-1"
+          label="Attempts"
+          value={task.attempt_count}
+          detail={`max ${task.max_attempts ?? queue?.max_attempts ?? '…'}`}
+        />
+        <StatCard
+          label="Last status"
+          value={<StatusCode code={task.last_status} />}
+          detail={task.last_error?.replace(/^HTTP \d{3} /, '') ?? task.last_outcome?.replace('_', ' ')}
+          title={task.last_error}
+        />
+        <StatCard
+          label="Last attempt"
+          value={task.last_attempt_at ? <RelativeTime iso={task.last_attempt_at} /> : <None />}
+          detail={task.last_attempt_at ? formatDate(task.last_attempt_at, { seconds: false }) : undefined}
+        />
+        <StatCard label="Next run" value={<NextRun task={task} now={now} paused={queue?.paused} />} />
+        <StatCard
+          label="Total time"
+          value={<Duration task={task} />}
+          detail={task.finished_at ? (task.retried_at ? 'since the last retry' : 'from enqueue') : undefined}
+        />
+      </StatStrip>
       <Request task={task} />
       <Section title="Attempts">
         <Attempts task={task} />
@@ -139,7 +135,6 @@ function Duration({ task }: { task: Task }) {
   const from = task.retried_at ?? task.created_at;
   return (
     <span
-      className="font-mono text-xs"
       title={
         task.retried_at
           ? 'From the latest manual retry until the task finished'

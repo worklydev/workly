@@ -41,6 +41,7 @@ Live reference: **`/design`** in the dashboard (`src/pages/DesignPage.tsx`). Tok
 | role                        | class                                           |
 | --------------------------- | ----------------------------------------------- |
 | Page title                  | `text-xl` (20px, regular)                       |
+| Section titles (`Section`)  | default size, `font-medium`                     |
 | Emphasis / titles           | `font-medium`                                   |
 | Body                        | default (`text-sm`, 14px)                       |
 | Labels, table headers, meta | `text-xs text-muted-foreground` or `text-faint` |
@@ -79,6 +80,11 @@ Nav: an icon plus a label. Inactive items are `text-muted-foreground`. The activ
 - **Actions never disappear.** Render every action for an entity; when it doesn't apply, disable it and say why with `DisabledReason`, which opens on hover, tap and keyboard focus. A hidden button reads as a missing feature.
 - **Page headers** (`PageHeader`): the entity's state badge sits next to the title (`badge`), not among the actions. Actions go ghost ones first, then the main action (a filled button), then destructive ones (`ConfirmButton`) last. On narrow screens they wrap below the title.
 - **Lists** show what tells rows apart: long IDs shortened to their last characters (`shortId`, the full ID in the title), targets without the scheme, and only the path when every row calls the same host. A pager appears only when there's more than one page.
+- **Stats** that belong together are one `StatStrip`: cells divided by hairlines, not a box each. A queue's policy is one line of label–value pairs under its title, and a task table has a single row of controls above it (selection, sort, bulk actions).
+- **Top-level pages** (Queues, Tasks, …) show their name once, as the page title; the header's breadcrumbs start on detail pages. A detail page's title carries its key facts underneath in mono (a queue's limits, a schedule's cron and timezone).
+- **Header actions are one size** (`PageHeader` sets it), so only the fill marks the main action. A disabled destructive action turns grey, not pale red.
+- **Clickable rows** show an arrow next to the name on hover (`RowHint`), and their row actions brighten.
+- **Checkboxes** use the `Checkbox` primitive, not the browser's, which is pure white in dark mode.
 - **Phones:** below `sm` the sidebar becomes a drawer opened from the header (`MobileNav`), and the gutter shrinks to 16px. Wide tables scroll sideways inside their container, never the page.
 
 ### Don't

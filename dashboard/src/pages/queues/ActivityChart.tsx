@@ -28,10 +28,10 @@ export function ActivityChart() {
   return (
     <section className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-4">
-        <h3 className="text-xs text-muted-foreground">
+        <h3 className="font-medium">
           Tasks created
           {series && (
-            <span className="text-faint">
+            <span className="text-xs font-normal text-faint">
               {' '}
               · {formatCount(series.total)} in the last {range}, per {per}
             </span>
@@ -46,7 +46,7 @@ export function ActivityChart() {
       ) : (
         <>
           <Detail data={data} series={series} index={hovered} per={per} />
-          <div className="flex h-28 items-end gap-px" onMouseLeave={() => setHovered(undefined)}>
+          <div className="flex h-28 items-end gap-px border-b border-border" onMouseLeave={() => setHovered(undefined)}>
             {data.buckets.map((b, i) => {
               const total = sum(b.counts);
               return (
@@ -55,9 +55,13 @@ export function ActivityChart() {
                   className={cn('flex h-full flex-1 flex-col-reverse rounded-xs', hovered === i && 'bg-muted')}
                   onMouseEnter={() => setHovered(i)}
                 >
+                  {/* An empty slot keeps a stub, so a quiet range still reads as a timeline. */}
                   <div
-                    className="flex w-full flex-col-reverse overflow-hidden rounded-xs"
-                    style={{ height: `${(total / series.max) * 100}%` }}
+                    className={cn(
+                      'flex w-full flex-col-reverse overflow-hidden rounded-t-xs',
+                      total === 0 && 'bg-muted',
+                    )}
+                    style={{ height: total === 0 ? 2 : `${(total / series.max) * 100}%` }}
                   >
                     {series.keys.map((key) => {
                       const n = countFor(b, key, series.keys);
@@ -151,9 +155,13 @@ function Detail({ data, series, index, per }: { data: Activity; series: Series; 
   if (index === undefined) {
     return (
       <div className="h-5 text-xs text-faint">
-        {series.total === 0
-          ? 'No tasks created in this range.'
-          : `Busiest ${per}: ${formatCount(series.max)}. Hover a bar for its counts.`}
+        {series.total === 0 ? (
+          'No tasks created in this range.'
+        ) : (
+          <span className="font-mono">
+            peak {formatCount(series.max)} per {per}
+          </span>
+        )}
       </div>
     );
   }

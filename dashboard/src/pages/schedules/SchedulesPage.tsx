@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
+import { RowHint } from '../../components/RowHint';
 import { Link, useNavigate } from 'react-router';
 import { listRunsOptions, listSchedulesOptions } from '../../api/@tanstack/react-query.gen';
 import type { Run, Schedule } from '../../api';
@@ -109,6 +110,7 @@ function ScheduleTable({ schedules }: { schedules: Schedule[] }) {
                   {s.name}
                 </Link>
                 {s.paused && <Badge variant="warning">paused</Badge>}
+                <RowHint />
               </div>
             </TableCell>
             <TableCell>

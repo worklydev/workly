@@ -21,7 +21,12 @@ export function PageHeader({ title, description, badge, children }: Props) {
         </div>
         {description && <p className="text-sm text-muted-foreground">{description}</p>}
       </div>
-      {children && <div className="flex flex-wrap items-center gap-2">{children}</div>}
+      {/* One size for the whole row, whatever each button asked for: the fill alone marks the main action. */}
+      {children && (
+        <div className="flex flex-wrap items-center gap-1.5 [&_[data-slot=button]]:h-7 [&_[data-slot=button]]:px-2.5 [&_[data-slot=button]]:text-[0.8125rem]">
+          {children}
+        </div>
+      )}
     </div>
   );
 }

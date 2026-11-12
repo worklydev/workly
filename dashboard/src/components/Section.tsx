@@ -4,7 +4,7 @@ export function Section({ title, actions, children }: { title: string; actions?:
   return (
     <section className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-4">
-        <h3 className="text-xs text-muted-foreground">{title}</h3>
+        <h3 className="font-medium">{title}</h3>
         {actions}
       </div>
       {children}

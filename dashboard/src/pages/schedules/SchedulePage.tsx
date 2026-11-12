@@ -15,10 +15,11 @@ import type { ListRunsData, RunState, Schedule } from '../../api';
 import { CodePanel } from '../../components/CodePanel';
 import { ConfirmButton } from '../../components/ConfirmButton';
 import { PageHeader } from '../../components/PageHeader';
-import { Properties, Property, PropertyGroups } from '../../components/Properties';
+import { InlineFields } from '../../components/InlineFields';
 import { ErrorText, Muted } from '../../components/QueryState';
 import { RelativeTime } from '../../components/RelativeTime';
 import { Section } from '../../components/Section';
+import { StatCard, StatStrip } from '../../components/StatCard';
 import { errorMessage, LIVE } from '../../lib/api';
 import { describeCron } from '../../lib/cron';
 import { formatDate, formatSeconds, prettyBody } from '../../lib/format';
@@ -50,66 +51,109 @@ export function SchedulePage() {
 
   return (
     <>
-      <PageHeader title={schedule.name} badge={schedule.paused && <Badge variant="warning">paused</Badge>}>
-        <ScheduleActions schedule={schedule} />
-      </PageHeader>
-      <PropertyGroups>
-        <Properties title="Timetable">
-          <Property label="Runs">{describeCron(schedule.cron) ?? <None />}</Property>
-          <Property label="Cron">
-            <span className="font-mono text-xs">{schedule.cron}</span>
-          </Property>
-          <Property label="Timezone">
-            <span className="font-mono text-xs">{schedule.timezone}</span>
-          </Property>
-          <Property label="Next run">
-            {schedule.next_run_at ? (
-              <RelativeTime iso={schedule.next_run_at} />
-            ) : (
-              <span className="text-warning">paused</span>
-            )}
-          </Property>
-          <Property label="If still running">
-            {schedule.overlap === 'skip' ? 'skip the slot' : 'run alongside'}
-          </Property>
-          <Property label="If missed">{schedule.missed === 'skip' ? 'skip, record it' : 'catch up once'}</Property>
-        </Properties>
-        <Properties title="Delivery">
-          <Property label="Max attempts">
-            <span className="font-mono text-xs">{schedule.max_attempts}</span>
-          </Property>
-          <Property label="Backoff">
-            <span className="font-mono text-xs">
-              {formatSeconds(schedule.min_backoff_seconds)} → {formatSeconds(schedule.max_backoff_seconds)}, ×
-              {schedule.backoff_multiplier}
+      {/* What the schedule is set to sits with the title; below it, how it's doing. */}
+      <div className="flex flex-col gap-3">
+        <PageHeader
+          title={schedule.name}
+          description={
+            <span className="flex flex-wrap items-baseline gap-x-2">
+              <span className="text-foreground">{describeCron(schedule.cron) ?? 'Custom timetable'}</span>
+              <span className="font-mono text-xs">
+                {schedule.cron} · {schedule.timezone}
+              </span>
             </span>
-          </Property>
-          <Property label="Timeout">
-            <span className="font-mono text-xs">{formatSeconds(schedule.timeout_seconds)}</span>
-          </Property>
-          <Property label="Retry 4xx">{schedule.retry_on_4xx ? 'yes' : 'only 408 and 429'}</Property>
-          <Property label="Recent runs">
-            <RecentRunsOf schedule={schedule.name} />
-          </Property>
-        </Properties>
-      </PropertyGroups>
-      <Upcoming schedule={schedule} />
-      <Request schedule={schedule} />
+          }
+          badge={schedule.paused && <Badge variant="warning">paused</Badge>}
+        >
+          <ScheduleActions schedule={schedule} />
+        </PageHeader>
+        <InlineFields
+          items={[
+            { label: 'Max attempts', value: schedule.max_attempts },
+            {
+              label: 'Backoff',
+              value: `${formatSeconds(schedule.min_backoff_seconds)} → ${formatSeconds(schedule.max_backoff_seconds)}, ×${schedule.backoff_multiplier}`,
+            },
+            { label: 'Timeout', value: formatSeconds(schedule.timeout_seconds) },
+            { label: 'Retry 4xx', value: schedule.retry_on_4xx ? 'yes' : 'only 408 and 429' },
+            { label: 'If still running', value: schedule.overlap === 'skip' ? 'skip the slot' : 'run alongside' },
+            { label: 'If missed', value: schedule.missed === 'skip' ? 'skip, record it' : 'catch up once' },
+          ]}
+        />
+      </div>
+      <Overview schedule={schedule} />
+      <div className="grid gap-8 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        <Request schedule={schedule} />
+        <Upcoming schedule={schedule} />
+      </div>
       <Runs schedule={schedule.name} />
     </>
   );
 }
 
-function None() {
-  return <span className="text-faint">—</span>;
-}
+const RUN_TONE: Partial<Record<RunState, string>> = {
+  succeeded: 'text-success',
+  failed: 'text-destructive',
+  skipped: 'text-warning',
+  running: 'text-primary',
+};
 
-function RecentRunsOf({ schedule }: { schedule: string }) {
+/** When it runs next, how the last run went, and the latest dozen at a glance. */
+function Overview({ schedule }: { schedule: Schedule }) {
   const { data } = useQuery({
-    ...listRunsOptions({ path: { schedule }, query: { limit: 12 } }),
+    ...listRunsOptions({ path: { schedule: schedule.name }, query: { limit: 12 } }),
     ...LIVE,
   });
-  return <RecentRuns runs={data?.runs} />;
+  const runs = data?.runs;
+  const last = runs?.[0];
+  const count = (state: RunState) => runs?.filter((r) => r.state === state).length ?? 0;
+  const tally = (['succeeded', 'failed', 'skipped'] as const)
+    .filter((s) => count(s) > 0)
+    .map((s) => `${count(s)} ${s}`)
+    .join(' · ');
+
+  return (
+    <StatStrip className="grid-cols-1 sm:grid-cols-3">
+      <StatCard
+        label="Next run"
+        value={
+          schedule.next_run_at ? (
+            <RelativeTime iso={schedule.next_run_at} />
+          ) : (
+            <span className="text-warning">paused</span>
+          )
+        }
+        detail={schedule.next_run_at ? formatDate(schedule.next_run_at, { seconds: false }) : 'resume it to run again'}
+      />
+      <StatCard
+        label="Last run"
+        value={
+          last ? <span className={RUN_TONE[last.state]}>{last.state}</span> : <span className="text-faint">—</span>
+        }
+        detail={
+          last ? (
+            <>
+              <RelativeTime iso={last.scheduled_for} />
+              {last.skip_reason &&
+                ` · ${last.skip_reason === 'overlap' ? 'previous run still going' : 'server was down'}`}
+            </>
+          ) : runs ? (
+            'no runs yet'
+          ) : undefined
+        }
+        to={last ? `/runs/${last.id}` : undefined}
+      />
+      <StatCard
+        label="Recent runs"
+        value={
+          <div className="flex h-7 items-center">
+            <RecentRuns runs={runs} />
+          </div>
+        }
+        detail={tally || undefined}
+      />
+    </StatStrip>
+  );
 }
 
 function ScheduleActions({ schedule }: { schedule: Schedule }) {

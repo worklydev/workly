@@ -5,10 +5,21 @@ import { COUNT_LIMIT, formatCount } from '../../lib/format';
  * Pending tasks, as in the Pending tab: due now plus scheduled for later
  * (including retries), split in the line below, as the task badges name them.
  */
-export function PendingCard({ due, scheduled, to }: { due: number; scheduled: number; to?: string }) {
+export function PendingCard({
+  due,
+  scheduled,
+  to,
+  className,
+}: {
+  due: number;
+  scheduled: number;
+  to?: string;
+  className?: string;
+}) {
   const pending = Math.min(COUNT_LIMIT, due + scheduled);
   return (
     <StatCard
+      className={className}
       label="Pending"
       value={formatCount(pending)}
       detail={`${formatCount(due)} now · ${formatCount(scheduled)} scheduled`}

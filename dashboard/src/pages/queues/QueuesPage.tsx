@@ -9,7 +9,7 @@ import { useSetting, useSlots } from '../../context';
 import { ListPager, ListSearch } from '../../components/ListControls';
 import { PageHeader } from '../../components/PageHeader';
 import { ErrorText, Muted } from '../../components/QueryState';
-import { StatCard } from '../../components/StatCard';
+import { StatCard, StatStrip } from '../../components/StatCard';
 import { LIVE } from '../../lib/api';
 import { COUNT_LIMIT, formatCount, formatDuration } from '../../lib/format';
 import { Badge } from '../../primitives/badge';
@@ -21,6 +21,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { LONGEST_WAIT_TITLE, LongestWait } from './LongestWait';
 import { PendingCard } from './PendingCard';
 import { limits } from '../../lib/queues';
+import { RowHint } from '../../components/RowHint';
 import { useNow } from '../../hooks/useNow';
 import { useListPage } from '../../hooks/useListPage';
 import { formatRate } from '../../lib/format';
@@ -74,7 +75,7 @@ function Totals({ queues }: { queues: Queue[] }) {
   const failed = sum('failed');
 
   return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+    <StatStrip className="grid-cols-2 md:grid-cols-4">
       <PendingCard due={sum('due')} scheduled={sum('scheduled')} to="/tasks?state=pending" />
       <StatCard label="Running" value={formatCount(sum('running'))} />
       <StatCard
@@ -91,7 +92,7 @@ function Totals({ queues }: { queues: Queue[] }) {
         to={failed > 0 ? '/tasks?state=failed' : undefined}
         title={`Failed tasks still kept${setting('WORKLY_RETENTION')}`}
       />
-    </div>
+    </StatStrip>
   );
 }
 
@@ -152,12 +153,18 @@ function QueueTable({ queues }: { queues: Queue[] }) {
       <TableBody>
         {queues.map((q) => (
           <TableRow key={q.name} className="cursor-pointer" onClick={() => navigate(`/queues/${q.name}${query}`)}>
-            <TableCell>
+            <TableCell className="w-full max-w-0 min-w-40">
               <div className="flex items-center gap-2">
-                <Link to={`/queues/${q.name}${query}`} className="font-medium" onClick={(e) => e.stopPropagation()}>
+                <Link
+                  to={`/queues/${q.name}${query}`}
+                  title={q.name}
+                  className="truncate font-medium"
+                  onClick={(e) => e.stopPropagation()}
+                >
                   {q.name}
                 </Link>
                 {q.paused && <Badge variant="warning">paused</Badge>}
+                <RowHint />
               </div>
             </TableCell>
             <TableCell className="text-right font-mono text-xs">

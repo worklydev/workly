@@ -80,10 +80,11 @@ export function Header() {
   return (
     <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border px-4 sm:gap-4 sm:px-6">
       <MobileNav />
+      {/* A top-level page's own title names it, so its single crumb is for screen readers only. */}
       <h1 className="flex min-w-0 flex-1 items-center gap-2 text-sm">
         {items.map((crumb, i) => {
           // On phones only the parent shows, as a way back: the page's title names the page.
-          const phone = items.length === 1 || i === items.length - 2 ? '' : 'hidden sm:inline';
+          const phone = items.length === 1 ? 'sr-only' : i === items.length - 2 ? '' : 'hidden sm:inline';
           return (
             <Fragment key={crumb.to}>
               {i > 0 && <span className="hidden text-faint sm:inline">/</span>}
@@ -119,7 +120,12 @@ function ServerStatus() {
       <span className="hidden sm:inline">offline</span>
     </Badge>
   ) : (
-    <Badge variant="success" dot title="Connected; updates live">
+    <Badge
+      variant="success"
+      dot
+      title="Connected; updates live"
+      className="motion-safe:[&>span:first-child]:animate-pulse"
+    >
       <span className="hidden sm:inline">live</span>
     </Badge>
   );

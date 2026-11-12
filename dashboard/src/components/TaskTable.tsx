@@ -14,11 +14,13 @@ import { displayState } from '../lib/states';
 import type { TaskPages } from '../lib/tasks';
 import type { SortField, TaskSorting } from '../lib/taskSort';
 import { Button } from '../primitives/button';
+import { Checkbox as CheckboxPrimitive } from '../primitives/checkbox';
 import { SortableTableHead, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../primitives/table';
 import { ConfirmButton } from './ConfirmButton';
 import { CursorPager } from './ListControls';
 import { useCursorPages } from '../hooks/useCursorPages';
 import { DisabledReason } from './DisabledReason';
+import { SortSummary } from './SortSummary';
 import { ErrorText, Muted } from './QueryState';
 import { RelativeTime } from './RelativeTime';
 import { StatusCode, TaskStateBadge } from './states';
@@ -63,9 +65,17 @@ export function TaskTable({ pages, showQueue, empty, paused = () => false, sorti
   // When every task on the page calls the same host, the path is what differs.
   const host = sharedHost(tasks.map((t) => t.url));
 
-  // With a Queue column the table is too wide for a laptop, so Last run goes
-  // first, unless the list is sorted by it.
-  const lastRun = showQueue && sorting?.sort.field !== 'last_attempt_at' ? 'hidden 2xl:table-cell' : undefined;
+  // The table is too wide for a small laptop, more so with a Queue column, so
+  // Last run goes first, unless the list is sorted by it.
+  const lastRun =
+    sorting?.sort.field === 'last_attempt_at'
+      ? undefined
+      : showQueue
+        ? 'hidden 2xl:table-cell'
+        : 'hidden xl:table-cell';
+
+  // With a Queue column, Attempts and Target wait for a wider screen too.
+  const wide = showQueue ? 'hidden xl:table-cell' : undefined;
 
   // Selections of tasks no longer listed (e.g. after a filter change) don't count.
   const chosen = tasks.filter((t) => selected.has(t.id));
@@ -78,7 +88,7 @@ export function TaskTable({ pages, showQueue, empty, paused = () => false, sorti
 
   return (
     <div className="flex flex-col gap-3">
-      <BulkActions tasks={chosen} onDone={() => setSelected(new Set())} />
+      <BulkActions tasks={chosen} sorting={sorting} onDone={() => setSelected(new Set())} />
       <Table>
         <TableHeader>
           <TableRow>
@@ -93,12 +103,12 @@ export function TaskTable({ pages, showQueue, empty, paused = () => false, sorti
             <TableHead>Task</TableHead>
             {showQueue && <TableHead>Queue</TableHead>}
             <TableHead>State</TableHead>
-            {head('attempt_count', 'Attempts', { className: 'text-right' })}
+            {head('attempt_count', 'Attempts', { className: cn('text-right', wide) })}
             <TableHead>Last result</TableHead>
             {head('run_at', 'Next run')}
             {head('last_attempt_at', 'Last run', { title: 'When the latest attempt finished', className: lastRun })}
             {head('created_at', 'Created')}
-            <TableHead>Target</TableHead>
+            <TableHead className={wide}>Target</TableHead>
             <TableHead className="w-0">
               <span className="sr-only">Actions</span>
             </TableHead>
@@ -121,15 +131,15 @@ export function TaskTable({ pages, showQueue, empty, paused = () => false, sorti
                 </Link>
               </TableCell>
               {showQueue && (
-                <TableCell className="max-w-36 truncate" title={t.queue}>
+                <TableCell className="max-w-32 truncate" title={t.queue}>
                   {t.queue}
                 </TableCell>
               )}
               <TableCell>
                 <TaskStateBadge state={displayState(t, now)} />
               </TableCell>
-              <TableCell className="text-right font-mono text-xs">{t.attempt_count}</TableCell>
-              <TableCell className="max-w-36 truncate font-mono text-xs">
+              <TableCell className={cn('text-right font-mono text-xs', wide)}>{t.attempt_count}</TableCell>
+              <TableCell className="max-w-64 truncate font-mono text-xs">
                 <LastResult task={t} />
               </TableCell>
               <TableCell className="text-xs text-muted-foreground">
@@ -141,8 +151,11 @@ export function TaskTable({ pages, showQueue, empty, paused = () => false, sorti
               <TableCell className="text-xs text-muted-foreground">
                 <RelativeTime iso={t.created_at} />
               </TableCell>
-              {/* Takes the width left over, at least 8rem, rather than widening the table. */}
-              <TableCell className="w-full max-w-0 min-w-32 truncate font-mono text-xs text-faint" title={t.url}>
+              {/* Takes the width left over, at least 5rem, rather than widening the table. */}
+              <TableCell
+                className={cn('w-full max-w-0 min-w-20 truncate font-mono text-xs text-faint', wide)}
+                title={t.url}
+              >
                 {formatTarget(t.method, t.url, host)}
               </TableCell>
               <TableCell className="py-0" onClick={(e) => e.stopPropagation()}>
@@ -168,18 +181,7 @@ function Checkbox({
   onChange: () => void;
   label: string;
 }) {
-  return (
-    <input
-      type="checkbox"
-      aria-label={label}
-      checked={checked}
-      ref={(el) => {
-        if (el) el.indeterminate = indeterminate;
-      }}
-      onChange={onChange}
-      className="block size-3.5 cursor-pointer accent-primary"
-    />
-  );
+  return <CheckboxPrimitive aria-label={label} checked={checked} indeterminate={indeterminate} onChange={onChange} />;
 }
 
 /** The latest attempt's status code with its reason, or how it ended without one. */
@@ -235,7 +237,7 @@ function RowActions({ task }: { task: Task }) {
   const error = retry.error ?? cancel.error;
 
   return (
-    <div className="flex items-center justify-end gap-0.5">
+    <div className="flex items-center justify-end gap-0.5 opacity-60 transition-opacity group-hover/row:opacity-100 focus-within:opacity-100">
       {error && (
         <span className="text-xs text-destructive" title={errorMessage(error)}>
           failed
@@ -287,7 +289,8 @@ async function forEachLimit(ids: string[], fn: (id: string) => Promise<unknown>,
 type Bulk = { action: 'retry' | 'cancel'; ids: string[] };
 
 /** Retry or cancel the selected tasks; each applies only to the tasks it can act on. */
-function BulkActions({ tasks, onDone }: { tasks: Task[]; onDone: () => void }) {
+/** The list's sort sits in the same row, so the table has one line of controls above it, not two. */
+function BulkActions({ tasks, sorting, onDone }: { tasks: Task[]; sorting?: TaskSorting; onDone: () => void }) {
   const qc = useQueryClient();
   const [result, setResult] = useState<string>();
   const retryable = tasks.filter((t) => t.state !== 'running');
@@ -308,12 +311,18 @@ function BulkActions({ tasks, onDone }: { tasks: Task[]; onDone: () => void }) {
   const none = tasks.length === 0 ? 'Select tasks to act on several at once.' : undefined;
 
   return (
-    <div className="flex h-7 items-center gap-2 text-xs">
+    <div className="flex min-h-7 flex-wrap items-center gap-x-4 gap-y-1 text-xs">
       <span className={tasks.length ? 'text-foreground' : 'text-faint'}>
         {tasks.length ? `${tasks.length} selected` : 'None selected'}
       </span>
       {result && !tasks.length && <span className="text-muted-foreground">{result}</span>}
-      <div className="ml-auto flex items-center gap-1">
+      <div className="ml-auto flex flex-wrap items-center gap-x-1 gap-y-1">
+        {/* On phones the column headers' arrows say it; the row is for the actions. */}
+        {sorting && (
+          <div className="mr-3 hidden sm:block">
+            <SortSummary sorting={sorting} />
+          </div>
+        )}
         <DisabledReason
           reason={none ?? (retryable.length ? undefined : 'Running tasks retry once their attempt finishes.')}
         >
