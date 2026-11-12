@@ -195,10 +195,11 @@ func (s *Store) completeGroup(ctx context.Context, tx *sql.Tx, g *store.Group, n
 	return err == nil, err
 }
 
-func (s *Store) DeleteFinishedGroups(ctx context.Context, before time.Time, limit int) (int, error) {
+func (s *Store) DeleteFinishedGroups(ctx context.Context, sw store.Sweep, limit int) (int, error) {
+	where, args := s.sweepWhere("", sw)
 	res, err := s.exec(ctx, s.db, `DELETE FROM task_groups WHERE id IN (
-			SELECT id FROM task_groups WHERE finished_at < ? ORDER BY finished_at LIMIT ?
-		)`, s.ts(before), limit)
+			SELECT id FROM task_groups WHERE `+where+` ORDER BY finished_at LIMIT ?
+		)`, append(args, limit)...)
 	if err != nil {
 		return 0, err
 	}

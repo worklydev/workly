@@ -654,16 +654,17 @@ func (s *Store) ExpiredRunLeases(ctx context.Context, now time.Time, limit int) 
 		ORDER BY lease_expires_at LIMIT ?`, s.ts(now), limit)
 }
 
-func (s *Store) DeleteFinishedRuns(ctx context.Context, before time.Time, limit int) (int, error) {
+func (s *Store) DeleteFinishedRuns(ctx context.Context, sw store.Sweep, limit int) (int, error) {
 	// Each schedule's latest run is kept, so a monthly schedule still shows
 	// how it last went after a week's retention. Attempts go by cascade.
+	where, args := s.sweepWhere("r.", sw)
 	res, err := s.exec(ctx, s.db, `DELETE FROM runs WHERE id IN (
 			SELECT r.id FROM runs r
-			WHERE r.finished_at < ? AND r.lease_expires_at IS NULL
+			WHERE `+where+` AND r.lease_expires_at IS NULL
 				AND r.id <> (SELECT max(l.id) FROM runs l
 					WHERE l.workspace_id = r.workspace_id AND l.schedule = r.schedule)
 			ORDER BY r.finished_at LIMIT ?
-		)`, s.ts(before), limit)
+		)`, append(args, limit)...)
 	if err != nil {
 		return 0, err
 	}

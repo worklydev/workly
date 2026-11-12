@@ -45,6 +45,7 @@ func Run(t *testing.T, factory Factory) {
 		{"ManualRetryHistory", testManualRetryHistory},
 		{"RetryFailedTasks", testRetryFailedTasks},
 		{"DeleteFinishedTasks", testDeleteFinishedTasks},
+		{"SweepWorkspaces", testSweepWorkspaces},
 		{"QueueStats", testQueueStats},
 		{"QueueStatsCap", testQueueStatsCap},
 		{"QueueActivity", testQueueActivity},

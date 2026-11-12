@@ -384,6 +384,30 @@ func testRetryFailedTasks(t *testing.T, open func() store.Store) {
 	}
 }
 
+// testSweepWorkspaces checks that a sweep covers the workspaces it names.
+func testSweepWorkspaces(t *testing.T, open func() store.Store) {
+	s := seeded(t, open)
+	ctx := t.Context()
+	for _, ws := range []workspace.ID{workspace.Default, workspace.Default, otherWorkspace} {
+		attempt(t, s, mustCreate(t, s, ws, store.NewTask{Queue: "emails"}), store.TaskSucceeded)
+	}
+	cutoff := time.Now().Add(time.Second)
+	for _, tt := range []struct {
+		name string
+		sw   store.Sweep
+		want int
+	}{
+		{"except every workspace", store.Sweep{Before: cutoff, Except: []workspace.ID{workspace.Default, otherWorkspace}}, 0},
+		{"except the other", store.Sweep{Before: cutoff, Except: []workspace.ID{otherWorkspace}}, 2},
+		{"the other only, before it finished", store.Sweep{Before: time.Now().Add(-time.Hour), Workspace: otherWorkspace}, 0},
+		{"the other only", store.Sweep{Before: cutoff, Workspace: otherWorkspace}, 1},
+	} {
+		if n, err := s.DeleteFinishedTasks(ctx, tt.sw, 10); err != nil || n != tt.want {
+			t.Fatalf("%s: DeleteFinishedTasks = %d, %v; want %d", tt.name, n, err, tt.want)
+		}
+	}
+}
+
 func testDeleteFinishedTasks(t *testing.T, open func() store.Store) {
 	s := seeded(t, open)
 	ctx := t.Context()
@@ -407,14 +431,14 @@ func testDeleteFinishedTasks(t *testing.T, open func() store.Store) {
 		t.Fatalf("CancelTask: %v", err)
 	}
 
-	if n, err := s.DeleteFinishedTasks(ctx, time.Now().Add(-time.Hour), 10); err != nil || n != 0 {
+	if n, err := s.DeleteFinishedTasks(ctx, store.Sweep{Before: time.Now().Add(-time.Hour)}, 10); err != nil || n != 0 {
 		t.Fatalf("DeleteFinishedTasks(an hour ago) = %d, %v; want 0", n, err)
 	}
 	cutoff := time.Now().Add(time.Second)
-	if n, err := s.DeleteFinishedTasks(ctx, cutoff, 2); err != nil || n != 2 {
+	if n, err := s.DeleteFinishedTasks(ctx, store.Sweep{Before: cutoff}, 2); err != nil || n != 2 {
 		t.Fatalf("DeleteFinishedTasks(limit 2) = %d, %v; want 2", n, err)
 	}
-	if n, err := s.DeleteFinishedTasks(ctx, cutoff, 10); err != nil || n != 3 {
+	if n, err := s.DeleteFinishedTasks(ctx, store.Sweep{Before: cutoff}, 10); err != nil || n != 3 {
 		t.Fatalf("second DeleteFinishedTasks = %d, %v; want 3", n, err)
 	}
 	for _, task := range append(finished, failed, cancelled) {

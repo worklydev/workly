@@ -11,8 +11,10 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"maps"
 	"math/rand/v2"
 	"net/http"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -65,6 +67,11 @@ type Options struct {
 	// RunRetention is how long finished schedule runs are kept; each
 	// schedule's latest run is kept regardless. 0 keeps them forever.
 	RunRetention time.Duration
+	// WorkspaceRetention, if set, returns the workspaces whose finished
+	// tasks, groups and runs are kept for their own duration instead (0
+	// keeps them forever). Called once per sweep; if it fails, those
+	// workspaces aren't known, so nothing is deleted that sweep.
+	WorkspaceRetention func(ctx context.Context) (map[workspace.ID]time.Duration, error)
 	// SweepInterval is how often finished tasks and runs past retention are
 	// deleted. Default 1m.
 	SweepInterval time.Duration
@@ -229,7 +236,7 @@ func (d *Dispatcher) lead(ctx context.Context, leader store.Leader) {
 		d.metrics.IsLeader.Set(0)
 	}()
 
-	if d.opts.Retention > 0 || d.opts.RunRetention > 0 {
+	if d.opts.Retention > 0 || d.opts.RunRetention > 0 || d.opts.WorkspaceRetention != nil {
 		sweepCtx, stopSweep := context.WithCancel(ctx)
 		var sweeper sync.WaitGroup
 		sweeper.Go(func() { d.sweep(sweepCtx) })
@@ -554,12 +561,7 @@ func (d *Dispatcher) sweep(ctx context.Context) {
 	ticker := time.NewTicker(d.opts.SweepInterval)
 	defer ticker.Stop()
 	for {
-		if d.opts.Retention > 0 {
-			d.sweepTasks(ctx)
-		}
-		if d.opts.RunRetention > 0 {
-			d.sweepRuns(ctx)
-		}
+		d.sweepOnce(ctx)
 		select {
 		case <-ctx.Done():
 			return
@@ -568,39 +570,63 @@ func (d *Dispatcher) sweep(ctx context.Context) {
 	}
 }
 
-func (d *Dispatcher) sweepTasks(ctx context.Context) {
-	before := time.Now().Add(-d.opts.Retention)
+// sweepOnce sweeps every workspace on the default retention, then each one
+// with its own.
+func (d *Dispatcher) sweepOnce(ctx context.Context) {
+	var own map[workspace.ID]time.Duration
+	if d.opts.WorkspaceRetention != nil {
+		var err error
+		if own, err = d.opts.WorkspaceRetention(ctx); err != nil {
+			if ctx.Err() == nil {
+				d.log.Warn("retention sweep skipped: workspace retention unknown", "err", err)
+			}
+			return
+		}
+	}
+	except := slices.Sorted(maps.Keys(own))
+	now := time.Now()
+	if d.opts.Retention > 0 {
+		d.sweepTasks(ctx, store.Sweep{Before: now.Add(-d.opts.Retention), Except: except}, d.opts.Retention)
+	}
+	if d.opts.RunRetention > 0 {
+		d.sweepRuns(ctx, store.Sweep{Before: now.Add(-d.opts.RunRetention), Except: except}, d.opts.RunRetention)
+	}
+	for _, ws := range except {
+		if r := own[ws]; r > 0 && ctx.Err() == nil {
+			sw := store.Sweep{Before: now.Add(-r), Workspace: ws}
+			d.sweepTasks(ctx, sw, r)
+			d.sweepRuns(ctx, sw, r)
+		}
+	}
+}
+
+// sweepBatches calls del until a batch comes back short, and returns how
+// many it deleted.
+func (d *Dispatcher) sweepBatches(ctx context.Context, what string, del func() (int, error)) int {
 	total := 0
 	for {
-		n, err := d.store.DeleteFinishedTasks(ctx, before, sweepBatch)
+		n, err := del()
 		if err != nil {
 			if ctx.Err() == nil {
-				d.log.Warn("retention sweep failed", "err", err)
+				d.log.Warn("retention sweep failed", "of", what, "err", err)
 			}
-			break
+			return total
 		}
 		total += n
 		if n < sweepBatch || ctx.Err() != nil {
-			break
+			return total
 		}
 	}
+}
+
+func (d *Dispatcher) sweepTasks(ctx context.Context, sw store.Sweep, retention time.Duration) {
+	total := d.sweepBatches(ctx, "tasks", func() (int, error) { return d.store.DeleteFinishedTasks(ctx, sw, sweepBatch) })
 	if total > 0 {
-		d.log.Info("deleted finished tasks past retention", "count", total, "retention", d.opts.Retention.String())
+		d.log.Info("deleted finished tasks past retention", "count", total, "retention", retention.String(), "workspace", sw.Workspace)
 	}
 	// A completed group's tasks finished before it did, so they are gone by
 	// the time it is.
-	for {
-		n, err := d.store.DeleteFinishedGroups(ctx, before, sweepBatch)
-		if err != nil {
-			if ctx.Err() == nil {
-				d.log.Warn("retention sweep of groups failed", "err", err)
-			}
-			break
-		}
-		if n < sweepBatch || ctx.Err() != nil {
-			break
-		}
-	}
+	d.sweepBatches(ctx, "groups", func() (int, error) { return d.store.DeleteFinishedGroups(ctx, sw, sweepBatch) })
 }
 
 // drain waits for in-flight deliveries, interrupting them after

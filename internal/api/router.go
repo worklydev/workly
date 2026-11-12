@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,6 +36,8 @@ type Options struct {
 	ServeMetrics bool
 	// Retention is how long finished tasks are kept; 0 is forever.
 	Retention time.Duration
+	// WorkspaceRetention, if set, gives some workspaces their own retention.
+	WorkspaceRetention func(ctx context.Context) (map[workspace.ID]time.Duration, error)
 	// Signer builds the requests shown by GET /v1/tasks/{id}/delivery.
 	Signer dispatch.Signer
 	// MCP sets which tools /mcp serves; mcp.Off doesn't serve it.
@@ -72,14 +75,15 @@ func NewHandler(opts Options) http.Handler {
 		opts.Live = live.New(opts.Store, opts.Logger)
 	}
 	handlers := Handlers{
-		Store:            opts.Store,
-		AutoCreateQueues: opts.AutoCreateQueues,
-		MaxPayloadBytes:  opts.MaxPayloadBytes,
-		Metrics:          opts.Metrics,
-		Signer:           opts.Signer,
-		Retention:        opts.Retention,
-		Admission:        opts.Admission,
-		Alerts:           opts.Alerts,
+		Store:              opts.Store,
+		AutoCreateQueues:   opts.AutoCreateQueues,
+		MaxPayloadBytes:    opts.MaxPayloadBytes,
+		Metrics:            opts.Metrics,
+		Signer:             opts.Signer,
+		Retention:          opts.Retention,
+		WorkspaceRetention: opts.WorkspaceRetention,
+		Admission:          opts.Admission,
+		Alerts:             opts.Alerts,
 	}
 	if handlers.Alerts == nil {
 		handlers.Alerts = alert.NewSender(nil, "")

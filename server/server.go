@@ -174,6 +174,12 @@ type Options struct {
 	// RunRetention is the same for schedule runs, except that each
 	// schedule's latest run is always kept. 0 keeps them forever.
 	RunRetention time.Duration
+	// WorkspaceRetention, if set, returns the workspaces that keep finished
+	// tasks, groups and runs for their own duration instead of Retention and
+	// RunRetention (0 keeps them forever), e.g. by plan. It's called once
+	// per sweep and when the API reports retention, so keep it cheap; while
+	// it fails, nothing is swept.
+	WorkspaceRetention func(ctx context.Context) (map[WorkspaceID]time.Duration, error)
 	// DevEndpoints serves the /_dev/echo delivery target. For `workly dev`.
 	DevEndpoints bool
 	// DeliveryDialControl, if set, is called with the resolved address of
@@ -264,17 +270,18 @@ func New(opts Options) (*Server, error) {
 	hub := live.New(opts.Store, opts.Logger)
 	alerts := alert.NewSender(opts.Mailer, alert.Links(opts.PublicURL))
 	apiOpts := api.Options{
-		Store:            opts.Store,
-		Resolver:         opts.WorkspaceResolver,
-		Logger:           opts.Logger,
-		Dashboard:        opts.Dashboard,
-		AutoCreateQueues: !opts.DisableQueueAutoCreate,
-		MaxPayloadBytes:  opts.MaxPayloadBytes,
-		Metrics:          m,
-		ServeMetrics:     !opts.DisableMetrics && opts.MetricsAddr == "",
-		Retention:        opts.Retention,
-		Admission:        opts.Admission,
-		Alerts:           alerts,
+		Store:              opts.Store,
+		Resolver:           opts.WorkspaceResolver,
+		Logger:             opts.Logger,
+		Dashboard:          opts.Dashboard,
+		AutoCreateQueues:   !opts.DisableQueueAutoCreate,
+		MaxPayloadBytes:    opts.MaxPayloadBytes,
+		Metrics:            m,
+		ServeMetrics:       !opts.DisableMetrics && opts.MetricsAddr == "",
+		Retention:          opts.Retention,
+		WorkspaceRetention: opts.WorkspaceRetention,
+		Admission:          opts.Admission,
+		Alerts:             alerts,
 		Signer: dispatch.NewSigner([]byte(opts.SigningSecret), []byte(opts.PreviousSigningSecret),
 			userAgent(opts.Version), opts.SigningSecrets),
 		MCP:                 cmp.Or(opts.MCP, MCPReadOnly),
@@ -303,6 +310,7 @@ func New(opts Options) (*Server, error) {
 			WorkspaceMaxInFlight:  opts.WorkspaceMaxInFlight,
 			Retention:             opts.Retention,
 			RunRetention:          opts.RunRetention,
+			WorkspaceRetention:    opts.WorkspaceRetention,
 			Metrics:               m,
 			DialControl:           opts.DeliveryDialControl,
 			Alerts:                &alert.Notifier{Store: opts.Store, Sender: alerts, Logger: opts.Logger},

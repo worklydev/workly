@@ -454,10 +454,10 @@ func testDeleteFinishedGroups(t *testing.T, open func() store.Store) {
 	closeGroup(t, s, running)
 	openGroup := mustCreateGroup(t, s, workspace.Default, store.NewGroup{})
 
-	if n, err := s.DeleteFinishedGroups(ctx, done.FinishedAt.Add(-time.Second), 10); err != nil || n != 0 {
+	if n, err := s.DeleteFinishedGroups(ctx, store.Sweep{Before: done.FinishedAt.Add(-time.Second)}, 10); err != nil || n != 0 {
 		t.Fatalf("DeleteFinishedGroups(before) = %d, %v", n, err)
 	}
-	if n, err := s.DeleteFinishedGroups(ctx, time.Now().Add(time.Second), 10); err != nil || n != 1 {
+	if n, err := s.DeleteFinishedGroups(ctx, store.Sweep{Before: time.Now().Add(time.Second)}, 10); err != nil || n != 1 {
 		t.Fatalf("DeleteFinishedGroups = %d, %v; want 1", n, err)
 	}
 	if _, err := s.GetGroup(ctx, workspace.Default, done.ID); !errors.Is(err, store.ErrNotFound) {

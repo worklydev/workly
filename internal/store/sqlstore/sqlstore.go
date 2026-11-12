@@ -1377,20 +1377,38 @@ func repeatRows(row string, n int) string {
 	return strings.TrimSuffix(strings.Repeat(row+", ", n), ", ")
 }
 
+// sweepWhere is the condition for rows (with the column prefix, e.g. "r.")
+// that sw covers, and its arguments.
+func (s *Store) sweepWhere(prefix string, sw store.Sweep) (string, []any) {
+	where, args := prefix+"finished_at < ?", []any{s.ts(sw.Before)}
+	switch {
+	case sw.Workspace != "":
+		where += " AND " + prefix + "workspace_id = ?"
+		args = append(args, sw.Workspace)
+	case len(sw.Except) > 0:
+		where += " AND " + prefix + "workspace_id NOT IN (" + strings.TrimSuffix(strings.Repeat("?, ", len(sw.Except)), ", ") + ")"
+		for _, ws := range sw.Except {
+			args = append(args, ws)
+		}
+	}
+	return where, args
+}
+
 func (s *Store) ExpiredLeases(ctx context.Context, now time.Time, limit int) ([]store.Task, error) {
 	return s.listTasks(ctx, s.db, `SELECT `+taskColumns+` FROM tasks
 		WHERE lease_expires_at IS NOT NULL AND lease_expires_at < ?
 		ORDER BY lease_expires_at LIMIT ?`, s.ts(now), limit)
 }
 
-func (s *Store) DeleteFinishedTasks(ctx context.Context, before time.Time, limit int) (int, error) {
+func (s *Store) DeleteFinishedTasks(ctx context.Context, sw store.Sweep, limit int) (int, error) {
 	// Attempts are deleted by cascade. A task cancelled mid-attempt is kept
 	// until its attempt is recorded.
+	where, args := s.sweepWhere("", sw)
 	res, err := s.exec(ctx, s.db, `DELETE FROM tasks WHERE id IN (
 			SELECT id FROM tasks
-			WHERE finished_at < ? AND lease_expires_at IS NULL
+			WHERE `+where+` AND lease_expires_at IS NULL
 			ORDER BY finished_at LIMIT ?
-		)`, s.ts(before), limit)
+		)`, append(args, limit)...)
 	if err != nil {
 		return 0, err
 	}

@@ -238,13 +238,14 @@ type Dispatch interface {
 	// metrics.
 	AllQueueStats(ctx context.Context, now time.Time) ([]QueueStatus, error)
 	// DeleteFinishedTasks deletes up to limit succeeded, failed or cancelled
-	// tasks that finished before the given time, with their attempts. It
-	// returns how many it deleted.
-	DeleteFinishedTasks(ctx context.Context, before time.Time, limit int) (int, error)
+	// tasks in the sweep's workspaces that finished before sw.Before, with
+	// their attempts. It returns how many it deleted.
+	DeleteFinishedTasks(ctx context.Context, sw Sweep, limit int) (int, error)
 
-	// DeleteFinishedGroups deletes up to limit groups that completed before
-	// the given time. It returns how many it deleted.
-	DeleteFinishedGroups(ctx context.Context, before time.Time, limit int) (int, error)
+	// DeleteFinishedGroups deletes up to limit groups in the sweep's
+	// workspaces that completed before sw.Before. It returns how many it
+	// deleted.
+	DeleteFinishedGroups(ctx context.Context, sw Sweep, limit int) (int, error)
 
 	// DueSchedules returns unpaused schedules whose next slot is at or
 	// before now.
@@ -269,9 +270,10 @@ type Dispatch interface {
 	// ExpiredRunLeases returns up to limit runs with an attempt in flight
 	// whose lease expired before now.
 	ExpiredRunLeases(ctx context.Context, now time.Time, limit int) ([]Run, error)
-	// DeleteFinishedRuns deletes up to limit runs that finished before the
-	// given time, with their attempts, except each schedule's latest run.
-	DeleteFinishedRuns(ctx context.Context, before time.Time, limit int) (int, error)
+	// DeleteFinishedRuns deletes up to limit runs in the sweep's workspaces
+	// that finished before sw.Before, with their attempts, except each
+	// schedule's latest run.
+	DeleteFinishedRuns(ctx context.Context, sw Sweep, limit int) (int, error)
 	// AllScheduleStatus returns every schedule's status across all
 	// workspaces, for metrics.
 	AllScheduleStatus(ctx context.Context) ([]ScheduleStatus, error)
@@ -291,6 +293,14 @@ type Leader interface {
 	Lost() <-chan struct{}
 	// Release gives up leadership.
 	Release()
+}
+
+// Sweep picks what a retention sweep deletes: rows finished before Before,
+// in Workspace only if it's set, otherwise in every workspace but Except.
+type Sweep struct {
+	Before    time.Time
+	Workspace workspace.ID
+	Except    []workspace.ID
 }
 
 type Workspace struct {
