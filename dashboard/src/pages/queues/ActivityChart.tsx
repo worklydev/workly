@@ -46,7 +46,11 @@ export function ActivityChart() {
       ) : (
         <>
           <Detail data={data} series={series} index={hovered} per={per} />
-          <div className="flex h-28 items-end gap-px border-b border-border" onMouseLeave={() => setHovered(undefined)}>
+          {/* The dashed top line is the scale Detail labels. */}
+          <div
+            className="flex h-28 items-end gap-px border-t border-b border-border border-t-transparent bg-[linear-gradient(to_right,var(--border)_50%,transparent_0)] bg-size-[6px_1px] bg-top bg-repeat-x"
+            onMouseLeave={() => setHovered(undefined)}
+          >
             {data.buckets.map((b, i) => {
               const total = sum(b.counts);
               return (
@@ -61,7 +65,7 @@ export function ActivityChart() {
                       'flex w-full flex-col-reverse overflow-hidden rounded-t-xs',
                       total === 0 && 'bg-muted',
                     )}
-                    style={{ height: total === 0 ? 2 : `${(total / series.max) * 100}%` }}
+                    style={{ height: total === 0 ? 2 : `${(total / series.scale) * 100}%` }}
                   >
                     {series.keys.map((key) => {
                       const n = countFor(b, key, series.keys);
@@ -123,8 +127,8 @@ type Series = {
   color: Record<string, string>;
   totals: Record<string, number>;
   total: number;
-  /** The tallest bar, at least 1. */
-  max: number;
+  /** The top of the chart: the tallest bar rounded up to 1, 2 or 5 × 10ⁿ, and at least 5, so a few tasks don't read as a spike. */
+  scale: number;
 };
 
 function toSeries(buckets: ActivityBucket[]): Series {
@@ -140,7 +144,13 @@ function toSeries(buckets: ActivityBucket[]): Series {
     totals[OTHER] = ranked.slice(top.length).reduce((n, q) => n + totals[q], 0);
   }
   const total = ranked.reduce((n, q) => n + totals[q], 0);
-  return { keys, color, totals, total, max: Math.max(1, ...buckets.map((b) => sum(b.counts))) };
+  return { keys, color, totals, total, scale: niceCeil(Math.max(5, ...buckets.map((b) => sum(b.counts)))) };
+}
+
+/** 1, 2 or 5 × 10ⁿ, the first at or above n. */
+function niceCeil(n: number): number {
+  const p = 10 ** Math.floor(Math.log10(n));
+  return ([1, 2, 5, 10].find((m) => m * p >= n) ?? 10) * p;
 }
 
 function countFor(b: ActivityBucket, key: string, keys: string[]): number {
@@ -150,18 +160,15 @@ function countFor(b: ActivityBucket, key: string, keys: string[]): number {
 
 const sum = (counts: Record<string, number>) => Object.values(counts).reduce((a, b) => a + b, 0);
 
-/** The hovered bar's time and counts, or the busiest bar's count as a scale. */
+/** The hovered bar's time and counts, or the scale, labelling the dashed line at the chart's top. */
 function Detail({ data, series, index, per }: { data: Activity; series: Series; index?: number; per: string }) {
   if (index === undefined) {
     return (
-      <div className="h-5 text-xs text-faint">
-        {series.total === 0 ? (
-          'No tasks created in this range.'
-        ) : (
-          <span className="font-mono">
-            peak {formatCount(series.max)} per {per}
-          </span>
-        )}
+      <div className="flex h-5 items-end justify-between text-xs text-faint">
+        <span>{series.total === 0 && 'No tasks created in this range.'}</span>
+        <span className="font-mono tabular-nums">
+          {formatCount(series.scale)} per {per}
+        </span>
       </div>
     );
   }

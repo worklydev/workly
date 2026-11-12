@@ -1,6 +1,6 @@
 import { cn } from 'cn';
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Info, Pause, Pencil, Play, RotateCcw, Send, Trash2, X } from 'lucide-react';
+import { Ban, Info, Pause, Pencil, Play, RotateCcw, Send, Trash2, X } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import {
@@ -15,7 +15,8 @@ import {
   deleteQueueMutation,
 } from '../../api/@tanstack/react-query.gen';
 import type { FailureGroup, ListTasksData, Queue, TaskState } from '../../api';
-import { ConfirmButton } from '../../components/ConfirmButton';
+import { ConfirmItem, MoreActions } from '../../components/MoreActions';
+import { LOW_SUCCESS } from '../../lib/queues';
 import { useSetting } from '../../context';
 import { ListPager } from '../../components/ListControls';
 import { usePage } from '../../hooks/usePage';
@@ -70,8 +71,9 @@ export function QueuePage() {
 }
 
 /**
- * The backlog now, then finished tasks over the page's range (useRange), or
- * as much of it as retention keeps, as one strip.
+ * Two groups: the backlog now, and finished tasks over the page's range
+ * (useRange), or as much of it as retention keeps. The range tabs head only
+ * the second, since the backlog doesn't depend on them.
  */
 function Overview({ queue }: { queue: Queue }) {
   const { value: range, seconds, query } = useRange();
@@ -84,73 +86,82 @@ function Overview({ queue }: { queue: Queue }) {
   const retention = data?.retention_seconds;
   const setting = useSetting();
   const finished = data ? data.succeeded + data.failed : 0;
+  const rate = finished > 0 ? data!.succeeded / finished : undefined;
+  // Every failed task still kept, whatever the range: the Failed tab's count.
+  const failedKept = queue.stats?.failed ?? 0;
   // Keeps the range when filtering the task list below.
   const tasks = (state: TaskState) => `${query ? `${query}&` : '?'}state=${state}`;
   const kept =
     retention === undefined
       ? `Finished tasks are kept forever${setting('WORKLY_RETENTION')}.`
       : `Finished tasks are kept for ${formatDays(retention)}${setting('WORKLY_RETENTION')}.`;
-  const inRange = (label: string) => (
-    <>
-      {label} <span className="text-faint">· {range}</span>
-    </>
-  );
 
   return (
-    <Section title="Overview" actions={<RangeTabs />}>
-      <StatStrip className="grid-cols-2 sm:grid-cols-4 xl:grid-cols-7">
-        {/* Below xl Pending takes two columns, so seven stats fill the grid's rows. */}
-        <PendingCard
-          className="col-span-2 xl:col-span-1"
-          due={queue.stats?.due ?? 0}
-          scheduled={queue.stats?.scheduled ?? 0}
-          to="?state=pending"
-        />
-        <StatCard
-          label="Running"
-          value={formatCount(queue.stats?.running ?? 0)}
-          to={queue.stats?.running ? '?state=running' : undefined}
-        />
-        <StatCard
-          label="Longest wait"
-          value={<LongestWait since={queue.stats?.oldest_due_at} />}
-          detail={queue.stats?.oldest_due_at ? 'past its run time' : 'nothing waiting'}
-          title={LONGEST_WAIT_TITLE}
-        />
-        <StatCard
-          label={inRange('Succeeded')}
-          value={data ? formatCount(data.succeeded) : '…'}
-          to={data?.succeeded ? tasks('succeeded') : undefined}
-          title={kept}
-        />
-        <StatCard
-          label={inRange('Failed')}
-          value={data ? formatCount(data.failed) : '…'}
-          tone={data?.failed ? 'danger' : undefined}
-          to={data?.failed ? tasks('failed') : undefined}
-          title={kept}
-        />
-        <StatCard
-          label={inRange('Cancelled')}
-          value={data ? formatCount(data.cancelled) : '…'}
-          to={data?.cancelled ? tasks('cancelled') : undefined}
-          title={kept}
-        />
-        <StatCard
-          label={inRange('Success rate')}
-          value={finished > 0 ? `${formatRate(data!.succeeded / finished)}` : '—'}
-          title={kept}
-        />
-      </StatStrip>
-      {error && <ErrorText error={error} />}
-      {/* Only worth saying when it changes what the numbers mean. */}
-      {retention !== undefined && retention < seconds && (
-        <p className="flex items-center gap-1.5 text-xs text-faint">
-          <Info className="size-3.5 shrink-0" />
-          {kept.slice(0, -1)}, so older activity isn't counted.
-        </p>
-      )}
-    </Section>
+    <div className="grid gap-x-6 gap-y-8 lg:grid-cols-[minmax(0,3fr)_minmax(0,4fr)]">
+      <section className="flex flex-col gap-3">
+        {/* As tall as the range tabs beside it, so the two strips line up. */}
+        <div className="flex h-8 items-center">
+          <h3 className="font-medium">Now</h3>
+        </div>
+        <StatStrip className="flex-1 grid-cols-3">
+          <PendingCard due={queue.stats?.due ?? 0} scheduled={queue.stats?.scheduled ?? 0} to="?state=pending" />
+          <StatCard
+            label="Running"
+            value={formatCount(queue.stats?.running ?? 0)}
+            to={queue.stats?.running ? '?state=running' : undefined}
+          />
+          <StatCard
+            label="Longest wait"
+            value={<LongestWait since={queue.stats?.oldest_due_at} />}
+            detail={queue.stats?.oldest_due_at ? 'past its run time' : 'nothing waiting'}
+            title={LONGEST_WAIT_TITLE}
+          />
+        </StatStrip>
+      </section>
+      <section className="flex flex-col gap-3">
+        <div className="flex h-8 items-center justify-between gap-4">
+          <h3 className="font-medium">Last {range}</h3>
+          <RangeTabs />
+        </div>
+        <StatStrip className="flex-1 grid-cols-2 sm:grid-cols-4">
+          <StatCard
+            label="Succeeded"
+            value={data ? formatCount(data.succeeded) : '…'}
+            to={data?.succeeded ? tasks('succeeded') : undefined}
+            title={kept}
+          />
+          <StatCard
+            label="Failed"
+            value={data ? formatCount(data.failed) : '…'}
+            tone={data?.failed ? 'danger' : undefined}
+            // The range's count and the tab's differ; saying both keeps them from looking like a bug.
+            detail={failedKept > 0 ? `${formatCount(failedKept)} kept in all` : undefined}
+            to={failedKept > 0 ? tasks('failed') : undefined}
+            title={`Failed in the last ${range}. ${formatCount(failedKept)} failed tasks are kept in all, as in the Failed tab.`}
+          />
+          <StatCard
+            label="Cancelled"
+            value={data ? formatCount(data.cancelled) : '…'}
+            to={data?.cancelled ? tasks('cancelled') : undefined}
+            title={kept}
+          />
+          <StatCard
+            label="Success rate"
+            value={rate === undefined ? '—' : formatRate(rate)}
+            tone={rate !== undefined && rate < LOW_SUCCESS ? 'danger' : undefined}
+            title={kept}
+          />
+        </StatStrip>
+        {error && <ErrorText error={error} />}
+        {/* Only worth saying when it changes what the numbers mean. */}
+        {retention !== undefined && retention < seconds && (
+          <p className="flex items-center gap-1.5 text-xs text-faint">
+            <Info className="size-3.5 shrink-0" />
+            {kept.slice(0, -1)}, so older activity isn't counted.
+          </p>
+        )}
+      </section>
+    </div>
   );
 }
 
@@ -170,6 +181,7 @@ function QueueActions({ queue }: { queue: Queue }) {
   const retryFailed = useMutation({ ...retryFailedTasksMutation(), onSuccess });
   const navigate = useNavigate();
   const [enqueueing, setEnqueueing] = useState(false);
+  const [editing, setEditing] = useState(false);
   const remove = useMutation({
     ...deleteQueueMutation(),
     onSuccess: async () => {
@@ -191,6 +203,11 @@ function QueueActions({ queue }: { queue: Queue }) {
           {retried === 0 ? 'No failed tasks' : `Retrying ${formatCount(retried)} failed`}
         </span>
       )}
+      <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>
+        <Pencil />
+        Edit
+      </Button>
+      <EditPolicy queue={queue} open={editing} onClose={() => setEditing(false)} />
       <DisabledReason reason={failed === 0 ? 'No failed tasks to retry.' : undefined}>
         <Button
           variant="ghost"
@@ -219,25 +236,25 @@ function QueueActions({ queue }: { queue: Queue }) {
         Enqueue task
       </Button>
       <EnqueueTask queue={queue.name} open={enqueueing} onClose={() => setEnqueueing(false)} />
-      <DisabledReason reason={pending === 0 ? 'No pending tasks to cancel.' : undefined}>
-        <ConfirmButton
+      <MoreActions label="More queue actions">
+        <ConfirmItem
+          icon={<Ban />}
           title="Cancel every pending task, including scheduled ones. They stay in the history and can be retried."
           confirmLabel={`Cancel ${formatCount(pending)} pending?`}
           onConfirm={() => cancelPending.mutate(path)}
-          disabled={pending === 0 || cancelPending.isPending}
+          disabledReason={pending === 0 ? 'No pending tasks to cancel.' : undefined}
         >
-          Cancel pending
-        </ConfirmButton>
-      </DisabledReason>
-      <ConfirmButton
-        title="Delete the queue and every task in it, history included. This can't be undone."
-        confirmLabel="Delete queue and all its tasks"
-        onConfirm={() => remove.mutate(path)}
-        disabled={remove.isPending}
-      >
-        <Trash2 />
-        Delete
-      </ConfirmButton>
+          Cancel pending tasks
+        </ConfirmItem>
+        <ConfirmItem
+          icon={<Trash2 />}
+          title="Delete the queue and every task in it, history included. This can't be undone."
+          confirmLabel="Delete queue and all its tasks?"
+          onConfirm={() => remove.mutate(path)}
+        >
+          Delete queue
+        </ConfirmItem>
+      </MoreActions>
     </>
   );
 }
@@ -359,7 +376,6 @@ function Policy({ queue }: { queue: Queue }) {
   // The generated type keeps QueueConfig's fields optional, but a queue
   // always has its full policy.
   const q = queue as Queue & Required<Pick<Queue, 'min_backoff_seconds' | 'max_backoff_seconds' | 'timeout_seconds'>>;
-  const [editing, setEditing] = useState(false);
   const items = [
     { label: 'Max attempts', value: String(q.max_attempts) },
     {
@@ -367,25 +383,13 @@ function Policy({ queue }: { queue: Queue }) {
       value: `${formatSeconds(q.min_backoff_seconds)} → ${formatSeconds(q.max_backoff_seconds)}, ×${q.backoff_multiplier}`,
     },
     { label: 'Timeout', value: formatSeconds(q.timeout_seconds) },
-    { label: 'Retry 4xx', value: q.retry_on_4xx ? 'yes' : 'only 408 and 429' },
-    { label: 'Rate', value: q.rate_per_second === undefined ? 'unlimited' : `${q.rate_per_second}/s` },
+    { label: 'Retry 4xx', value: q.retry_on_4xx ? 'yes' : 'only 408 and 429', prose: true },
+    q.rate_per_second === undefined
+      ? { label: 'Rate', value: 'unlimited', prose: true }
+      : { label: 'Rate', value: `${q.rate_per_second}/s` },
     { label: 'Concurrency', value: String(q.max_concurrency) },
   ];
-  return (
-    <InlineFields items={items}>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="-ml-2 size-6 [&_svg]:size-3.5"
-        title="Edit policy"
-        aria-label="Edit policy"
-        onClick={() => setEditing(true)}
-      >
-        <Pencil />
-      </Button>
-      <EditPolicy queue={queue} open={editing} onClose={() => setEditing(false)} />
-    </InlineFields>
-  );
+  return <InlineFields items={items} />;
 }
 
 /** Tab counts for the states the stats cover; finished tasks aren't counted. */

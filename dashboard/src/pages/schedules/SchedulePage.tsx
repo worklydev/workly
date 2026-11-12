@@ -13,7 +13,9 @@ import {
 } from '../../api/@tanstack/react-query.gen';
 import type { ListRunsData, RunState, Schedule } from '../../api';
 import { CodePanel } from '../../components/CodePanel';
-import { ConfirmButton } from '../../components/ConfirmButton';
+import { ConfirmItem, MoreActions } from '../../components/MoreActions';
+import { LastResult } from '../../components/LastResult';
+import { TaskStateBadge } from '../../components/states';
 import { PageHeader } from '../../components/PageHeader';
 import { InlineFields } from '../../components/InlineFields';
 import { ErrorText, Muted } from '../../components/QueryState';
@@ -75,9 +77,17 @@ export function SchedulePage() {
               value: `${formatSeconds(schedule.min_backoff_seconds)} → ${formatSeconds(schedule.max_backoff_seconds)}, ×${schedule.backoff_multiplier}`,
             },
             { label: 'Timeout', value: formatSeconds(schedule.timeout_seconds) },
-            { label: 'Retry 4xx', value: schedule.retry_on_4xx ? 'yes' : 'only 408 and 429' },
-            { label: 'If still running', value: schedule.overlap === 'skip' ? 'skip the slot' : 'run alongside' },
-            { label: 'If missed', value: schedule.missed === 'skip' ? 'skip, record it' : 'catch up once' },
+            { label: 'Retry 4xx', value: schedule.retry_on_4xx ? 'yes' : 'only 408 and 429', prose: true },
+            {
+              label: 'If still running',
+              value: schedule.overlap === 'skip' ? 'skip the slot' : 'run alongside',
+              prose: true,
+            },
+            {
+              label: 'If missed',
+              value: schedule.missed === 'skip' ? 'skip, record it' : 'catch up once',
+              prose: true,
+            },
           ]}
         />
       </div>
@@ -90,13 +100,6 @@ export function SchedulePage() {
     </>
   );
 }
-
-const RUN_TONE: Partial<Record<RunState, string>> = {
-  succeeded: 'text-success',
-  failed: 'text-destructive',
-  skipped: 'text-warning',
-  running: 'text-primary',
-};
 
 /** When it runs next, how the last run went, and the latest dozen at a glance. */
 function Overview({ schedule }: { schedule: Schedule }) {
@@ -128,19 +131,19 @@ function Overview({ schedule }: { schedule: Schedule }) {
       <StatCard
         label="Last run"
         value={
-          last ? <span className={RUN_TONE[last.state]}>{last.state}</span> : <span className="text-faint">—</span>
-        }
-        detail={
           last ? (
-            <>
-              <RelativeTime iso={last.scheduled_for} />
-              {last.skip_reason &&
-                ` · ${last.skip_reason === 'overlap' ? 'previous run still going' : 'server was down'}`}
-            </>
-          ) : runs ? (
-            'no runs yet'
-          ) : undefined
+            // A state is a word, not a number: a badge, at the height of the mono values beside it.
+            <span className="flex h-7 items-center gap-2 font-sans text-sm">
+              <TaskStateBadge state={last.state} />
+              <span className="text-muted-foreground">
+                <RelativeTime iso={last.scheduled_for} />
+              </span>
+            </span>
+          ) : (
+            <span className="text-faint">—</span>
+          )
         }
+        detail={last ? <LastResult result={last} /> : runs ? 'no runs yet' : undefined}
         to={last ? `/runs/${last.id}` : undefined}
       />
       <StatCard
@@ -211,15 +214,16 @@ function ScheduleActions({ schedule }: { schedule: Schedule }) {
         <Play />
         Run now
       </Button>
-      <ConfirmButton
-        title="Delete the schedule and all its runs. A run in flight finishes, but its result isn't recorded."
-        confirmLabel="Delete schedule and runs"
-        onConfirm={() => remove.mutate(path)}
-        disabled={remove.isPending}
-      >
-        <Trash2 />
-        Delete
-      </ConfirmButton>
+      <MoreActions label="More schedule actions">
+        <ConfirmItem
+          icon={<Trash2 />}
+          title="Delete the schedule and all its runs. A run in flight finishes, but its result isn't recorded."
+          confirmLabel="Delete schedule and runs?"
+          onConfirm={() => remove.mutate(path)}
+        >
+          Delete schedule
+        </ConfirmItem>
+      </MoreActions>
     </>
   );
 }

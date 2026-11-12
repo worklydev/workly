@@ -23,7 +23,8 @@ import { DisabledReason } from './DisabledReason';
 import { SortSummary } from './SortSummary';
 import { ErrorText, Muted } from './QueryState';
 import { RelativeTime } from './RelativeTime';
-import { StatusCode, TaskStateBadge } from './states';
+import { TaskStateBadge } from './states';
+import { LastResult } from './LastResult';
 
 type Props = {
   pages: TaskPages;
@@ -139,8 +140,8 @@ export function TaskTable({ pages, showQueue, empty, paused = () => false, sorti
                 <TaskStateBadge state={displayState(t, now)} />
               </TableCell>
               <TableCell className={cn('text-right font-mono text-xs', wide)}>{t.attempt_count}</TableCell>
-              <TableCell className="max-w-64 truncate font-mono text-xs">
-                <LastResult task={t} />
+              <TableCell className="max-w-64 truncate text-xs">
+                <LastResult result={t} />
               </TableCell>
               <TableCell className="text-xs text-muted-foreground">
                 <NextRun task={t} now={now} paused={paused(t.queue)} />
@@ -182,27 +183,6 @@ function Checkbox({
   label: string;
 }) {
   return <CheckboxPrimitive aria-label={label} checked={checked} indeterminate={indeterminate} onChange={onChange} />;
-}
-
-/** The latest attempt's status code with its reason, or how it ended without one. */
-function LastResult({ task: t }: { task: Task }) {
-  if (t.last_status !== undefined) {
-    const reason = t.last_error?.match(/^HTTP \d{3} (.+)$/)?.[1];
-    return (
-      <span title={t.last_error}>
-        <StatusCode code={t.last_status} />
-        {reason && <span className="font-sans text-faint"> {reason}</span>}
-      </span>
-    );
-  }
-  if (t.last_outcome && t.last_outcome !== 'success') {
-    return (
-      <span className={t.last_outcome === 'lost' ? 'text-warning' : 'text-destructive'} title={t.last_error}>
-        {t.last_outcome.replace('_', ' ')}
-      </span>
-    );
-  }
-  return <span className="text-faint">—</span>;
 }
 
 /** When a pending task runs next; a running one is in flight, a finished one won't run. */
