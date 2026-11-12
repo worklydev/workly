@@ -34,6 +34,8 @@ export type DashboardProps = {
   nav?: NavItem[];
   /** Extra header content, e.g. an organization switcher. */
   header?: ReactNode;
+  /** Shown above every page's content, e.g. a notice about the account. Renders nothing when null. */
+  banner?: ReactNode;
   /**
    * Shown on the Queues and Schedules pages while there are none, instead
    * of the `workly dev` examples.
@@ -60,6 +62,7 @@ export function Dashboard({
   routes,
   nav = [],
   header,
+  banner,
   gettingStarted,
   serverSettings = true,
   queryClient,
@@ -94,7 +97,7 @@ export function Dashboard({
   return (
     <QueryClientProvider client={queries}>
       <LiveUpdates />
-      <SlotsContext value={{ nav, header, gettingStarted, serverSettings }}>
+      <SlotsContext value={{ nav, header, banner, gettingStarted, serverSettings }}>
         <BrowserRouter basename={basename}>
           <Routes>
             <Route path="design" element={<DesignPage />} />

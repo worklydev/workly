@@ -7,6 +7,7 @@ export type NavItem = { to: string; label: string; icon: LucideIcon };
 export type Slots = {
   nav: NavItem[];
   header?: ReactNode;
+  banner?: ReactNode;
   gettingStarted?: GettingStarted;
   /** False hides server settings (environment variables) from explanations; see <Dashboard>. */
   serverSettings?: boolean;

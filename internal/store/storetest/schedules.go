@@ -422,10 +422,10 @@ func testDeleteFinishedRuns(t *testing.T, open func() store.Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n, err := s.DeleteFinishedRuns(ctx, now().Add(-time.Hour), 10); err != nil || n != 0 {
+	if n, err := s.DeleteFinishedRuns(ctx, store.Sweep{Before: now().Add(-time.Hour)}, 10); err != nil || n != 0 {
 		t.Fatalf("DeleteFinishedRuns before retention = %d, %v", n, err)
 	}
-	if n, err := s.DeleteFinishedRuns(ctx, now().Add(time.Hour), 10); err != nil || n != 3 {
+	if n, err := s.DeleteFinishedRuns(ctx, store.Sweep{Before: now().Add(time.Hour)}, 10); err != nil || n != 3 {
 		t.Fatalf("DeleteFinishedRuns = %d, %v; want 3", n, err)
 	}
 	left, _, _ := s.ListRuns(ctx, workspace.Default, store.RunFilter{Schedule: "nightly", Limit: 10})
@@ -437,7 +437,7 @@ func testDeleteFinishedRuns(t *testing.T, open func() store.Store) {
 	if _, err := s.CancelRun(ctx, workspace.Default, pending.ID); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := s.DeleteFinishedRuns(ctx, now().Add(time.Hour), 10); err != nil || n != 0 {
+	if n, err := s.DeleteFinishedRuns(ctx, store.Sweep{Before: now().Add(time.Hour)}, 10); err != nil || n != 0 {
 		t.Fatalf("DeleteFinishedRuns of the latest run = %d, %v", n, err)
 	}
 }

@@ -290,3 +290,46 @@ func TestRetention(t *testing.T) {
 		waitForState(t, s, scheduled.ID, store.TaskPending)
 	})
 }
+
+func TestWorkspaceRetention(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		retention time.Duration
+		own       time.Duration
+		deleted   bool
+	}{
+		{"kept forever despite the default", 50 * time.Millisecond, 0, false},
+		{"its own retention without a default", 0, 50 * time.Millisecond, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			forEachStore(t, func(t *testing.T, open func() store.Store) {
+				s := setup(t, open)
+				rec := newRecorder(t, nil)
+				done := enqueue(t, s, store.NewTask{URL: rec.URL})
+				start(t, s, func(o *Options) {
+					o.Retention = tt.retention
+					o.WorkspaceRetention = func(context.Context) (map[workspace.ID]time.Duration, error) {
+						return map[workspace.ID]time.Duration{workspace.Default: tt.own}, nil
+					}
+					o.SweepInterval = 10 * time.Millisecond
+				})
+				waitForState(t, s, done.ID, store.TaskSucceeded)
+
+				deadline := time.Now().Add(10 * time.Second)
+				if !tt.deleted {
+					deadline = time.Now().Add(300 * time.Millisecond)
+				}
+				for time.Now().Before(deadline) {
+					if _, err := s.GetTask(t.Context(), workspace.Default, done.ID); err == store.ErrNotFound {
+						break
+					}
+					time.Sleep(10 * time.Millisecond)
+				}
+				_, err := s.GetTask(t.Context(), workspace.Default, done.ID)
+				if deleted := err == store.ErrNotFound; deleted != tt.deleted {
+					t.Fatalf("deleted = %v (err %v), want %v", deleted, err, tt.deleted)
+				}
+			})
+		})
+	}
+}

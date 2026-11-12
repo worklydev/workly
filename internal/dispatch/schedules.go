@@ -256,24 +256,10 @@ func (d *Dispatcher) collectScheduleMetrics(ctx context.Context) {
 	}
 }
 
-// sweepRuns deletes finished runs older than RunRetention.
-func (d *Dispatcher) sweepRuns(ctx context.Context) {
-	before := time.Now().Add(-d.opts.RunRetention)
-	total := 0
-	for {
-		n, err := d.store.DeleteFinishedRuns(ctx, before, sweepBatch)
-		if err != nil {
-			if ctx.Err() == nil {
-				d.log.Warn("run retention sweep failed", "err", err)
-			}
-			break
-		}
-		total += n
-		if n < sweepBatch || ctx.Err() != nil {
-			break
-		}
-	}
+// sweepRuns deletes the finished runs sw covers.
+func (d *Dispatcher) sweepRuns(ctx context.Context, sw store.Sweep, retention time.Duration) {
+	total := d.sweepBatches(ctx, "runs", func() (int, error) { return d.store.DeleteFinishedRuns(ctx, sw, sweepBatch) })
 	if total > 0 {
-		d.log.Info("deleted schedule runs past retention", "count", total, "retention", d.opts.RunRetention.String())
+		d.log.Info("deleted schedule runs past retention", "count", total, "retention", retention.String(), "workspace", sw.Workspace)
 	}
 }

@@ -1,8 +1,10 @@
 import { Outlet } from 'react-router';
+import { useSlots } from '../context';
 import { Header } from './Header';
 import { Sidebar } from './Sidebar';
 
 export function AppShell() {
+  const { banner } = useSlots();
   return (
     <div className="flex h-screen bg-background text-foreground">
       <Sidebar />
@@ -10,6 +12,7 @@ export function AppShell() {
         <Header />
         <main className="flex-1 overflow-auto bg-surface p-4 sm:p-6">
           <div className="mx-auto flex max-w-6xl flex-col gap-8">
+            {banner}
             <Outlet />
           </div>
         </main>

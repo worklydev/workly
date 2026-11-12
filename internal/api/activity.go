@@ -44,9 +44,6 @@ func (h Handlers) GetActivity(ctx context.Context, req GetActivityRequestObject)
 			out.Buckets[i].Counts[c.Queue] += c.Count
 		}
 	}
-	if h.Retention > 0 {
-		s := seconds(h.Retention)
-		out.RetentionSeconds = &s
-	}
+	out.RetentionSeconds = h.retentionSeconds(ctx)
 	return out, nil
 }
