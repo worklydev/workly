@@ -1,6 +1,7 @@
 package dispatch
 
 import (
+	"context"
 	"math"
 	"time"
 
@@ -83,17 +84,90 @@ type queueState struct {
 	inFlight int
 }
 
+// workspaceState is the dispatcher's view of a workspace's own cap on
+// concurrent deliveries.
+type workspaceState struct {
+	inFlight int
+	// limit is the workspace's cap from Options.WorkspaceMaxInFlight, 0 for
+	// none, as of checked.
+	limit   int
+	checked time.Time
+}
+
+// limitTTL is how long a workspace's cap is used before it is looked up
+// again, so a hosted service's lookup isn't on every dispatch round.
+const limitTTL = time.Minute
+
+// room is how many more deliveries the workspace's cap allows. d.mu must be
+// held.
+func (w *workspaceState) room() int {
+	if w.limit <= 0 {
+		return math.MaxInt
+	}
+	return max(0, w.limit-w.inFlight)
+}
+
+// workspaceState returns ws's state. d.mu must be held.
+func (d *Dispatcher) workspaceState(ws workspace.ID) *workspaceState {
+	st, ok := d.workspaces[ws]
+	if !ok {
+		st = &workspaceState{}
+		d.workspaces[ws] = st
+	}
+	return st
+}
+
+// refreshLimits looks up the caps of the queues' workspaces that are new or
+// older than limitTTL. A failed lookup keeps the previous cap until the next
+// try, rather than stopping the workspace's deliveries.
+func (d *Dispatcher) refreshLimits(ctx context.Context, queues []store.Queue, now time.Time) {
+	lookup := d.opts.WorkspaceMaxInFlight
+	if lookup == nil {
+		return
+	}
+	var stale []workspace.ID
+	d.mu.Lock()
+	for _, q := range queues {
+		st := d.workspaceState(q.WorkspaceID)
+		if now.Sub(st.checked) >= limitTTL {
+			st.checked = now // once per round, however many queues it has
+			stale = append(stale, q.WorkspaceID)
+		}
+	}
+	d.mu.Unlock()
+	for _, ws := range stale {
+		lctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		limit, err := lookup(lctx, ws)
+		cancel()
+		if err != nil {
+			d.log.Warn("could not look up a workspace's delivery limit", "workspace", ws, "err", err)
+			continue
+		}
+		d.mu.Lock()
+		d.workspaceState(ws).limit = max(0, limit)
+		d.mu.Unlock()
+	}
+}
+
+// workspaceRoom is how many more deliveries ws's cap allows.
+func (d *Dispatcher) workspaceRoom(ws workspace.ID) int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.workspaceState(ws).room()
+}
+
 // reserve takes up to n delivery slots from the queue's concurrency and
-// rate limits. If it returns 0 because of the rate limit, wait is how long
-// until a delivery may start. When it returns 0 because of the concurrency
-// limit, a finishing delivery wakes the dispatcher.
+// rate limits and its workspace's cap. If it returns 0 because of the rate
+// limit, wait is how long until a delivery may start. When it returns 0
+// because of a concurrency limit, a finishing delivery wakes the dispatcher.
 func (d *Dispatcher) reserve(q store.Queue, n int, now time.Time) (got int, wait time.Duration) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	st := d.queueState(q)
+	st, ws := d.queueState(q), d.workspaceState(q.WorkspaceID)
 	if q.MaxConcurrency > 0 {
 		n = min(n, q.MaxConcurrency-st.inFlight)
 	}
+	n = min(n, ws.room())
 	if n <= 0 {
 		return 0, 0
 	}
@@ -103,19 +177,20 @@ func (d *Dispatcher) reserve(q store.Queue, n int, now time.Time) (got int, wait
 		}
 	}
 	st.inFlight += n
+	ws.inFlight += n
 	return n, 0
 }
 
-// headroom is how many deliveries the queue's limits let it start now,
-// without taking them. If that is 0 because of the rate limit, wait is how
-// long until one may start.
+// headroom is how many deliveries the queue's limits and its workspace's
+// cap let it start now, without taking them. If that is 0 because of the
+// rate limit, wait is how long until one may start.
 func (d *Dispatcher) headroom(q store.Queue, now time.Time) (n int, wait time.Duration) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	st := d.queueState(q)
-	n = math.MaxInt
+	n = d.workspaceState(q.WorkspaceID).room()
 	if q.MaxConcurrency > 0 {
-		n = q.MaxConcurrency - st.inFlight
+		n = min(n, q.MaxConcurrency-st.inFlight)
 	}
 	if n <= 0 {
 		return 0, 0
@@ -155,12 +230,40 @@ func allotSlots(room []int, free int) []int {
 	return allot
 }
 
+// allotByWorkspace shares free slots equally among workspaces, and each
+// workspace's share among its queues, so a workspace's share doesn't grow
+// with how many queues it has. groups[g] lists the indexes in room of
+// workspace g's queues, and caps[g] is how many more deliveries its own cap
+// allows.
+func allotByWorkspace(groups [][]int, caps, room []int, free int) []int {
+	wsRoom := make([]int, len(groups))
+	for g, qs := range groups {
+		sum := 0
+		for _, i := range qs {
+			sum += room[i]
+		}
+		wsRoom[g] = min(caps[g], sum)
+	}
+	allot := make([]int, len(room))
+	for g, share := range allotSlots(wsRoom, free) {
+		qRoom := make([]int, len(groups[g]))
+		for j, i := range groups[g] {
+			qRoom[j] = room[i]
+		}
+		for j, n := range allotSlots(qRoom, share) {
+			allot[groups[g][j]] = n
+		}
+	}
+	return allot
+}
+
 // unreserve returns slots reserved but not used: n unused tokens and slots.
 func (d *Dispatcher) unreserve(q store.Queue, n int) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	st := d.queueState(q)
 	st.inFlight -= n
+	d.workspaceState(q.WorkspaceID).inFlight -= n
 	if q.RatePerSecond > 0 {
 		st.bucket.put(n)
 	}
@@ -188,6 +291,7 @@ func (d *Dispatcher) released(q store.Queue) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.queueState(q).inFlight--
+	d.workspaceState(q.WorkspaceID).inFlight--
 }
 
 // queueState returns the queue's state with its current limits. d.mu must be
@@ -205,14 +309,20 @@ func (d *Dispatcher) queueState(q store.Queue) *queueState {
 	return st
 }
 
-// pruneQueues forgets queues with nothing in flight and a full bucket: a new
-// state would behave the same.
+// pruneQueues forgets queues with nothing in flight and a full bucket, and
+// workspaces with nothing in flight whose cap is due a lookup: a new state
+// would behave the same.
 func (d *Dispatcher) pruneQueues(now time.Time) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	for k, st := range d.queues {
 		if st.inFlight == 0 && (st.bucket.rate == 0 || st.bucket.full(now)) {
 			delete(d.queues, k)
+		}
+	}
+	for ws, st := range d.workspaces {
+		if st.inFlight == 0 && now.Sub(st.checked) >= limitTTL {
+			delete(d.workspaces, ws)
 		}
 	}
 }

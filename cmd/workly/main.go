@@ -269,6 +269,7 @@ func run(ctx context.Context, cfg config.Config, dev bool, onReady func(net.Addr
 		PreviousSigningSecret:  cfg.PreviousSigningSecret,
 		DisableQueueAutoCreate: !cfg.AutoCreateQueues,
 		MaxPayloadBytes:        cfg.MaxPayloadBytes,
+		MaxInFlight:            cfg.MaxInFlight,
 		Retention:              cfg.Retention,
 		RunRetention:           cfg.RunRetention,
 		DevEndpoints:           dev,
