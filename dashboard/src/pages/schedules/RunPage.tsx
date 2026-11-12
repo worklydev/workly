@@ -19,6 +19,7 @@ import { PageHeader } from '../../components/PageHeader';
 import { InlineFields } from '../../components/InlineFields';
 import { ErrorText, Muted } from '../../components/QueryState';
 import { RelativeTime } from '../../components/RelativeTime';
+import { CallbackSection } from '../../components/CallbackSection';
 import { Section } from '../../components/Section';
 import { StatCard, StatStrip } from '../../components/StatCard';
 import { StatusCode, TaskStateBadge } from '../../components/states';
@@ -94,11 +95,42 @@ export function RunPage() {
         <StatCard label="Next attempt" value={run.state === 'pending' ? <RelativeTime iso={run.run_at} /> : <None />} />
       </StatStrip>
       <Request run={run} />
+      {schedule?.on_complete && run.state !== 'skipped' && (
+        <CallbackSection
+          callback={schedule.on_complete}
+          taskId={run.callback_task_id}
+          body={runSummary(run)}
+          waiting="Waiting: it is enqueued when the run succeeds, fails or is cancelled."
+          note={
+            <>
+              The schedule's callback, enqueued into <span className="font-mono">_callbacks</span> each time a run
+              finishes, again after a retry by hand, and delivered with that queue's retries.
+            </>
+          }
+        />
+      )}
       <Section title="Attempts">
         <Attempts run={run} />
       </Section>
     </>
   );
+}
+
+/** A run's callback body as it is (or will be) sent. */
+function runSummary(r: Run) {
+  const finished = r.finished_at !== undefined;
+  return {
+    run_id: r.id,
+    schedule: r.schedule,
+    state: finished ? r.state : '…',
+    trigger: r.trigger,
+    scheduled_for: r.scheduled_for,
+    attempt_count: r.attempt_count,
+    ...(r.last_status !== undefined && { last_status: r.last_status }),
+    ...(r.last_outcome && { last_outcome: r.last_outcome }),
+    ...(r.last_error && { last_error: r.last_error }),
+    finished_at: r.finished_at ?? '…',
+  };
 }
 
 function None() {

@@ -70,6 +70,7 @@ The queue is created with default settings if it doesn't exist.
 	f.Int("max-attempts", 0, "override the queue's max attempts")
 	f.Duration("timeout", 0, "override the queue's response timeout")
 	f.String("group", "", "add the task to this open group (see workly groups)")
+	f.String("on-complete", "", "POST a summary of the task to this URL each time it finishes")
 	cmd.MarkFlagsMutuallyExclusive("delay", "at")
 	return cmd
 }
@@ -94,6 +95,9 @@ func enqueueRequest(cmd *cobra.Command, url string) (client.EnqueueRequest, erro
 	setIf(f.Changed("max-attempts"), &req.MaxAttempts, must(f.GetInt("max-attempts")))
 	setIf(f.Changed("timeout"), &req.TimeoutSeconds, must(f.GetDuration("timeout")).Seconds())
 	setIf(f.Changed("group"), &req.GroupId, must(f.GetString("group")))
+	if f.Changed("on-complete") {
+		req.OnComplete = &client.Callback{Url: must(f.GetString("on-complete"))}
+	}
 	return req, nil
 }
 
@@ -298,6 +302,9 @@ func printTask(w io.Writer, t *client.Task, attempts []client.Attempt) {
 	}
 	if t.GroupId != nil {
 		rows = append(rows, []string{"Group", *t.GroupId})
+	}
+	if t.OnComplete != nil {
+		rows = append(rows, []string{"Callback", callbackRow(t.OnComplete.Url, t.CallbackTaskId)})
 	}
 	if t.LastError != nil {
 		rows = append(rows, []string{"Last error", *t.LastError})

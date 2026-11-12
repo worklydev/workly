@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/worklydev/workly/internal/workspace"
@@ -52,6 +53,9 @@ type ScheduleConfig struct {
 
 	Overlap OverlapPolicy
 	Missed  MissedPolicy
+
+	// OnComplete is enqueued each time a run finishes, except skipped runs.
+	OnComplete *Callback
 }
 
 // DefaultScheduleConfig is the settings a schedule gets for omitted
@@ -159,6 +163,36 @@ type Run struct {
 	// LastDuration is how long the latest finished attempt took.
 	LastDuration *time.Duration
 	RetriedAt    *time.Time
+	// CallbackTaskID is the callback enqueued when the run last finished.
+	CallbackTaskID string
+}
+
+// RunCallbackBody is the body of a schedule's callback.
+type RunCallbackBody struct {
+	RunID        string     `json:"run_id"`
+	Schedule     string     `json:"schedule"`
+	State        RunState   `json:"state"`
+	Trigger      RunTrigger `json:"trigger"`
+	ScheduledFor time.Time  `json:"scheduled_for"`
+	AttemptCount int        `json:"attempt_count"`
+	LastStatus   *int       `json:"last_status,omitempty"`
+	LastOutcome  Outcome    `json:"last_outcome,omitempty"`
+	LastError    string     `json:"last_error,omitempty"`
+	FinishedAt   time.Time  `json:"finished_at"`
+}
+
+// CallbackBody is the JSON body of the callback for r, once r has finished.
+func (r Run) CallbackBody() []byte {
+	b := RunCallbackBody{
+		RunID: r.ID, Schedule: r.Schedule, State: r.State, Trigger: r.Trigger,
+		ScheduledFor: r.ScheduledFor.UTC(), AttemptCount: r.AttemptCount,
+		LastStatus: r.LastStatus, LastOutcome: r.LastOutcome, LastError: r.LastError,
+	}
+	if r.FinishedAt != nil {
+		b.FinishedAt = r.FinishedAt.UTC()
+	}
+	out, _ := json.Marshal(b)
+	return out
 }
 
 // AttemptsSinceReplay is the number of attempts counted against the

@@ -19,13 +19,13 @@ func TestGroups(t *testing.T) {
 	h := newServer(t, server.Options{DisableDispatcher: true}).Handler()
 
 	res := doBody(t, h, "POST", "/v1/groups", "", `{"name": "daily-prices", "idempotency_key": "2026-10-19",
-		"on_complete": {"queue": "callbacks", "url": "https://example.test/done", "headers": {"X-Job": "prices"}}}`)
+		"on_complete": {"url": "https://example.test/done", "headers": {"X-Job": "prices"}}}`)
 	if res.status != 201 || res.json["status"] != "open" || res.json["name"] != "daily-prices" ||
 		res.json["total"] != 0.0 || res.json["remaining"] != 0.0 {
 		t.Fatalf("create = %d %s", res.status, res.body)
 	}
 	cb := res.json["on_complete"].(map[string]any)
-	if cb["queue"] != "callbacks" || cb["url"] != "https://example.test/done" || cb["headers"].(map[string]any)["X-Job"] != "prices" {
+	if _, ok := cb["queue"]; ok || cb["url"] != "https://example.test/done" || cb["headers"].(map[string]any)["X-Job"] != "prices" {
 		t.Fatalf("on_complete = %v", cb)
 	}
 	id := res.json["id"].(string)
@@ -37,9 +37,8 @@ func TestGroups(t *testing.T) {
 	}
 
 	for _, body := range []string{
-		`{"on_complete": {"queue": "Bad Name", "url": "https://example.test"}}`,
-		`{"on_complete": {"queue": "q", "url": "ftp://example.test"}}`,
-		`{"on_complete": {"queue": "q", "url": "https://example.test", "headers": {"Workly-Signature": "x"}}}`,
+		`{"on_complete": {"url": "ftp://example.test"}}`,
+		`{"on_complete": {"url": "https://example.test", "headers": {"Workly-Signature": "x"}}}`,
 		`{"name": "` + strings.Repeat("x", 257) + `"}`,
 	} {
 		if res := doBody(t, h, "POST", "/v1/groups", "", body); res.status != 400 || errorCode(res) != "invalid_request" {
@@ -104,15 +103,12 @@ func TestGroups(t *testing.T) {
 	}
 }
 
-func TestGroupCallbackQueueMustExist(t *testing.T) {
+// Callbacks go to _callbacks, which is created when it's needed, even
+// where queues aren't created automatically.
+func TestGroupCallbackQueue(t *testing.T) {
 	h := newServer(t, server.Options{DisableDispatcher: true, DisableQueueAutoCreate: true}).Handler()
-	res := doBody(t, h, "POST", "/v1/groups", "", `{"on_complete": {"queue": "callbacks", "url": "https://example.test"}}`)
-	if res.status != 404 || errorCode(res) != "queue_not_found" {
-		t.Fatalf("create = %d %s", res.status, res.body)
-	}
-	// _callbacks, the default, is created when it's needed.
-	res = doBody(t, h, "POST", "/v1/groups", "", `{"on_complete": {"url": "https://example.test"}}`)
-	if res.status != 201 || res.json["on_complete"].(map[string]any)["queue"] != "_callbacks" {
+	res := doBody(t, h, "POST", "/v1/groups", "", `{"on_complete": {"url": "https://example.test"}}`)
+	if res.status != 201 {
 		t.Fatalf("create = %d %s", res.status, res.body)
 	}
 	if res := do(t, h, "POST", "/v1/groups/"+res.json["id"].(string)+"/close", ""); res.status != 200 {
@@ -141,12 +137,10 @@ func TestReservedQueues(t *testing.T) {
 		{"POST", "/v1/queues/_new/tasks", task, 400},
 		{"POST", "/v1/queues/_new/tasks:batch", `{"tasks": [` + task + `]}`, 400},
 		{"PUT", "/v1/queues/_new", `{}`, 400},
-		{"POST", "/v1/groups", `{"on_complete": {"queue": "_new", "url": "https://example.test"}}`, 400},
 		{"PUT", "/v1/queues/_callbacks", `{"max_attempts": 10}`, 201},
 		// A queue created before the names were reserved keeps working.
 		{"POST", "/v1/queues/_legacy/tasks", task, 201},
 		{"PUT", "/v1/queues/_legacy", `{}`, 200},
-		{"POST", "/v1/groups", `{"on_complete": {"queue": "_legacy", "url": "https://example.test"}}`, 201},
 	} {
 		res := doBody(t, h, tt.method, tt.path, "", tt.body)
 		if res.status != tt.status || (tt.status == 400 && !strings.Contains(res.body, "_")) {
@@ -193,7 +187,7 @@ func TestGroupEndToEnd(t *testing.T) {
 		return out
 	}
 
-	group := call("POST", "/v1/groups", fmt.Sprintf(`{"name": "prices", "on_complete": {"queue": "callbacks", "url": "%s/_dev/echo"}}`, base))
+	group := call("POST", "/v1/groups", fmt.Sprintf(`{"name": "prices", "on_complete": {"url": "%s/_dev/echo"}}`, base))
 	id := group["id"].(string)
 	for _, status := range []int{200, 200, 400} {
 		call("POST", "/v1/queues/prices/tasks", fmt.Sprintf(`{"url": "%s/_dev/echo?status=%d", "group_id": "%s"}`, base, status, id))

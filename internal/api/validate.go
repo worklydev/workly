@@ -17,9 +17,9 @@ func validateQueueName(name string) error { return validateName("queue", name) }
 
 func validateScheduleName(name string) error { return validateName("schedule", name) }
 
-// CallbackQueue is the queue callbacks go to unless they name one. Only
+// CallbackQueue is the queue every callback goes to. Only
 // Workly enqueues into it.
-const CallbackQueue = "_callbacks"
+const CallbackQueue = store.CallbackQueue
 
 // Reserved reports whether a queue name is reserved for Workly's own queues.
 // Queues with such names that users created before they were reserved keep
@@ -213,6 +213,9 @@ func newTask(queue string, req EnqueueRequest, traceparent string, maxBody int64
 			return nt, invalid("group_id must be a group's ID")
 		}
 		nt.GroupID = *req.GroupId
+	}
+	if nt.OnComplete, err = validateCallback(req.OnComplete, maxBody); err != nil {
+		return nt, err
 	}
 	// Only keep a well-formed traceparent; it's forwarded verbatim.
 	if validHeaderValue(traceparent) && len(traceparent) <= 512 {

@@ -16,19 +16,23 @@ import (
 
 const scheduleColumns = `workspace_id, name, cron, timezone, method, url, headers, body,
 	timeout_ms, max_attempts, min_backoff_ms, max_backoff_ms, backoff_multiplier, retry_on_4xx,
-	overlap, missed, paused, next_run_at, created_at, updated_at, paused_at`
+	overlap, missed, paused, next_run_at, created_at, updated_at, paused_at, callback_url, callback_headers`
 
 func scanSchedule(row interface{ Scan(...any) error }) (store.Schedule, error) {
 	var (
 		sc                               store.Schedule
-		headers                          []byte
+		headers, cbHeaders               []byte
+		cbURL                            sql.NullString
 		timeout, minBackoff, maxBackoff  int64
 		next, created, updated, pausedAt dbTime
 	)
 	err := row.Scan(&sc.WorkspaceID, &sc.Name, &sc.Cron, &sc.Timezone, &sc.Method, &sc.URL, &headers, &sc.Body,
 		&timeout, &sc.MaxAttempts, &minBackoff, &maxBackoff, &sc.BackoffMultiplier, &sc.RetryOn4xx,
-		&sc.Overlap, &sc.Missed, &sc.Paused, &next, &created, &updated, &pausedAt)
+		&sc.Overlap, &sc.Missed, &sc.Paused, &next, &created, &updated, &pausedAt, &cbURL, &cbHeaders)
 	if err != nil {
+		return sc, err
+	}
+	if sc.OnComplete, err = scanCallback(cbURL, cbHeaders); err != nil {
 		return sc, err
 	}
 	if sc.Headers, err = unmarshalHeaders(headers); err != nil {
@@ -52,6 +56,10 @@ func (s *Store) PutSchedule(ctx context.Context, ws workspace.ID, name string, c
 	if cfg.Body == nil {
 		cfg.Body = []byte{}
 	}
+	cbURL, cbHeaders, err := callbackArgs(cfg.OnComplete)
+	if err != nil {
+		return store.Schedule{}, false, err
+	}
 	var (
 		sc      store.Schedule
 		created bool
@@ -67,7 +75,7 @@ func (s *Store) PutSchedule(ctx context.Context, ws workspace.ID, name string, c
 		now := s.ts(time.Now())
 		// A paused schedule stays paused, with no next slot.
 		_, err = s.exec(ctx, tx, `INSERT INTO schedules (`+scheduleColumns+`)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
 			ON CONFLICT (workspace_id, name) DO UPDATE SET
 				cron = excluded.cron, timezone = excluded.timezone, method = excluded.method,
 				url = excluded.url, headers = excluded.headers, body = excluded.body,
@@ -75,11 +83,13 @@ func (s *Store) PutSchedule(ctx context.Context, ws workspace.ID, name string, c
 				min_backoff_ms = excluded.min_backoff_ms, max_backoff_ms = excluded.max_backoff_ms,
 				backoff_multiplier = excluded.backoff_multiplier, retry_on_4xx = excluded.retry_on_4xx,
 				overlap = excluded.overlap, missed = excluded.missed,
+				callback_url = excluded.callback_url, callback_headers = excluded.callback_headers,
 				next_run_at = CASE WHEN schedules.paused THEN NULL ELSE excluded.next_run_at END,
 				updated_at = excluded.updated_at`,
 			ws, name, cfg.Cron, cfg.Timezone, cfg.Method, cfg.URL, headers, cfg.Body,
 			cfg.Timeout.Milliseconds(), cfg.MaxAttempts, cfg.MinBackoff.Milliseconds(), cfg.MaxBackoff.Milliseconds(),
-			cfg.BackoffMultiplier, cfg.RetryOn4xx, cfg.Overlap, cfg.Missed, false, s.ts(nextRunAt), now, now)
+			cfg.BackoffMultiplier, cfg.RetryOn4xx, cfg.Overlap, cfg.Missed, false, s.ts(nextRunAt), now, now,
+			cbURL, cbHeaders)
 		if err != nil {
 			return err
 		}
@@ -291,20 +301,21 @@ func (s *Store) insertRun(ctx context.Context, tx *sql.Tx, sc store.Schedule, tr
 const runColumns = `id, workspace_id, schedule, state, trigger_type, scheduled_for, skip_reason,
 	method, url, headers, body, run_at, attempt_count, replayed_attempts, lease_expires_at,
 	last_status, last_outcome, last_error, created_at, updated_at, finished_at, last_attempt_at, retried_at,
-	started_at, last_duration_ms`
+	started_at, last_duration_ms, callback_task_id`
 
 func scanRun(row interface{ Scan(...any) error }) (store.Run, error) {
 	var (
 		r                                                        store.Run
 		headers                                                  []byte
 		lastStatus, lastDuration                                 sql.NullInt64
-		skipReason, lastOutcome, lastError                       sql.NullString
+		skipReason, lastOutcome, lastError, cbTask               sql.NullString
 		slot, runAt, lease, created, updated, fin, last, retried dbTime
 		started                                                  dbTime
 	)
 	err := row.Scan(&r.ID, &r.WorkspaceID, &r.Schedule, &r.State, &r.Trigger, &slot, &skipReason,
 		&r.Method, &r.URL, &headers, &r.Body, &runAt, &r.AttemptCount, &r.ReplayedAttempts, &lease,
-		&lastStatus, &lastOutcome, &lastError, &created, &updated, &fin, &last, &retried, &started, &lastDuration)
+		&lastStatus, &lastOutcome, &lastError, &created, &updated, &fin, &last, &retried, &started, &lastDuration,
+		&cbTask)
 	if err != nil {
 		return r, err
 	}
@@ -322,6 +333,7 @@ func scanRun(row interface{ Scan(...any) error }) (store.Run, error) {
 	r.ScheduledFor, r.RunAt, r.CreatedAt, r.UpdatedAt = slot.Time, runAt.Time, created.Time, updated.Time
 	r.LeaseExpiresAt, r.FinishedAt, r.LastAttemptAt, r.RetriedAt = lease.ptr(), fin.ptr(), last.ptr(), retried.ptr()
 	r.StartedAt, r.LastDuration = started.ptr(), millis(lastDuration)
+	r.CallbackTaskID = cbTask.String
 	return r, nil
 }
 
@@ -389,7 +401,10 @@ func (s *Store) ListRunAttempts(ctx context.Context, ws workspace.ID, runID stri
 }
 
 func (s *Store) CancelRun(ctx context.Context, ws workspace.ID, id string) (store.Run, error) {
-	var r store.Run
+	var (
+		r        store.Run
+		callback bool
+	)
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
 		now := s.ts(time.Now())
 		// A running run keeps its lease, so its in-flight attempt is still
@@ -403,6 +418,11 @@ func (s *Store) CancelRun(ctx context.Context, ws workspace.ID, id string) (stor
 		if err != nil {
 			return err
 		}
+		if n == 1 {
+			if callback, err = s.runCallback(ctx, tx, ws, id); err != nil {
+				return err
+			}
+		}
 		if r, err = s.getRun(ctx, tx, ws, id); err != nil {
 			return err
 		}
@@ -411,6 +431,9 @@ func (s *Store) CancelRun(ctx context.Context, ws workspace.ID, id string) (stor
 		}
 		return nil
 	})
+	if callback {
+		s.wake()
+	}
 	return r, err
 }
 
@@ -575,7 +598,10 @@ func (s *Store) FinishRunAttempt(ctx context.Context, ws workspace.ID, r store.R
 	if err != nil {
 		return "", err
 	}
-	var state store.RunState
+	var (
+		state    store.RunState
+		callback bool
+	)
 	err = s.inTx(ctx, func(tx *sql.Tx) error {
 		// As for tasks: a late result for a reaped lease is a no-op, and a
 		// run cancelled mid-attempt stays cancelled.
@@ -607,8 +633,18 @@ func (s *Store) FinishRunAttempt(ctx context.Context, ws workspace.ID, r store.R
 			id.New("att"), r.RunID, ws, r.Number, s.ts(r.StartedAt), s.ts(r.FinishedAt),
 			nullInt(r.StatusCode), r.Outcome, nullString(r.Error), nullString(r.ResponseBody), respHeaders,
 			ws, r.RunID)
+		if err != nil {
+			return err
+		}
+		// A run cancelled mid-attempt was called back when it was cancelled.
+		if state == store.RunSucceeded || state == store.RunFailed {
+			callback, err = s.runCallback(ctx, tx, ws, r.RunID)
+		}
 		return err
 	})
+	if callback {
+		s.wake()
+	}
 	return state, err
 }
 
@@ -657,4 +693,30 @@ func (s *Store) AllScheduleStatus(ctx context.Context) ([]store.ScheduleStatus, 
 		out = append(out, st)
 	}
 	return out, rows.Err()
+}
+
+// runCallback enqueues the callback of a run the transaction has just
+// finished, if its schedule has one, and reports whether it did. The
+// schedule's current callback applies, as its current retry policy does.
+func (s *Store) runCallback(ctx context.Context, tx *sql.Tx, ws workspace.ID, runID string) (bool, error) {
+	r, err := s.getRun(ctx, tx, ws, runID)
+	if err != nil {
+		return false, err
+	}
+	if r.FinishedAt == nil || r.State == store.RunSkipped {
+		return false, nil
+	}
+	sc, err := s.getSchedule(ctx, tx, ws, r.Schedule)
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil || sc.OnComplete == nil {
+		return false, err
+	}
+	cbID, err := s.enqueueCallback(ctx, tx, ws, *sc.OnComplete, r.CallbackBody(), finishKey(r.ID, r.AttemptCount, string(r.State), *r.FinishedAt), *r.FinishedAt)
+	if err != nil {
+		return false, err
+	}
+	_, err = s.exec(ctx, tx, `UPDATE runs SET callback_task_id = ? WHERE id = ?`, cbID, r.ID)
+	return err == nil, err
 }

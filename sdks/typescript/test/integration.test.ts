@@ -14,6 +14,7 @@ import {
   NotFoundError,
   SignatureVerificationError,
   type Task,
+  type TaskSummary,
   type TaskSpec,
   verifySignature,
   Workly,
@@ -296,8 +297,25 @@ describe('integration', { skip: server ? false : 'set WORKLY_BIN or install Go' 
     await assert.rejects(workly.alerts.delete(channel.id), NotFoundError);
   });
 
+  test('task callbacks', async () => {
+    let task = await workly.tasks.enqueue(queue, { url: `${url}/_dev/echo`, onComplete: { url: `${url}/_dev/echo` } });
+    assert.deepEqual(task.onComplete, { url: `${url}/_dev/echo` });
+    const deadline = Date.now() + 10_000;
+    while (!(task = await workly.tasks.get(task.id)).callbackTaskId) {
+      if (Date.now() > deadline) assert.fail(`task still ${task.state} after 10s`);
+      await delay(50);
+    }
+    const callback = await waitFinished(task.callbackTaskId!);
+    assert.equal(callback.queue, '_callbacks');
+    const summary = callback.payload as TaskSummary;
+    assert.deepEqual(
+      [summary.task_id, summary.queue, summary.state, summary.attempt_count],
+      [task.id, queue, 'succeeded', 1],
+    );
+  });
+
   test('groups', async () => {
-    let group = await workly.groups.create({ name: 'prices', onComplete: { queue, url: `${url}/_dev/echo` } });
+    let group = await workly.groups.create({ name: 'prices', onComplete: { url: `${url}/_dev/echo` } });
     for (let i = 0; i < 3; i++) {
       const task = await workly.tasks.enqueue(queue, { url: `${url}/_dev/echo`, groupId: group.id });
       assert.equal(task.groupId, group.id);

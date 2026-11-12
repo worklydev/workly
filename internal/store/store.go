@@ -420,6 +420,12 @@ const (
 	TaskCancelled TaskState = "cancelled"
 )
 
+// Finished reports whether a task in this state has finished: succeeded,
+// failed or cancelled.
+func (s TaskState) Finished() bool {
+	return s == TaskSucceeded || s == TaskFailed || s == TaskCancelled
+}
+
 type NewTask struct {
 	Queue   string
 	Method  string
@@ -434,6 +440,8 @@ type NewTask struct {
 	// TraceContext is the W3C traceparent captured at enqueue.
 	TraceContext string
 	GroupID      string
+	// OnComplete is enqueued each time the task finishes.
+	OnComplete *Callback
 }
 
 type Task struct {
@@ -474,6 +482,10 @@ type Task struct {
 	RetriedAt *time.Time
 	// GroupID is the group the task belongs to, if any.
 	GroupID string
+	// OnComplete is enqueued each time the task finishes; CallbackTaskID
+	// is the one enqueued when it last did.
+	OnComplete     *Callback
+	CallbackTaskID string
 }
 
 // EffectiveMaxAttempts applies the queue default.
@@ -591,12 +603,44 @@ const (
 // Finished reports whether the group has completed.
 func (s GroupStatus) Finished() bool { return s == GroupSucceeded || s == GroupFailed }
 
+// CallbackQueue is the queue every callback is enqueued into. Its name is
+// reserved, so only Workly enqueues into it, and callbacks have no
+// callbacks of their own.
+const CallbackQueue = "_callbacks"
+
 // Callback is a task enqueued when something completes: a POST saying what
-// completed. A group's has its summary (GroupSummary) as its JSON body.
+// completed, as JSON: a TaskCallbackBody, RunCallbackBody or GroupSummary.
 type Callback struct {
-	Queue   string
 	URL     string
 	Headers map[string]string
+}
+
+// TaskCallbackBody is the body of a task's callback.
+type TaskCallbackBody struct {
+	TaskID         string    `json:"task_id"`
+	Queue          string    `json:"queue"`
+	State          TaskState `json:"state"`
+	AttemptCount   int       `json:"attempt_count"`
+	LastStatus     *int      `json:"last_status,omitempty"`
+	LastOutcome    Outcome   `json:"last_outcome,omitempty"`
+	LastError      string    `json:"last_error,omitempty"`
+	IdempotencyKey string    `json:"idempotency_key,omitempty"`
+	GroupID        string    `json:"group_id,omitempty"`
+	FinishedAt     time.Time `json:"finished_at"`
+}
+
+// CallbackBody is the JSON body of t's callback, once t has finished.
+func (t Task) CallbackBody() []byte {
+	b := TaskCallbackBody{
+		TaskID: t.ID, Queue: t.Queue, State: t.State, AttemptCount: t.AttemptCount,
+		LastStatus: t.LastStatus, LastOutcome: t.LastOutcome, LastError: t.LastError,
+		IdempotencyKey: t.IdempotencyKey, GroupID: t.GroupID,
+	}
+	if t.FinishedAt != nil {
+		b.FinishedAt = t.FinishedAt.UTC()
+	}
+	out, _ := json.Marshal(b)
+	return out
 }
 
 type NewGroup struct {

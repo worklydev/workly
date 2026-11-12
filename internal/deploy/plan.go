@@ -150,6 +150,7 @@ func scheduleConfig(s api.Schedule) api.ScheduleConfig {
 		RetryOn4xx:        &s.RetryOn4xx,
 		Overlap:           &s.Overlap,
 		Missed:            &s.Missed,
+		OnComplete:        s.OnComplete,
 	}
 }
 
@@ -213,6 +214,12 @@ var scheduleFields = []field[store.ScheduleConfig]{
 	{"retry_on_4xx", func(c store.ScheduleConfig) string { return strconv.FormatBool(c.RetryOn4xx) }},
 	{"overlap", func(c store.ScheduleConfig) string { return string(c.Overlap) }},
 	{"missed", func(c store.ScheduleConfig) string { return string(c.Missed) }},
+	{"on_complete.url", func(c store.ScheduleConfig) string {
+		if c.OnComplete == nil {
+			return "none"
+		}
+		return c.OnComplete.URL
+	}},
 }
 
 func scheduleDiffs(from, to store.ScheduleConfig) []Diff {
@@ -229,6 +236,16 @@ func scheduleDiffs(from, to store.ScheduleConfig) []Diff {
 		if _, ok := from.Headers[name]; !ok {
 			out = append(out, Diff{"headers." + name, "added"})
 		}
+	}
+	var fromCb, toCb map[string]string
+	if from.OnComplete != nil {
+		fromCb = from.OnComplete.Headers
+	}
+	if to.OnComplete != nil {
+		toCb = to.OnComplete.Headers
+	}
+	if !maps.Equal(fromCb, toCb) {
+		out = append(out, Diff{"on_complete.headers", "changed"})
 	}
 	if !sameBody(from.Body, to.Body) {
 		switch {

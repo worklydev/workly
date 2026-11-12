@@ -21,6 +21,7 @@ import { InlineFields } from '../../components/InlineFields';
 import { PageHeader } from '../../components/PageHeader';
 import { ErrorText, Muted } from '../../components/QueryState';
 import { RelativeTime } from '../../components/RelativeTime';
+import { CallbackSection } from '../../components/CallbackSection';
 import { Section } from '../../components/Section';
 import { StatCard, StatStrip } from '../../components/StatCard';
 import { StatusCode, TaskStateBadge } from '../../components/states';
@@ -118,11 +119,42 @@ export function TaskPage() {
         />
       </StatStrip>
       <Request task={task} />
+      {task.on_complete && (
+        <CallbackSection
+          callback={task.on_complete}
+          taskId={task.callback_task_id}
+          body={taskSummary(task)}
+          waiting="Waiting: it is enqueued when the task succeeds, fails or is cancelled."
+          note={
+            <>
+              Enqueued into <span className="font-mono">_callbacks</span> each time the task finishes, again after a
+              retry by hand, and delivered with that queue's retries.
+            </>
+          }
+        />
+      )}
       <Section title="Attempts">
         <Attempts task={task} />
       </Section>
     </>
   );
+}
+
+/** A task's callback body as it is (or will be) sent. */
+function taskSummary(t: Task) {
+  const finished = t.finished_at !== undefined;
+  return {
+    task_id: t.id,
+    queue: t.queue,
+    state: finished ? t.state : '…',
+    attempt_count: t.attempt_count,
+    ...(t.last_status !== undefined && { last_status: t.last_status }),
+    ...(t.last_outcome && { last_outcome: t.last_outcome }),
+    ...(t.last_error && { last_error: t.last_error }),
+    ...(t.idempotency_key && { idempotency_key: t.idempotency_key }),
+    ...(t.group_id && { group_id: t.group_id }),
+    finished_at: t.finished_at ?? '…',
+  };
 }
 
 function None() {

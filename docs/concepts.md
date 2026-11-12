@@ -21,7 +21,7 @@ A **paused** queue keeps accepting tasks but doesn't start deliveries; those alr
 
 ## Tasks
 
-A **task** is one HTTP request Workly owes your endpoint: a URL, a method (`POST` by default), headers, and a body: either `payload`, sent as JSON, or `body` with its own `content_type`. It can wait: `delay_seconds` or `run_at` set when it's first due. It can override its queue's `max_attempts` and `timeout_seconds`.
+A **task** is one HTTP request Workly owes your endpoint: a URL, a method (`POST` by default), headers, and a body: either `payload`, sent as JSON, or `body` with its own `content_type`. It can wait: `delay_seconds` or `run_at` set when it's first due. It can override its queue's `max_attempts` and `timeout_seconds`, and with `on_complete` call you back each time it finishes (see [Callbacks](callbacks.md)).
 
 A task is in one of these states:
 

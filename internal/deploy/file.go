@@ -4,6 +4,7 @@
 package deploy
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -281,7 +282,9 @@ func (p *parser) fields(n *yaml.Node, path string, dst any) (map[string]*yaml.No
 			continue
 		}
 		ptr := reflect.New(v.Field(i).Type())
-		if json.Unmarshal(b, ptr.Interface()) != nil {
+		dec := json.NewDecoder(bytes.NewReader(b))
+		dec.DisallowUnknownFields()
+		if dec.Decode(ptr.Interface()) != nil {
 			p.add(kv[1], field, "must be %s", describe(v.Field(i).Type()))
 			continue
 		}
@@ -308,6 +311,8 @@ func describe(t reflect.Type) string {
 		return "true or false"
 	case reflect.Map:
 		return "a mapping of names to strings"
+	case reflect.Struct:
+		return "a mapping with url and, optionally, headers"
 	}
 	return "a string"
 }

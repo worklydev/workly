@@ -259,7 +259,7 @@ describe('groups', () => {
     failed: 0,
     cancelled: 0,
     remaining: 0,
-    on_complete: { queue: 'jobs', url: 'u', headers: { 'X-Job': 'prices' } },
+    on_complete: { url: 'u', headers: { 'X-Job': 'prices' } },
     callback_task_id: 'task_9',
     created_at: '2026-10-19T10:00:00Z',
   };
@@ -269,26 +269,34 @@ describe('groups', () => {
     const workly = new Workly({ fetch });
     const g = await workly.groups.create({
       name: 'daily-prices',
-      onComplete: { queue: 'jobs', url: 'u', headers: { 'X-Job': 'prices' } },
+      onComplete: { url: 'u', headers: { 'X-Job': 'prices' } },
     });
     assert.equal(g.callbackTaskId, 'task_9');
-    assert.deepEqual(g.onComplete, { queue: 'jobs', url: 'u', headers: { 'X-Job': 'prices' } });
+    assert.deepEqual(g.onComplete, { url: 'u', headers: { 'X-Job': 'prices' } });
     await workly.groups.close(g.id);
     await workly.tasks.enqueue('prices', { url: 'u', groupId: g.id });
     await workly.tasks.listPage({ groupId: g.id });
     assert.deepEqual(sent[0]?.body, {
       name: 'daily-prices',
-      on_complete: { queue: 'jobs', url: 'u', headers: { 'X-Job': 'prices' } },
+      on_complete: { url: 'u', headers: { 'X-Job': 'prices' } },
     });
     assert.equal(`${sent[1]?.method} ${sent[1]?.url.pathname}`, 'POST /v1/groups/grp_1/close');
     assert.deepEqual(sent[2]?.body, { url: 'u', group_id: 'grp_1' });
     assert.equal(sent[3]?.url.search, '?group_id=grp_1');
   });
 
-  test('the callback queue defaults on the server', async () => {
-    const { fetch, sent } = fakeFetch(json(group, 201));
-    await new Workly({ fetch }).groups.create({ onComplete: { url: 'u' } });
-    assert.deepEqual(sent[0]?.body, { on_complete: { url: 'u' } });
+  test('tasks and schedules take a callback too', async () => {
+    const { fetch, sent } = fakeFetch(
+      json({ ...task, on_complete: { url: 'done', headers: { 'X-Job': 'a' } }, callback_task_id: 'task_9' }, 201),
+      json({}, 201),
+    );
+    const workly = new Workly({ fetch });
+    const t = await workly.tasks.enqueue('jobs', { url: 'u', onComplete: { url: 'done', headers: { 'X-Job': 'a' } } });
+    assert.deepEqual(t.onComplete, { url: 'done', headers: { 'X-Job': 'a' } });
+    assert.equal(t.callbackTaskId, 'task_9');
+    await workly.schedules.put('nightly', { cron: '@daily', url: 'u', onComplete: { url: 'done' } });
+    assert.deepEqual(sent[0]?.body, { url: 'u', on_complete: { url: 'done', headers: { 'X-Job': 'a' } } });
+    assert.deepEqual(sent[1]?.body, { cron: '@daily', url: 'u', on_complete: { url: 'done' } });
   });
 
   test('list paginates', async () => {

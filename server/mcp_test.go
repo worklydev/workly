@@ -634,7 +634,7 @@ func TestMCPGroups(t *testing.T) {
 	h := newServer(t, server.Options{Store: st, DisableDispatcher: true, MCP: server.MCPFull}).Handler()
 	c := mcpClient{t: t, h: h}
 
-	res := doBody(t, h, "POST", "/v1/groups", "", `{"name": "prices", "on_complete": {"queue": "callbacks", "url": "https://example.test/done"}}`)
+	res := doBody(t, h, "POST", "/v1/groups", "", `{"name": "prices", "on_complete": {"url": "https://example.test/done"}}`)
 	id := res.json["id"].(string)
 	ok := c.call("enqueue_task", map[string]any{"queue": "prices", "url": "https://example.test/ok", "group_id": id})
 	bad := c.call("enqueue_task", map[string]any{"queue": "prices", "url": "https://example.test/bad", "group_id": id})
@@ -671,7 +671,7 @@ func TestMCPGroups(t *testing.T) {
 	got := c.call("get_group", map[string]any{"id": id})
 	failed := got["failed_tasks"].([]any)
 	if got["group"].(map[string]any)["status"] != "failed" || len(failed) != 1 || failed[0].(map[string]any)["id"] != bad["id"] ||
-		got["callback_task"].(map[string]any)["queue"] != "callbacks" {
+		got["callback_task"].(map[string]any)["queue"] != "_callbacks" {
 		t.Errorf("get_group = %v", got)
 	}
 	if got := c.call("list_tasks", map[string]any{"group_id": id}); len(got["tasks"].([]any)) != 2 {

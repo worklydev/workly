@@ -167,7 +167,7 @@ Runs are delivered with `Workly-Run-Id`, `Workly-Schedule` and `Workly-Scheduled
 
 ## Task groups
 
-A group tracks a set of tasks and enqueues a callback task once it's closed and they've all finished: a `POST` of the group's status and counts. See [Task groups](https://workly.run/docs/groups/). The callback goes to Workly's `_callbacks` queue unless it names a `queue`.
+A group tracks a set of tasks and enqueues a callback task once it's closed and they've all finished: a `POST` of the group's status and counts. See [Task groups](https://workly.run/docs/groups/). Like every callback, it goes to Workly's `_callbacks` queue.
 
 ```ts
 const group = await workly.groups.create({
@@ -192,6 +192,25 @@ for await (const task of workly.tasks.list({ groupId: group.id, state: 'failed' 
 ```
 
 The callback's body is a `GroupSummary`. It arrives as the task's payload, so its fields are snake_case: `group_id`, `status`, `total`, `succeeded`, `failed`, `cancelled`.
+
+## Callbacks
+
+Tasks and schedules take the same `onComplete`: each time the task, or a run of the schedule, succeeds, fails or is cancelled, Workly POSTs a summary of it to the URL. See [Callbacks](https://workly.run/docs/callbacks/).
+
+```ts
+await workly.tasks.enqueue('exports', {
+  url: 'https://api.example.com/jobs/export',
+  payload: { exportId: 42 },
+  onComplete: { url: 'https://api.example.com/jobs/export-done' },
+});
+await workly.schedules.put('nightly-report', {
+  cron: '0 3 * * *',
+  url: 'https://api.example.com/reports/nightly',
+  onComplete: { url: 'https://api.example.com/reports/nightly-done' },
+});
+```
+
+The bodies are a `TaskSummary` (`task_id`, `queue`, `state`, `attempt_count`, `last_status`, `last_error`, `finished_at`, …) and a `RunSummary` (`run_id`, `schedule`, `state`, …), in snake_case as sent.
 
 ## Errors
 

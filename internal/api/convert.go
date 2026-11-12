@@ -60,6 +60,8 @@ func toTask(t store.Task) Task {
 		LastDurationMs: durationMillis(t.LastDuration),
 		RetriedAt:      t.RetriedAt,
 		GroupId:        optional(t.GroupID),
+		OnComplete:     toCallback(t.OnComplete),
+		CallbackTaskId: optional(t.CallbackTaskID),
 	}
 	if t.Timeout != nil {
 		s := seconds(*t.Timeout)

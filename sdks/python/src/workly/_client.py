@@ -216,6 +216,7 @@ class Tasks:
         max_attempts: int | None = None,
         timeout_seconds: float | None = None,
         group_id: str | None = None,
+        on_complete: Callback | r.CallbackDict | None = None,
         traceparent: str | None = None,
     ) -> Task:
         """Enqueue a task to deliver to `url`.
@@ -224,7 +225,8 @@ class Tasks:
         created with default settings if it doesn't exist. If
         `idempotency_key` matches a task already in the queue, that task is
         returned and nothing is enqueued. With `group_id`, the task joins
-        that group, which must be open.
+        that group, which must be open. `on_complete` is called each time the
+        task succeeds, fails or is cancelled, with a `TaskSummary`.
         """
         spec = {
             "url": url,
@@ -239,6 +241,7 @@ class Tasks:
             "max_attempts": max_attempts,
             "timeout_seconds": timeout_seconds,
             "group_id": group_id,
+            "on_complete": on_complete,
         }
         return Task._from_json(self._client._send(r.enqueue(queue, spec, traceparent)))
 
@@ -456,13 +459,15 @@ class Schedules:
         retry_on_4xx: bool | None = None,
         overlap: OverlapPolicy | None = None,
         missed: MissedPolicy | None = None,
+        on_complete: Callback | r.CallbackDict | None = None,
     ) -> Schedule:
         """Create or update a schedule that calls `url` on `cron` (read in `timezone`, default UTC).
 
         Declarative: the schedule ends up with exactly these settings, and
         omitted ones are reset to their defaults. It doesn't change whether
         the schedule is paused. `next_runs` on the result shows when it runs
-        (`next_runs_if_resumed` while it is paused).
+        (`next_runs_if_resumed` while it is paused). `on_complete` is called
+        each time a run succeeds, fails or is cancelled, with a `RunSummary`.
         """
         config = dict(
             cron=cron,
@@ -481,6 +486,7 @@ class Schedules:
             retry_on_4xx=retry_on_4xx,
             overlap=overlap,
             missed=missed,
+            on_complete=on_complete,
         )
         return Schedule._from_json(self._client._send(r.put_schedule(name, config)))
 

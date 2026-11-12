@@ -673,18 +673,21 @@ func (s *Store) CancelPendingTasks(ctx context.Context, ws workspace.ID, queue s
 			return err
 		}
 		now := s.ts(time.Now())
-		var groups map[string]int
-		var err error
-		n, groups, err = s.updateTasks(ctx, tx, `UPDATE tasks SET state = 'cancelled', finished_at = ?, updated_at = ?
+		u, err := s.updateTasks(ctx, tx, `UPDATE tasks SET state = 'cancelled', finished_at = ?, updated_at = ?
 			WHERE workspace_id = ? AND queue = ? AND state = 'pending'`, now, now, ws, queue)
 		if err != nil {
 			return err
 		}
+		n = u.n
 		counts := groupCounts{}
-		for groupID, k := range groups {
+		for groupID, k := range u.groups {
 			counts.move(groupID, store.TaskPending, store.TaskCancelled, k)
 		}
-		callbacks, err = s.applyGroupCounts(ctx, tx, counts)
+		if callbacks, err = s.applyGroupCounts(ctx, tx, counts); err != nil {
+			return err
+		}
+		cb, err := s.taskCallbacks(ctx, tx, u.callbacks)
+		callbacks = callbacks || cb
 		return err
 	})
 	if callbacks {
@@ -693,26 +696,36 @@ func (s *Store) CancelPendingTasks(ctx context.Context, ws workspace.ID, queue s
 	return n, err
 }
 
-// updateTasks runs an UPDATE of tasks and returns how many rows it changed
-// and how many of those belong to each group.
-func (s *Store) updateTasks(ctx context.Context, tx *sql.Tx, query string, args ...any) (int, map[string]int, error) {
-	rows, err := s.query(ctx, tx, query+` RETURNING COALESCE(group_id, '')`, args...)
+// updatedTasks is what an UPDATE of tasks changed: how many rows, how
+// many of those belong to each group, and which have a callback.
+type updatedTasks struct {
+	n         int
+	groups    map[string]int
+	callbacks []string
+}
+
+// updateTasks runs an UPDATE of tasks and reports what it changed.
+func (s *Store) updateTasks(ctx context.Context, tx *sql.Tx, query string, args ...any) (updatedTasks, error) {
+	u := updatedTasks{groups: map[string]int{}}
+	rows, err := s.query(ctx, tx, query+` RETURNING id, COALESCE(group_id, ''), COALESCE(callback_url, '')`, args...)
 	if err != nil {
-		return 0, nil, err
+		return u, err
 	}
 	defer rows.Close()
-	n, groups := 0, map[string]int{}
 	for rows.Next() {
-		var groupID string
-		if err := rows.Scan(&groupID); err != nil {
-			return 0, nil, err
+		var taskID, groupID, cbURL string
+		if err := rows.Scan(&taskID, &groupID, &cbURL); err != nil {
+			return u, err
 		}
-		n++
+		u.n++
 		if groupID != "" {
-			groups[groupID]++
+			u.groups[groupID]++
+		}
+		if cbURL != "" {
+			u.callbacks = append(u.callbacks, taskID)
 		}
 	}
-	return n, groups, rows.Err()
+	return u, rows.Err()
 }
 
 // Tasks
@@ -720,24 +733,29 @@ func (s *Store) updateTasks(ctx context.Context, tx *sql.Tx, query string, args 
 const taskColumns = `id, workspace_id, queue, state, method, url, headers, body, run_at,
 	attempt_count, replayed_attempts, max_attempts, timeout_ms, idempotency_key, trace_context, lease_expires_at,
 	last_status, last_outcome, last_error, created_at, updated_at, finished_at, last_attempt_at, retried_at, group_id,
-	started_at, last_duration_ms`
+	started_at, last_duration_ms, callback_url, callback_headers, callback_task_id`
 
 func scanTask(row interface{ Scan(...any) error }) (store.Task, error) {
 	var (
 		t                                                  store.Task
-		headers                                            []byte
+		headers, cbHeaders                                 []byte
 		maxAttempts, timeoutMS, lastStatus, lastDuration   sql.NullInt64
 		idemKey, traceCtx, lastOutcome, lastError, groupID sql.NullString
+		cbURL, cbTask                                      sql.NullString
 		runAt, lease, created, updated, fin, last, retried dbTime
 		started                                            dbTime
 	)
 	err := row.Scan(&t.ID, &t.WorkspaceID, &t.Queue, &t.State, &t.Method, &t.URL, &headers, &t.Body,
 		&runAt, &t.AttemptCount, &t.ReplayedAttempts, &maxAttempts, &timeoutMS, &idemKey, &traceCtx, &lease,
 		&lastStatus, &lastOutcome, &lastError, &created, &updated, &fin, &last, &retried, &groupID,
-		&started, &lastDuration)
+		&started, &lastDuration, &cbURL, &cbHeaders, &cbTask)
 	if err != nil {
 		return t, err
 	}
+	if t.OnComplete, err = scanCallback(cbURL, cbHeaders); err != nil {
+		return t, err
+	}
+	t.CallbackTaskID = cbTask.String
 	if t.Headers, err = unmarshalHeaders(headers); err != nil {
 		return t, err
 	}
@@ -818,9 +836,9 @@ func (s *Store) CreateTasks(ctx context.Context, ws workspace.ID, nts []store.Ne
 func (s *Store) insertTaskQuery() string {
 	return `INSERT INTO tasks (id, workspace_id, queue, state, method, url,
 			headers, body, run_at, max_attempts, timeout_ms, idempotency_key, trace_context,
-			created_at, updated_at, group_id)
+			created_at, updated_at, group_id, callback_url, callback_headers)
 		SELECT * FROM (VALUES ` + s.values("text", "text", "text", "text", "text", "text",
-		"json", "bytes", "ts", "int", "int", "text", "text", "ts", "ts", "text") + `) AS v
+		"json", "bytes", "ts", "int", "int", "text", "text", "ts", "ts", "text", "text", "json") + `) AS v
 		WHERE EXISTS (SELECT 1 FROM queues q WHERE q.workspace_id = ? AND q.name = ?)
 		ON CONFLICT (workspace_id, queue, idempotency_key) WHERE idempotency_key IS NOT NULL
 		DO NOTHING
@@ -838,11 +856,15 @@ func (s *Store) createTask(ctx context.Context, q querier, ws workspace.ID, nt s
 	if nt.Body == nil {
 		nt.Body = []byte{}
 	}
+	cbURL, cbHeaders, err := callbackArgs(nt.OnComplete)
+	if err != nil {
+		return store.Task{}, false, err
+	}
 	now := s.ts(time.Now())
 	args := []any{id.New("task"), ws, nt.Queue, store.TaskPending, nt.Method, nt.URL, headers, nt.Body,
 		s.ts(nt.RunAt), nullInt(nt.MaxAttempts), nullMillis(nt.Timeout),
 		nullString(nt.IdempotencyKey), nullString(nt.TraceContext), now, now, nullString(nt.GroupID),
-		ws, nt.Queue}
+		cbURL, cbHeaders, ws, nt.Queue}
 	for createdQueue := false; ; createdQueue = true {
 		t, err := scanTask(s.queryRow(ctx, q, s.insertTask, args...))
 		if err == nil {
@@ -1014,24 +1036,31 @@ func (s *Store) CancelTask(ctx context.Context, ws workspace.ID, id string) (sto
 		now := s.ts(time.Now())
 		// A running task keeps its lease, so its in-flight attempt can still
 		// be recorded (see FinishAttempt).
-		n, groups, err := s.updateTasks(ctx, tx, `UPDATE tasks SET state = 'cancelled', finished_at = ?, updated_at = ?
+		u, err := s.updateTasks(ctx, tx, `UPDATE tasks SET state = 'cancelled', finished_at = ?, updated_at = ?
 			WHERE workspace_id = ? AND id = ? AND state IN ('pending', 'running')`, now, now, ws, id)
 		if err != nil {
 			return err
 		}
-		if t, err = s.getTask(ctx, tx, ws, id); err != nil {
-			return err
-		}
-		if n == 0 && t.State != store.TaskCancelled {
-			return store.ErrInvalidState
-		}
 		counts := groupCounts{}
-		for groupID := range groups {
+		for groupID := range u.groups {
 			// Pending and running count alike.
 			counts.move(groupID, store.TaskPending, store.TaskCancelled, 1)
 		}
-		callbacks, err = s.applyGroupCounts(ctx, tx, counts)
-		return err
+		if callbacks, err = s.applyGroupCounts(ctx, tx, counts); err != nil {
+			return err
+		}
+		cb, err := s.taskCallbacks(ctx, tx, u.callbacks)
+		if err != nil {
+			return err
+		}
+		callbacks = callbacks || cb
+		if t, err = s.getTask(ctx, tx, ws, id); err != nil {
+			return err
+		}
+		if u.n == 0 && t.State != store.TaskCancelled {
+			return store.ErrInvalidState
+		}
+		return nil
 	})
 	if callbacks {
 		s.wake()
@@ -1114,14 +1143,13 @@ func (s *Store) RetryFailedTasks(ctx context.Context, ws workspace.ID, queue, la
 			query += ` AND last_error = ?`
 			args = append(args, lastError)
 		}
-		var groups map[string]int
-		var err error
-		n, groups, err = s.updateTasks(ctx, tx, query, args...)
+		u, err := s.updateTasks(ctx, tx, query, args...)
 		if err != nil {
 			return err
 		}
+		n = u.n
 		counts := groupCounts{}
-		for groupID, k := range groups {
+		for groupID, k := range u.groups {
 			counts.move(groupID, store.TaskFailed, store.TaskPending, k)
 		}
 		_, err = s.applyGroupCounts(ctx, tx, counts)
@@ -1235,6 +1263,7 @@ func (s *Store) FinishAttempts(ctx context.Context, rs []store.FinishedAttempt) 
 	var callbacks bool
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
 		counts := groupCounts{}
+		var withCallback []string
 		for lo := 0; lo < len(rows); lo += finishChunk {
 			chunk := rows[lo:min(lo+finishChunk, len(rows))]
 			var args []any
@@ -1253,23 +1282,26 @@ func (s *Store) FinishAttempts(ctx context.Context, rs []store.FinishedAttempt) 
 				FROM (VALUES `+repeatRows(updateCols, len(chunk))+`) AS v
 				WHERE tasks.workspace_id = v.column1 AND tasks.id = v.column2
 					AND tasks.lease_expires_at IS NOT NULL AND tasks.attempt_count = v.column3
-				RETURNING tasks.id, tasks.state, COALESCE(tasks.group_id, '')`, args...)
+				RETURNING tasks.id, tasks.state, COALESCE(tasks.group_id, ''), COALESCE(tasks.callback_url, '')`, args...)
 			if err != nil {
 				return err
 			}
 			states := map[string]store.TaskState{}
 			for res.Next() {
-				var taskID, groupID string
+				var taskID, groupID, cbURL string
 				var state store.TaskState
-				if err := res.Scan(&taskID, &state, &groupID); err != nil {
+				if err := res.Scan(&taskID, &state, &groupID, &cbURL); err != nil {
 					res.Close()
 					return err
 				}
 				states[taskID] = state
 				// The task was running; cancelled means it was cancelled
-				// mid-attempt and already counted as such.
+				// mid-attempt and already counted (and called back) as such.
 				if state != store.TaskCancelled {
 					counts.move(groupID, store.TaskRunning, state, 1)
+					if cbURL != "" && state.Finished() {
+						withCallback = append(withCallback, taskID)
+					}
 				}
 			}
 			if err := res.Close(); err != nil {
@@ -1310,7 +1342,11 @@ func (s *Store) FinishAttempts(ctx context.Context, rs []store.FinishedAttempt) 
 			}
 		}
 		var err error
-		callbacks, err = s.applyGroupCounts(ctx, tx, counts)
+		if callbacks, err = s.applyGroupCounts(ctx, tx, counts); err != nil {
+			return err
+		}
+		cb, err := s.taskCallbacks(ctx, tx, withCallback)
+		callbacks = callbacks || cb
 		return err
 	})
 	if err != nil {

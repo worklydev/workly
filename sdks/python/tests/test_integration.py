@@ -321,9 +321,29 @@ def test_alert_channels(client: workly.Workly) -> None:
         client.alerts.delete(channel.id)
 
 
+def test_task_callbacks(client: workly.Workly, server_url: str, queue: str) -> None:
+    on_complete = workly.Callback(url=f"{server_url}/_dev/echo", headers={"X-Job": "a"})
+    task = client.tasks.enqueue(queue, url=f"{server_url}/_dev/echo", on_complete=on_complete)
+    assert task.on_complete == on_complete
+    deadline = time.monotonic() + 10
+    while (task := client.tasks.get(task.id)).callback_task_id is None:
+        if time.monotonic() > deadline:
+            pytest.fail(f"task still {task.state} after 10s")
+        time.sleep(0.05)
+    callback = wait_finished(client, task.callback_task_id)
+    assert callback.queue == "_callbacks"
+    summary = callback.payload
+    assert (summary["task_id"], summary["queue"], summary["state"], summary["attempt_count"]) == (
+        task.id,
+        queue,
+        "succeeded",
+        1,
+    )
+
+
 def test_groups(client: workly.Workly, server_url: str, queue: str) -> None:
     group = client.groups.create(
-        name="prices", on_complete=workly.Callback(url=f"{server_url}/_dev/echo", queue=queue)
+        name="prices", on_complete=workly.Callback(url=f"{server_url}/_dev/echo")
     )
     tasks = [
         client.tasks.enqueue(queue, url=f"{server_url}/_dev/echo", group_id=group.id)
