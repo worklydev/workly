@@ -22,8 +22,13 @@ export function PendingCard({
       className={className}
       label="Pending"
       value={formatCount(pending)}
-      // The split only means something once there's a backlog; a 0 says the rest.
-      detail={pending > 0 ? `${formatCount(due)} now · ${formatCount(scheduled)} scheduled` : undefined}
+      // Only the parts there are: "6 scheduled" says the backlog is all for
+      // later without a "0 now" beside it, and keeps the line from wrapping.
+      detail={
+        [due > 0 && `${formatCount(due)} now`, scheduled > 0 && `${formatCount(scheduled)} scheduled`]
+          .filter(Boolean)
+          .join(' · ') || undefined
+      }
       to={pending > 0 ? to : undefined}
       title="Tasks not run yet: due now, or scheduled for later (including ones waiting to retry)"
     />
