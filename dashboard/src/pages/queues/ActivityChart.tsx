@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { getActivityOptions } from '../../api/@tanstack/react-query.gen';
-import type { Activity, ActivityBucket } from '../../api';
+import type { Activity } from '../../api';
+import { ChartAxis, ChartEmpty, ChartFrame, ChartSkeleton } from '../../components/Chart';
+import { useActivity } from '../../hooks/useActivity';
+import { axisTicks, BARS, countFor, OTHER, RANGE_SECONDS, span, sum, type Series } from '../../lib/activity';
 import { ErrorText } from '../../components/QueryState';
 import { RangeTabs } from '../../components/RangeTabs';
 import { useSetting } from '../../context';
@@ -9,28 +10,22 @@ import { useRange } from '../../hooks/useRange';
 import { formatCount } from '../../lib/format';
 import { cn } from 'cn';
 
-type Range = Activity['range'];
-
-/** The busiest queues get a color each; the rest share one. */
-const COLORS = ['bg-chart-1', 'bg-chart-2', 'bg-chart-3', 'bg-chart-4', 'bg-chart-5'];
-const OTHER = 'other';
-
 /** Tasks created over time, stacked by queue: which queues drive the load, and when. */
 export function ActivityChart() {
-  const { value: range, per } = useRange();
-  const { data, error } = useQuery({ ...getActivityOptions({ query: { range } }), refetchInterval: 15_000 });
+  const { value: range, per, setRange } = useRange();
+  const { data, error, series } = useActivity();
   const [hovered, setHovered] = useState<number>();
   const [focus, setFocus] = useState<string>();
   const setting = useSetting();
-
-  const series = data ? toSeries(data.buckets) : undefined;
+  const deleted = data?.retention_seconds !== undefined && data.retention_seconds < RANGE_SECONDS[range];
+  const ticks = data && axisTicks(data);
 
   return (
     <section className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-4">
         <h3 className="font-medium">
           Tasks created
-          {series && (
+          {series && series.total > 0 && (
             <span className="text-xs font-normal text-faint">
               {' '}
               · {formatCount(series.total)} in the last {range}, per {per}
@@ -41,16 +36,34 @@ export function ActivityChart() {
       </div>
       {error ? (
         <ErrorText error={error} />
-      ) : !data || !series ? (
-        <div className="h-36" />
+      ) : !data || !series || !ticks ? (
+        <>
+          <div className="h-5" />
+          <ChartSkeleton bars={BARS[range]} />
+          <ChartAxis ticks={['', '', '']} />
+          <div className="h-4" />
+        </>
+      ) : series.total === 0 ? (
+        <>
+          <div className="h-5" />
+          <ChartEmpty
+            bars={data.buckets.length}
+            title={`No tasks created in the last ${range}`}
+            hint={
+              deleted
+                ? `Finished tasks are deleted after ${Math.round(data.retention_seconds! / 3600)}h${setting('WORKLY_RETENTION')}, so older ones aren't counted.`
+                : 'Tasks you enqueue show up here, stacked by queue.'
+            }
+            action={range === '7d' ? undefined : { label: 'Show the last 7 days', onClick: () => setRange('7d') }}
+          />
+          <ChartAxis ticks={ticks} />
+          <div className="h-4" />
+        </>
       ) : (
         <>
           <Detail data={data} series={series} index={hovered} per={per} />
           {/* The dashed top line is the scale Detail labels. */}
-          <div
-            className="flex h-28 items-end gap-px border-t border-b border-border border-t-transparent bg-[linear-gradient(to_right,var(--border)_50%,transparent_0)] bg-size-[6px_1px] bg-top bg-repeat-x"
-            onMouseLeave={() => setHovered(undefined)}
-          >
+          <ChartFrame onMouseLeave={() => setHovered(undefined)}>
             {data.buckets.map((b, i) => {
               const total = sum(b.counts);
               return (
@@ -86,12 +99,8 @@ export function ActivityChart() {
                 </div>
               );
             })}
-          </div>
-          <div className="flex justify-between font-mono text-xs text-faint">
-            <span>{tick(data.buckets[0].start, range)}</span>
-            <span>{tick(data.buckets[Math.floor(data.buckets.length / 2)].start, range)}</span>
-            <span>now</span>
-          </div>
+          </ChartFrame>
+          <ChartAxis ticks={ticks} />
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs" onMouseLeave={() => setFocus(undefined)}>
             {series.keys.map((key) => (
               <span
@@ -107,10 +116,10 @@ export function ActivityChart() {
               </span>
             ))}
           </div>
-          {data.retention_seconds !== undefined && data.retention_seconds < RANGE_SECONDS[range] && (
+          {deleted && (
             <p className="text-xs text-faint">
-              Finished tasks are deleted after {Math.round(data.retention_seconds / 3600)}h{setting('WORKLY_RETENTION')}
-              , so older bars count only what's left.
+              Finished tasks are deleted after {Math.round(data.retention_seconds! / 3600)}h
+              {setting('WORKLY_RETENTION')}, so older bars count only what's left.
             </p>
           )}
         </>
@@ -119,53 +128,12 @@ export function ActivityChart() {
   );
 }
 
-const RANGE_SECONDS: Record<Range, number> = { '1h': 3600, '24h': 86_400, '7d': 7 * 86_400 };
-
-type Series = {
-  /** The top queues by total, then OTHER if there are more. */
-  keys: string[];
-  color: Record<string, string>;
-  totals: Record<string, number>;
-  total: number;
-  /** The top of the chart: the tallest bar rounded up to 1, 2 or 5 × 10ⁿ, and at least 5, so a few tasks don't read as a spike. */
-  scale: number;
-};
-
-function toSeries(buckets: ActivityBucket[]): Series {
-  const totals: Record<string, number> = {};
-  for (const b of buckets) for (const [q, n] of Object.entries(b.counts)) totals[q] = (totals[q] ?? 0) + n;
-  const ranked = Object.keys(totals).sort((a, b) => totals[b] - totals[a] || a.localeCompare(b));
-  const top = ranked.length > COLORS.length ? ranked.slice(0, COLORS.length - 1) : ranked;
-  const keys = ranked.length > top.length ? [...top, OTHER] : top;
-  const color: Record<string, string> = {};
-  top.forEach((q, i) => (color[q] = COLORS[i]));
-  if (keys.includes(OTHER)) {
-    color[OTHER] = 'bg-chart-other';
-    totals[OTHER] = ranked.slice(top.length).reduce((n, q) => n + totals[q], 0);
-  }
-  const total = ranked.reduce((n, q) => n + totals[q], 0);
-  return { keys, color, totals, total, scale: niceCeil(Math.max(5, ...buckets.map((b) => sum(b.counts)))) };
-}
-
-/** 1, 2 or 5 × 10ⁿ, the first at or above n. */
-function niceCeil(n: number): number {
-  const p = 10 ** Math.floor(Math.log10(n));
-  return ([1, 2, 5, 10].find((m) => m * p >= n) ?? 10) * p;
-}
-
-function countFor(b: ActivityBucket, key: string, keys: string[]): number {
-  if (key !== OTHER) return b.counts[key] ?? 0;
-  return Object.entries(b.counts).reduce((n, [q, c]) => (keys.includes(q) ? n : n + c), 0);
-}
-
-const sum = (counts: Record<string, number>) => Object.values(counts).reduce((a, b) => a + b, 0);
-
 /** The hovered bar's time and counts, or the scale, labelling the dashed line at the chart's top. */
 function Detail({ data, series, index, per }: { data: Activity; series: Series; index?: number; per: string }) {
   if (index === undefined) {
     return (
       <div className="flex h-5 items-end justify-between text-xs text-faint">
-        <span>{series.total === 0 && 'No tasks created in this range.'}</span>
+        <span />
         <span className="font-mono tabular-nums">
           {formatCount(series.scale)} per {per}
         </span>
@@ -190,17 +158,4 @@ function Detail({ data, series, index, per }: { data: Activity; series: Series; 
       })}
     </div>
   );
-}
-
-const time = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' });
-const dayTime = new Intl.DateTimeFormat(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' });
-
-// Beyond an hour the axis spans two days or more, so its times need the day.
-function tick(iso: string, range: Range) {
-  return (range === '1h' ? time : dayTime).format(new Date(iso));
-}
-
-function span(start: Date, end: Date, range: Range) {
-  const f = range === '1h' ? time : dayTime;
-  return `${f.format(start)}–${time.format(end)}`;
 }

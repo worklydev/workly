@@ -1,27 +1,19 @@
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bell, RotateCcw } from 'lucide-react';
 import { Link, useNavigate } from 'react-router';
-import {
-  getQueueFailuresOptions,
-  listAlertChannelsOptions,
-  listQueuesOptions,
-  listRunsOptions,
-  retryFailedTasksMutation,
-} from '../api/@tanstack/react-query.gen';
-import type { FailureGroup, Run } from '../api';
+import { listAlertChannelsOptions, retryFailedTasksMutation } from '../api/@tanstack/react-query.gen';
 import { ListPager } from '../components/ListControls';
 import { PageHeader } from '../components/PageHeader';
 import { ErrorText, Muted } from '../components/QueryState';
 import { RelativeTime } from '../components/RelativeTime';
 import { Section } from '../components/Section';
 import { usePage } from '../hooks/usePage';
-import { errorMessage, LIVE } from '../lib/api';
+import { errorMessage } from '../lib/api';
+import { useQueueFailureGroups, useRunFailureGroups, type QueueFailureGroup } from '../hooks/useFailureGroups';
 import { formatCount, shortId } from '../lib/format';
 import { useFromHere } from '../lib/from';
 import { Button } from '../primitives/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../primitives/table';
-
-type Group = FailureGroup & { queue: string };
 
 /**
  * What's broken, and how badly: failed tasks in every queue and failed runs
@@ -30,10 +22,7 @@ type Group = FailureGroup & { queue: string };
 export function FailuresPage() {
   return (
     <>
-      <PageHeader
-        title="Failures"
-        description="Failed tasks and schedule runs, grouped by the error they ended with. Fix the cause, then retry them."
-      >
+      <PageHeader title="Failures" description="Everything that failed, grouped by error.">
         <AlertsLink />
       </PageHeader>
       <QueueFailures />
@@ -43,25 +32,14 @@ export function FailuresPage() {
 }
 
 function QueueFailures() {
-  const queues = useQuery({ ...listQueuesOptions(), ...LIVE });
-  const failing = (queues.data?.queues ?? []).filter((q) => (q.stats?.failed ?? 0) > 0);
-  const failures = useQueries({
-    queries: failing.map((q) => ({
-      ...getQueueFailuresOptions({ path: { queue: q.name }, query: { limit: 50 } }),
-      refetchInterval: 15_000,
-    })),
-  });
-  const groups: Group[] = failures
-    .flatMap((f, i) => (f.data?.groups ?? []).map((g) => ({ ...g, queue: failing[i].name })))
-    .sort((a, b) => b.count - a.count || Date.parse(b.last_failed_at) - Date.parse(a.last_failed_at));
+  const { groups, error, isPending } = useQueueFailureGroups();
   const list = usePage(groups);
-  const error = queues.error ?? failures.find((f) => f.error)?.error;
 
   return (
     <Section title="Queues">
       {error ? (
         <ErrorText error={error} />
-      ) : queues.isPending || failures.some((f) => f.isPending) ? (
+      ) : isPending ? (
         <Muted>Loading…</Muted>
       ) : groups.length === 0 ? (
         <Muted>No failed tasks in any queue.</Muted>
@@ -93,33 +71,9 @@ function QueueFailures() {
   );
 }
 
-/** How many of the latest failed runs are grouped; if there are more, counts show as "12+". */
-const RUN_LIMIT = 200;
-
-type RunGroup = { schedule: string; error: string; count: number; more: boolean; latest: Run };
-
-/**
- * Failed runs of every schedule, grouped like the queues' failures. The API
- * has no failure summary for schedules, so this groups the latest failed
- * runs here.
- */
 function ScheduleFailures() {
   const from = useFromHere();
-  const runs = useQuery({
-    ...listRunsOptions({ query: { state: 'failed', limit: RUN_LIMIT } }),
-    refetchInterval: 15_000,
-  });
-  const byKey = new Map<string, RunGroup>();
-  // Newest first, so the first run of each group is its latest.
-  for (const run of runs.data?.runs ?? []) {
-    const error = run.last_error ?? '';
-    const key = `${run.schedule}\n${error}`;
-    const g = byKey.get(key);
-    if (g) g.count++;
-    else byKey.set(key, { schedule: run.schedule, error, count: 1, more: false, latest: run });
-  }
-  if (runs.data?.next_cursor) byKey.forEach((g) => (g.more = true));
-  const groups = [...byKey.values()].sort((a, b) => b.count - a.count || lastFailed(b) - lastFailed(a));
+  const { groups, runs } = useRunFailureGroups();
   const list = usePage(groups);
 
   return (
@@ -185,8 +139,6 @@ function ScheduleFailures() {
   );
 }
 
-const lastFailed = (g: RunGroup) => Date.parse(g.latest.finished_at ?? g.latest.updated_at);
-
 /** Where failures are announced, or a nudge to set that up. */
 function AlertsLink() {
   const navigate = useNavigate();
@@ -200,7 +152,7 @@ function AlertsLink() {
   );
 }
 
-function GroupRow({ group: g }: { group: Group }) {
+function GroupRow({ group: g }: { group: QueueFailureGroup }) {
   const qc = useQueryClient();
   const from = useFromHere();
   const retry = useMutation({ ...retryFailedTasksMutation(), onSuccess: () => qc.invalidateQueries() });

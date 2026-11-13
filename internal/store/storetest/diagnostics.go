@@ -212,6 +212,43 @@ func testTaskActivity(t *testing.T, open func() store.Store) {
 	}
 }
 
+func testFinishedActivity(t *testing.T, open func() store.Store) {
+	s := seeded(t, open)
+	ctx := t.Context()
+	start := now().Add(-time.Second)
+
+	for range 3 {
+		attempt(t, s, mustCreate(t, s, workspace.Default, store.NewTask{Queue: "emails"}), store.TaskSucceeded)
+	}
+	attempt(t, s, mustCreate(t, s, workspace.Default, store.NewTask{Queue: "billing"}), store.TaskSucceeded)
+	attempt(t, s, mustCreate(t, s, workspace.Default, store.NewTask{Queue: "billing"}), store.TaskFailed)
+	// Not finished, cancelled, or another workspace's: none count.
+	cancelled := mustCreate(t, s, workspace.Default, store.NewTask{Queue: "emails", RunAt: now().Add(time.Hour)})
+	if _, err := s.CancelTask(ctx, workspace.Default, cancelled.ID); err != nil {
+		t.Fatalf("CancelTask: %v", err)
+	}
+	mustCreate(t, s, workspace.Default, store.NewTask{Queue: "emails", RunAt: now().Add(time.Hour)})
+	attempt(t, s, mustCreate(t, s, otherWorkspace, store.NewTask{Queue: "emails"}), store.TaskFailed)
+
+	day := 24 * time.Hour
+	got, err := s.FinishedActivity(ctx, workspace.Default, start, day)
+	if err != nil {
+		t.Fatalf("FinishedActivity: %v", err)
+	}
+	bucket := now().Truncate(day)
+	want := []store.FinishedCount{
+		{State: store.TaskFailed, Start: bucket, Count: 1},
+		{State: store.TaskSucceeded, Start: bucket, Count: 4},
+	}
+	// A test running across midnight UTC may split them; that's rare enough to ignore.
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("FinishedActivity = %+v, want %+v", got, want)
+	}
+	if got, err := s.FinishedActivity(ctx, workspace.Default, now().Add(time.Minute), day); err != nil || len(got) != 0 {
+		t.Fatalf("FinishedActivity since the future = %+v, %v; want none", got, err)
+	}
+}
+
 func testQueueFailures(t *testing.T, open func() store.Store) {
 	s := seeded(t, open)
 	ctx := t.Context()

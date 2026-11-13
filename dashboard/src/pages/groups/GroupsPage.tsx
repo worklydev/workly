@@ -31,10 +31,7 @@ export function GroupsPage() {
 
   return (
     <>
-      <PageHeader
-        title="Groups"
-        description="Sets of tasks tracked together. Once a group is closed and all its tasks have finished, it enqueues its callback."
-      />
+      <PageHeader title="Groups" description="Batches of tasks, with a callback when they're all done." />
       <Tabs
         value={status}
         onValueChange={(value) => {

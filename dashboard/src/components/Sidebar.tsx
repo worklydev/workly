@@ -66,7 +66,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <>
       <Link
-        to="/"
+        to="/home"
         onClick={onNavigate}
         className="flex h-14 shrink-0 items-center gap-1.5 px-4 font-mono tracking-[-0.02em]"
       >

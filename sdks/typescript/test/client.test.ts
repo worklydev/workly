@@ -430,14 +430,14 @@ describe('task activity', () => {
     const activity = {
       range: '1h',
       bucket_seconds: 300,
-      buckets: [{ start: '2030-01-01T00:00:00Z', counts: { q: 2 } }],
+      buckets: [{ start: '2030-01-01T00:00:00Z', counts: { q: 2 }, succeeded: 1, failed: 0 }],
     };
     const { fetch, sent } = fakeFetch(json(activity), json(activity));
     const workly = new Workly({ fetch });
     assert.deepEqual(await workly.tasks.activity({ range: '1h' }), {
       range: '1h',
       bucketSeconds: 300,
-      buckets: [{ start: '2030-01-01T00:00:00Z', counts: { q: 2 } }],
+      buckets: [{ start: '2030-01-01T00:00:00Z', counts: { q: 2 }, succeeded: 1, failed: 0 }],
     });
     await workly.tasks.activity();
     assert.equal(`${sent[0]?.url.pathname}${sent[0]?.url.search}`, '/v1/activity?range=1h');
@@ -457,6 +457,23 @@ describe('cron preview', () => {
     assert.equal(sent[0]?.url.pathname, '/v1/cron/preview');
     assert.equal(sent[0]?.url.searchParams.get('cron'), '0 3 * * *');
     assert.equal(sent[0]?.url.searchParams.get('timezone'), 'UTC');
+  });
+
+  test('previewCron with a window', async () => {
+    const preview = {
+      next_runs: ['2030-01-07T03:00:00Z'],
+      interval_seconds: 86400,
+      spans: [{ start: '2030-01-07T03:00:00Z', every_seconds: 86400, count: 7 }],
+    };
+    const { fetch, sent } = fakeFetch(json(preview));
+    const workly = new Workly({ fetch });
+    const got = await workly.schedules.previewCron('0 3 * * *', {
+      from: new Date('2030-01-07T00:00:00Z'),
+      until: '2030-01-14T00:00:00Z',
+    });
+    assert.deepEqual(got.spans, [{ start: '2030-01-07T03:00:00Z', everySeconds: 86400, count: 7 }]);
+    assert.equal(sent[0]?.url.searchParams.get('from'), '2030-01-07T00:00:00.000Z');
+    assert.equal(sent[0]?.url.searchParams.get('until'), '2030-01-14T00:00:00Z');
   });
 });
 

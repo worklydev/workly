@@ -1,5 +1,5 @@
 import type { RequestOptions, Workly } from './client.ts';
-import { seg } from './util.ts';
+import { seg, timestamp } from './util.ts';
 import type { Attempt, CronPreview, Delivery, Run, RunPage, RunState, Schedule, ScheduleConfig } from './types.ts';
 
 export interface RunsOptions extends RequestOptions {
@@ -88,15 +88,27 @@ export class Schedules {
     return this.#post(name, 'resume', options, true);
   }
 
-  /** The next 5 times a schedule with this cron and timezone (default UTC) would run, without creating it. */
+  /**
+   * The next 5 times a schedule with this cron and timezone (default UTC) would run, without creating it.
+   * With `from` and `until` (at most 35 days apart), `spans` lists every run in that window.
+   */
   async previewCron(
     cron: string,
-    options: RequestOptions & { timezone?: string | undefined } = {},
+    options: RequestOptions & {
+      timezone?: string | undefined;
+      from?: Date | string | undefined;
+      until?: Date | string | undefined;
+    } = {},
   ): Promise<CronPreview> {
     return this.#client.send({
       method: 'GET',
       path: '/v1/cron/preview',
-      query: { cron, timezone: options.timezone },
+      query: {
+        cron,
+        timezone: options.timezone,
+        from: timestamp(options.from, 'from'),
+        until: timestamp(options.until, 'until'),
+      },
       idempotent: true,
       signal: options.signal,
     });

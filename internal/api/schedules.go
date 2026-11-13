@@ -471,5 +471,42 @@ func (h Handlers) PreviewCron(ctx context.Context, req PreviewCronRequestObject)
 		out.NextRuns = append(out.NextRuns, t.UTC())
 	}
 	out.IntervalSeconds = int(shortestInterval(c, loc, now).Seconds())
+
+	from, until := req.Params.From, req.Params.Until
+	if (from == nil) != (until == nil) {
+		return nil, invalid("from and until go together")
+	}
+	if from != nil {
+		if !until.After(*from) || until.Sub(*from) > maxPreviewWindow {
+			return nil, invalid("until must be after from, and at most 35 days later")
+		}
+		spans := cronSpans(c, loc, *from, *until)
+		out.Spans = &spans
+	}
 	return out, nil
+}
+
+// maxPreviewWindow bounds the runs a preview lists: 35 days of a schedule
+// running every minute is about 50,000 of them to step through.
+const maxPreviewWindow = 35 * 24 * time.Hour
+
+// cronSpans lists the runs in [from, until) as runs at a fixed interval:
+// each run extends the current span if it comes one interval after its last.
+func cronSpans(c cron.Schedule, loc *time.Location, from, until time.Time) []CronSpan {
+	spans := []CronSpan{}
+	var last time.Time
+	for t := c.Next(from.Add(-time.Nanosecond), loc); !t.IsZero() && t.Before(until); t = c.Next(t, loc) {
+		n := len(spans)
+		switch {
+		case n > 0 && spans[n-1].Count == 1:
+			spans[n-1].EverySeconds = int(t.Sub(last).Seconds())
+			spans[n-1].Count = 2
+		case n > 0 && int(t.Sub(last).Seconds()) == spans[n-1].EverySeconds:
+			spans[n-1].Count++
+		default:
+			spans = append(spans, CronSpan{Start: t.UTC(), Count: 1})
+		}
+		last = t
+	}
+	return spans
 }

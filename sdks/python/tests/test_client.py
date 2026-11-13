@@ -387,7 +387,14 @@ def test_tasks_activity() -> None:
             json={
                 "range": "1h",
                 "bucket_seconds": 300,
-                "buckets": [{"start": "2026-09-20T10:00:00Z", "counts": {"emails": 3}}],
+                "buckets": [
+                    {
+                        "start": "2026-09-20T10:00:00Z",
+                        "counts": {"emails": 3},
+                        "succeeded": 2,
+                        "failed": 1,
+                    }
+                ],
             },
         )
     )
@@ -398,6 +405,7 @@ def test_tasks_activity() -> None:
         {"emails": 3},
         None,
     )
+    assert (a.buckets[0].succeeded, a.buckets[0].failed) == (2, 1)
 
 
 def test_preview_cron() -> None:
@@ -407,7 +415,33 @@ def test_preview_cron() -> None:
     p = client(handler).schedules.preview_cron("0 3 * * *", timezone="Europe/Stockholm")
     assert requests[0].url.path == "/v1/cron/preview"
     assert dict(requests[0].url.params) == {"cron": "0 3 * * *", "timezone": "Europe/Stockholm"}
-    assert (len(p.next_runs), p.interval_seconds) == (1, 86400)
+    assert (len(p.next_runs), p.interval_seconds, p.spans) == (1, 86400, None)
+
+
+def test_preview_cron_window() -> None:
+    span = {"start": "2030-01-07T03:00:00Z", "every_seconds": 86400, "count": 7}
+    requests, handler = recorder(
+        httpx.Response(
+            200,
+            json={
+                "next_runs": ["2030-01-07T03:00:00Z"],
+                "interval_seconds": 86400,
+                "spans": [span],
+            },
+        )
+    )
+    p = client(handler).schedules.preview_cron(
+        "0 3 * * *",
+        from_=datetime(2030, 1, 7, tzinfo=UTC),
+        until=datetime(2030, 1, 14, tzinfo=UTC),
+    )
+    assert dict(requests[0].url.params) == {
+        "cron": "0 3 * * *",
+        "from": "2030-01-07T00:00:00+00:00",
+        "until": "2030-01-14T00:00:00+00:00",
+    }
+    assert p.spans is not None
+    assert (p.spans[0].every_seconds, p.spans[0].count) == (86400, 7)
 
 
 SCHEDULE: dict[str, Any] = {

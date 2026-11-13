@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"time"
+
+	"github.com/worklydev/workly/internal/store"
 )
 
 // activityRanges are the ranges GET /v1/activity offers, and their buckets.
@@ -42,6 +44,22 @@ func (h Handlers) GetActivity(ctx context.Context, req GetActivityRequestObject)
 	for _, c := range counts {
 		if i := int(c.Start.Sub(first) / spec.bucket); i >= 0 && i < n {
 			out.Buckets[i].Counts[c.Queue] += c.Count
+		}
+	}
+	finished, err := h.Store.FinishedActivity(ctx, workspaceID(ctx), first, spec.bucket)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range finished {
+		i := int(c.Start.Sub(first) / spec.bucket)
+		if i < 0 || i >= n {
+			continue
+		}
+		switch c.State {
+		case store.TaskSucceeded:
+			out.Buckets[i].Succeeded += c.Count
+		case store.TaskFailed:
+			out.Buckets[i].Failed += c.Count
 		}
 	}
 	out.RetentionSeconds = h.retentionSeconds(ctx)

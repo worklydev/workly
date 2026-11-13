@@ -163,10 +163,11 @@ export const getQueueActivity = <ThrowOnError extends boolean = false>(options: 
 });
 
 /**
- * Count created tasks over time, by queue
+ * Count tasks created and finished over time
  *
  * Counts the workspace's tasks created in each bucket of the range, per
- * queue, oldest bucket first; every bucket is listed, empty ones too.
+ * queue, and the tasks that finished in it, by final state; oldest
+ * bucket first, and every bucket is listed, empty ones too.
  * Buckets are 5 minutes for `1h`, 1 hour for `24h` and 6 hours for `7d`,
  * aligned to UTC. Finished tasks are deleted after the server's
  * retention period, so buckets further back than `retention_seconds`
@@ -426,6 +427,9 @@ export const putSchedule = <ThrowOnError extends boolean = false>(options: Optio
  * The next times a schedule with this cron expression and timezone
  * would run, from now, without creating it. For forms that check a
  * timetable as it's typed.
+ *
+ * With `from` and `until`, it also lists every run in that window
+ * (at most 35 days) as `spans`, for calendars of what runs when.
  *
  */
 export const previewCron = <ThrowOnError extends boolean = false>(options: Options<PreviewCronData, ThrowOnError>): RequestResult<PreviewCronResponses, PreviewCronErrors, ThrowOnError> => (options.client ?? client).get<PreviewCronResponses, PreviewCronErrors, ThrowOnError>({

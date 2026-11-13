@@ -1,5 +1,8 @@
 import type { ReactNode } from 'react';
-import { Pause, RotateCcw, Search } from 'lucide-react';
+import { CircleCheck, Pause, RotateCcw, Search } from 'lucide-react';
+import { ChartAxis, ChartEmpty, ChartSkeleton } from '../components/Chart';
+import { EmptyState } from '../components/EmptyState';
+import { Status } from './home/Status';
 import { CodePanel } from '../components/CodePanel';
 import { ConfirmButton } from '../components/ConfirmButton';
 import { OutcomeBadge, StatusCode, TaskStateBadge } from '../components/states';
@@ -12,6 +15,10 @@ import { Input } from '../primitives/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../primitives/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../primitives/table';
 import { Tabs, TabsList, TabsTab } from '../primitives/tabs';
+
+// Example times, fixed when the page loads.
+const LOADED = Date.now();
+const ago = (ms: number) => new Date(LOADED - ms).toISOString();
 
 const SURFACES = ['background', 'surface', 'card', 'muted', 'border', 'input'];
 const TEXT = ['foreground', 'muted-foreground', 'faint'];
@@ -175,6 +182,74 @@ export function DesignPage() {
               </TableRow>
             </TableBody>
           </Table>
+        </Section>
+
+        <Section title="Charts: loading and empty">
+          <ChartSkeleton bars={24} />
+          <ChartEmpty
+            bars={24}
+            title="No tasks created in the last 24h"
+            hint="Tasks you enqueue show up here, stacked by queue."
+            action={{ label: 'Show the last 7 days', onClick: () => {} }}
+          />
+          <ChartAxis ticks={['Thu 10:00', 'Thu 22:00', 'now']} />
+          <EmptyState
+            icon={CircleCheck}
+            tone="success"
+            title="Nothing failing"
+            hint="Failed tasks and schedule runs show up here, grouped by the error they ended with."
+          />
+        </Section>
+
+        <Section title="Status (Home)">
+          <Status
+            status={{
+              tone: 'ok',
+              title: 'All quiet: 4 queues and 3 schedules, nothing failing',
+              issues: [],
+              running: 12,
+            }}
+          />
+          <Status
+            status={{ tone: 'idle', title: 'Quiet: nothing enqueued in the last 24h', issues: [], running: 0 }}
+            lastTaskAt={ago(3 * 86_400_000)}
+          />
+          <Status
+            status={{
+              tone: 'danger',
+              title: '3 things need attention',
+              running: 3,
+              issues: [
+                {
+                  key: '1',
+                  tone: 'danger',
+                  name: 'webhooks',
+                  what: '23 failed',
+                  detail: 'HTTP 503 Service Unavailable',
+                  more: '+2 other errors',
+                  at: ago(120_000),
+                  to: '/queues/webhooks?state=failed',
+                },
+                {
+                  key: '2',
+                  tone: 'danger',
+                  name: 'nightly-report',
+                  what: 'last run failed',
+                  detail: 'timeout after 30s',
+                  to: '/schedules/nightly-report?state=failed',
+                },
+                {
+                  key: '3',
+                  tone: 'warning',
+                  name: 'emails',
+                  what: '4m 12s behind',
+                  detail: '1,204 due now',
+                  to: '/queues/emails',
+                },
+                { key: '4', tone: 'neutral', name: 'reports', what: '1 queue paused', to: '/queues/reports' },
+              ],
+            }}
+          />
         </Section>
 
         <Section title="Card & code">

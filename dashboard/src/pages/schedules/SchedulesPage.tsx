@@ -1,12 +1,10 @@
 import { useState } from 'react';
-import { useQueries, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import { RowHint } from '../../components/RowHint';
-import { Link, useNavigate } from 'react-router';
-import { listRunsOptions, listSchedulesOptions } from '../../api/@tanstack/react-query.gen';
-import type { Run, Schedule } from '../../api';
-import { CodePanel } from '../../components/CodePanel';
-import { useSlots } from '../../context';
+import { Link, useNavigate, useSearchParams } from 'react-router';
+import { listSchedulesOptions } from '../../api/@tanstack/react-query.gen';
+import type { Schedule } from '../../api';
 import { ListPager, ListSearch } from '../../components/ListControls';
 import { PageHeader } from '../../components/PageHeader';
 import { ErrorText, Muted } from '../../components/QueryState';
@@ -21,6 +19,10 @@ import { Button } from '../../primitives/button';
 import { EditSchedule } from './EditSchedule';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../primitives/table';
 import { RecentRuns } from './RecentRuns';
+import { WeekOverview } from './WeekOverview';
+import { Tabs, TabsList, TabsTab } from '../../primitives/tabs';
+import { SchedulesGettingStarted } from './GettingStarted';
+import { useRecentRuns } from './useRecentRuns';
 
 export function SchedulesPage() {
   const { data, error, isPending } = useQuery({
@@ -32,10 +34,7 @@ export function SchedulesPage() {
 
   return (
     <>
-      <PageHeader
-        title="Schedules"
-        description="Cron for HTTP endpoints. Each call is a run, retried and recorded like a task, separately from queues."
-      >
+      <PageHeader title="Schedules" description="Endpoints called on a cron timetable.">
         <Button onClick={() => setCreating(true)}>
           <Plus />
           New schedule
@@ -55,26 +54,38 @@ export function SchedulesPage() {
   );
 }
 
-/** How many recent runs the overview shows per schedule. */
-const RECENT = 12;
-
-function useRecentRuns(schedules: Schedule[]): Map<string, Run[]> {
-  const results = useQueries({
-    queries: schedules.map((s) => ({
-      ...listRunsOptions({ query: { schedule: s.name, limit: RECENT } }),
-      ...LIVE,
-    })),
-  });
-  return new Map(schedules.flatMap((s, i) => (results[i].data ? [[s.name, results[i].data.runs]] : [])));
-}
+type View = 'overview' | 'list';
 
 function ScheduleList({ schedules }: { schedules: Schedule[] }) {
   const list = useListPage(schedules, (s) => [s.name, s.cron, describeCron(s.cron) ?? '', s.timezone, s.method, s.url]);
+  // The overview is the default: what runs when is the question a list of cron expressions can't answer.
+  const [params, setParams] = useSearchParams();
+  const view: View = params.get('view') === 'list' ? 'list' : 'overview';
+  const setView = (v: View) =>
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (v === 'overview') next.delete('view');
+        else next.set('view', v);
+        return next;
+      },
+      { replace: true },
+    );
   return (
     <div className="flex flex-col gap-3">
-      <ListSearch list={list} placeholder="Search name, timetable or URL" />
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <Tabs value={view} onValueChange={(v) => setView(v as View)}>
+          <TabsList>
+            <TabsTab value="overview">Overview</TabsTab>
+            <TabsTab value="list">List</TabsTab>
+          </TabsList>
+        </Tabs>
+        <ListSearch list={list} placeholder="Search" />
+      </div>
       {list.items.length === 0 ? (
         <Muted>No schedules match “{list.search}”.</Muted>
+      ) : view === 'overview' ? (
+        <WeekOverview schedules={list.items} />
       ) : (
         <ScheduleTable schedules={list.items} />
       )}
@@ -158,29 +169,6 @@ export function When({ schedule: s }: { schedule: Schedule }) {
         {words && `${s.cron} · `}
         {s.timezone}
       </span>
-    </div>
-  );
-}
-
-/** A wrapping app's own first steps, or the `workly dev` example. */
-function SchedulesGettingStarted() {
-  const custom = useSlots().gettingStarted?.schedules;
-  return custom ?? <GettingStarted />;
-}
-
-function GettingStarted() {
-  const origin = window.location.origin;
-  return (
-    <div className="flex max-w-2xl flex-col gap-3">
-      <p className="text-muted-foreground">
-        No schedules yet. A schedule calls a URL on a cron timetable, with retries and a history of every run. With{' '}
-        <span className="font-mono text-xs">workly dev</span>, the built-in echo endpoint makes a handy target:
-      </p>
-      <CodePanel title="Terminal">
-        {`curl -X PUT ${origin}/v1/schedules/hello \\
-  -H 'Content-Type: application/json' \\
-  -d '{"cron": "* * * * *", "url": "${origin}/_dev/echo", "payload": {"hello": "world"}}'`}
-      </CodePanel>
     </div>
   );
 }

@@ -268,10 +268,11 @@ paths:
   /v1/activity:
     get:
       operationId: getActivity
-      summary: Count created tasks over time, by queue
+      summary: Count tasks created and finished over time
       description: |
         Counts the workspace's tasks created in each bucket of the range, per
-        queue, oldest bucket first; every bucket is listed, empty ones too.
+        queue, and the tasks that finished in it, by final state; oldest
+        bucket first, and every bucket is listed, empty ones too.
         Buckets are 5 minutes for `1h`, 1 hour for `24h` and 6 hours for `7d`,
         aligned to UTC. Finished tasks are deleted after the server's
         retention period, so buckets further back than `retention_seconds`
@@ -739,6 +740,9 @@ paths:
         The next times a schedule with this cron expression and timezone
         would run, from now, without creating it. For forms that check a
         timetable as it's typed.
+
+        With `from` and `until`, it also lists every run in that window
+        (at most 35 days) as `spans`, for calendars of what runs when.
       tags: [schedules]
       security: [{bearerAuth: []}]
       parameters:
@@ -752,6 +756,18 @@ paths:
           description: IANA name. Defaults to UTC.
           schema:
             type: string
+        - name: from
+          in: query
+          description: The start of the window to list runs in. Requires `until`.
+          schema:
+            type: string
+            format: date-time
+        - name: until
+          in: query
+          description: The end of the window, exclusive. Requires `from`.
+          schema:
+            type: string
+            format: date-time
       responses:
         "200":
           description: The next runs
@@ -1306,7 +1322,7 @@ components:
             Absent if it keeps them forever.
     ActivityBucket:
       type: object
-      required: [start, counts]
+      required: [start, counts, succeeded, failed]
       properties:
         start:
           type: string
@@ -1316,6 +1332,12 @@ components:
           description: Tasks created in the bucket, by queue; queues with none are left out.
           additionalProperties:
             type: integer
+        succeeded:
+          type: integer
+          description: Tasks of every queue that finished in the bucket and succeeded.
+        failed:
+          type: integer
+          description: Tasks of every queue that finished in the bucket and failed.
     CronPreview:
       type: object
       required: [next_runs, interval_seconds]
@@ -1329,6 +1351,27 @@ components:
         interval_seconds:
           type: integer
           description: The shortest time between two of its runs.
+        spans:
+          type: array
+          description: |
+            With `from` and `until`: every run in the window, earliest first,
+            as runs at a fixed interval, so a schedule running every minute is
+            one span rather than thousands of times.
+          items:
+            $ref: "#/components/schemas/CronSpan"
+    CronSpan:
+      type: object
+      description: "`count` runs, `every_seconds` apart, the first at `start`."
+      required: [start, every_seconds, count]
+      properties:
+        start:
+          type: string
+          format: date-time
+        every_seconds:
+          type: integer
+          description: 0 when `count` is 1.
+        count:
+          type: integer
     QueueFailures:
       type: object
       required: [groups]
