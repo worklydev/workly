@@ -1,0 +1,104 @@
+---
+// The API reference: Scalar renders api/openapi.yaml (copied into public/api/ by
+// scripts/sync.mjs), on the dashboard's tokens so it reads like the rest of the docs.
+import '../../../../dashboard/src/tokens.css';
+import '@fontsource-variable/geist';
+import '@fontsource-variable/jetbrains-mono';
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>API reference | Workly</title>
+    <link rel="icon" href={`${base}/favicon.svg`} type="image/svg+xml" />
+    <script is:inline>
+      // Follow the theme picked in the docs (Starlight stores it), so both look the same.
+      const stored = localStorage.getItem('starlight-theme');
+      const dark = stored ? stored === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+      document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    </script>
+  </head>
+  <body>
+    <a class="back" href={`${base}/`}>← Workly docs</a>
+    <div id="app"></div>
+    <script is:inline src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.72.2"></script>
+    <script is:inline define:vars={{ specUrl: `${base}/api/openapi.yaml` }}>
+      Scalar.createApiReference('#app', {
+        url: specUrl,
+        theme: 'none',
+        forceDarkModeState: document.documentElement.dataset.theme,
+        hideDarkModeToggle: true,
+        hideClientButton: true,
+        withDefaultFonts: false,
+        showDeveloperTools: 'never',
+        agent: { disabled: true },
+        mcp: { disabled: true },
+      });
+    </script>
+  </body>
+</html>
+
+<style is:global>
+  body {
+    margin: 0;
+    background: var(--surface);
+    color: var(--foreground);
+    font-family: 'Geist Variable', system-ui, sans-serif;
+  }
+  .back {
+    display: block;
+    padding: 10px 16px;
+    font-size: 14px;
+    color: var(--muted-foreground);
+    text-decoration: none;
+    background: var(--background);
+    border-bottom: 1px solid var(--border);
+  }
+  .back:hover {
+    color: var(--foreground);
+  }
+
+  /* Scalar's theme variables, onto the tokens; they switch with data-theme. */
+  .light-mode,
+  .dark-mode {
+    --scalar-font: 'Geist Variable', system-ui, sans-serif;
+    --scalar-font-code: 'JetBrains Mono Variable', ui-monospace, monospace;
+    --scalar-radius: calc(var(--radius) * 0.8);
+    --scalar-radius-lg: var(--radius);
+    --scalar-radius-xl: calc(var(--radius) * 1.4);
+    --scalar-semibold: 500;
+    --scalar-bold: 500;
+
+    --scalar-background-1: var(--surface);
+    --scalar-background-2: var(--card);
+    --scalar-background-3: var(--muted);
+    --scalar-background-accent: color-mix(in oklch, var(--primary) 12%, transparent);
+    --scalar-color-1: var(--foreground);
+    --scalar-color-2: var(--muted-foreground);
+    --scalar-color-3: var(--faint);
+    --scalar-color-accent: var(--primary);
+    --scalar-color-green: var(--success);
+    --scalar-color-yellow: var(--warning);
+    --scalar-color-red: var(--destructive);
+    --scalar-color-orange: var(--primary);
+    --scalar-color-blue: var(--chart-1);
+    --scalar-color-purple: var(--chart-3);
+    --scalar-border-color: var(--border);
+    --scalar-shadow-1: none;
+
+    --scalar-sidebar-background-1: var(--background);
+    --scalar-sidebar-item-hover-background: var(--muted);
+    --scalar-sidebar-item-active-background: var(--muted);
+    --scalar-sidebar-color-1: var(--foreground);
+    --scalar-sidebar-color-2: var(--muted-foreground);
+    --scalar-sidebar-color-active: var(--foreground);
+    --scalar-sidebar-border-color: var(--border);
+    --scalar-sidebar-search-background: var(--card);
+    --scalar-sidebar-search-border-color: var(--input);
+    --scalar-sidebar-search-color: var(--faint);
+  }
+</style>
