@@ -15,6 +15,7 @@ import { Input } from '../primitives/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../primitives/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../primitives/table';
 import { Tabs, TabsList, TabsTab } from '../primitives/tabs';
+import { WorkflowDag } from './workflows/WorkflowDag';
 
 // Example times, fixed when the page loads.
 const LOADED = Date.now();
@@ -182,6 +183,28 @@ export function DesignPage() {
               </TableRow>
             </TableBody>
           </Table>
+        </Section>
+
+        <Section title="Workflow run (DAG)">
+          <WorkflowDag
+            nodes={[
+              { name: 'prices', status: 'waiting', detail: 'Waiting for group grp_…8K2M', meta: '4m 12s' },
+              { name: 'fx', status: 'succeeded', detail: 'HTTP 200', meta: '340ms' },
+              { name: 'news', status: 'pending', detail: 'Attempt 1 failed with HTTP 503, retrying in 20s' },
+              {
+                name: 'analytics',
+                depends_on: ['prices', 'fx'],
+                status: 'blocked',
+                detail: 'Waiting for prices',
+              },
+              {
+                name: 'notify',
+                depends_on: ['analytics', 'news'],
+                status: 'blocked',
+                detail: 'Waiting for analytics, news',
+              },
+            ]}
+          />
         </Section>
 
         <Section title="Charts: loading and empty">

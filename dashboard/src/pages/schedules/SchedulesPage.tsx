@@ -57,7 +57,15 @@ export function SchedulesPage() {
 type View = 'overview' | 'list';
 
 function ScheduleList({ schedules }: { schedules: Schedule[] }) {
-  const list = useListPage(schedules, (s) => [s.name, s.cron, describeCron(s.cron) ?? '', s.timezone, s.method, s.url]);
+  const list = useListPage(schedules, (s) => [
+    s.name,
+    s.cron,
+    describeCron(s.cron) ?? '',
+    s.timezone,
+    s.method,
+    s.url,
+    s.workflow ?? '',
+  ]);
   // The overview is the default: what runs when is the question a list of cron expressions can't answer.
   const [params, setParams] = useSearchParams();
   const view: View = params.get('view') === 'list' ? 'list' : 'overview';
@@ -103,7 +111,7 @@ function ScheduleTable({ schedules }: { schedules: Schedule[] }) {
   const navigate = useNavigate();
   const recent = useRecentRuns(schedules);
   // When every schedule calls the same host, the path is what differs.
-  const host = sharedHost(schedules.map((s) => s.url));
+  const host = sharedHost(schedules.filter((s) => !s.workflow).map((s) => s.url));
   return (
     <Table>
       <TableHeader>
@@ -149,8 +157,11 @@ function ScheduleTable({ schedules }: { schedules: Schedule[] }) {
             <TableCell>
               <RecentRuns runs={recent.get(s.name)} phoneSlots={8} />
             </TableCell>
-            <TableCell className="hidden max-w-56 truncate font-mono text-xs text-faint lg:table-cell" title={s.url}>
-              {formatTarget(s.method, s.url, host)}
+            <TableCell
+              className="hidden max-w-56 truncate font-mono text-xs text-faint lg:table-cell"
+              title={s.workflow ? `Starts a run of workflow ${s.workflow}` : s.url}
+            >
+              {s.workflow ? `workflow ${s.workflow}` : formatTarget(s.method, s.url, host)}
             </TableCell>
           </TableRow>
         ))}

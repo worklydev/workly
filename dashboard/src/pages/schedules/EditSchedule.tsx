@@ -19,7 +19,12 @@ import { Textarea } from '../../primitives/textarea';
 type NumberField =
   'timeout_seconds' | 'max_attempts' | 'min_backoff_seconds' | 'max_backoff_seconds' | 'backoff_multiplier';
 
-type Form = Record<NumberField | 'cron' | 'timezone' | 'url' | 'headers' | 'body' | 'callback_url', string> & {
+type Form = Record<
+  NumberField | 'cron' | 'timezone' | 'url' | 'workflow' | 'headers' | 'body' | 'callback_url',
+  string
+> & {
+  /** Whether each run calls a URL or starts a workflow run. */
+  target: 'url' | 'workflow';
   method: HttpMethod;
   retry_on_4xx: boolean;
   overlap: OverlapPolicy;
@@ -32,8 +37,10 @@ function toForm(s?: Schedule): Form {
     return {
       cron: '',
       timezone: 'UTC',
+      target: 'url',
       method: 'POST',
       url: '',
+      workflow: '',
       headers: '',
       body: '',
       timeout_seconds: '',
@@ -50,8 +57,10 @@ function toForm(s?: Schedule): Form {
   return {
     cron: s.cron,
     timezone: s.timezone,
+    target: s.workflow ? 'workflow' : 'url',
     method: s.method,
     url: s.url,
+    workflow: s.workflow ?? '',
     headers: formatHeaders(s.headers),
     body: formatBody(s),
     timeout_seconds: String(s.timeout_seconds),
@@ -83,14 +92,19 @@ function toConfig(f: Form, creating: boolean, current?: Schedule): ScheduleConfi
   const config: ScheduleConfig = {
     cron: f.cron.trim(),
     timezone: f.timezone.trim() || 'UTC',
-    method: f.method,
-    url: f.url.trim(),
     retry_on_4xx: f.retry_on_4xx,
     overlap: f.overlap,
     missed: f.missed,
   };
   if (!config.cron) return 'Cron is required.';
-  if (!config.url) return 'URL is required.';
+  if (f.target === 'workflow') {
+    config.workflow = f.workflow.trim();
+    if (!config.workflow) return 'Workflow is required.';
+  } else {
+    config.method = f.method;
+    config.url = f.url.trim();
+    if (!config.url) return 'URL is required.';
+  }
   // The form edits the callback's URL; headers set through the API stay.
   const callback = f.callback_url.trim();
   if (callback) config.on_complete = { ...current?.on_complete, url: callback };
@@ -103,6 +117,15 @@ function toConfig(f: Form, creating: boolean, current?: Schedule): ScheduleConfi
     config[key] = n;
   }
 
+  if (f.target === 'workflow') {
+    // The body is the run's input, so it has to be JSON.
+    if (!f.body.trim()) return config;
+    try {
+      return { ...config, payload: JSON.parse(f.body) };
+    } catch {
+      return 'Input must be JSON.';
+    }
+  }
   const headers = parseHeaders(f.headers);
   if (typeof headers === 'string') return headers;
   config.headers = headers;
@@ -120,6 +143,10 @@ export function EditSchedule({ schedule, open, onClose }: { schedule?: Schedule;
 }
 
 const METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+const TARGETS = [
+  { value: 'url', label: 'Calls a URL' },
+  { value: 'workflow', label: 'Starts a workflow' },
+];
 const OVERLAP = [
   { value: 'skip', label: 'Skip the slot' },
   { value: 'allow', label: 'Run alongside' },
@@ -240,33 +267,62 @@ function ScheduleForm({ schedule, onClose }: { schedule?: Schedule; onClose: () 
         </FormGroup>
 
         <FormGroup title="Request">
-          <FormRow label="Endpoint">
-            <div className="flex items-center gap-2">
-              <Choice
-                items={METHODS.map((m) => ({ value: m, label: m }))}
-                value={form.method}
-                onChange={(v) => setForm({ ...form, method: v as HttpMethod })}
-                className="w-28 font-mono"
-              />
-              <Input value={form.url} onChange={set('url')} placeholder="https://" className="font-mono" />
-            </div>
-          </FormRow>
-          <FormRow label="Headers" hint="One per line. Workly-* headers are reserved.">
-            <Textarea
-              value={form.headers}
-              onChange={set('headers')}
-              placeholder="Authorization: Bearer …"
-              rows={Math.min(6, Math.max(2, form.headers.split('\n').length))}
+          <FormRow label="Each run">
+            <Choice
+              items={TARGETS}
+              value={form.target}
+              onChange={(v) => setForm({ ...form, target: v as Form['target'] })}
             />
           </FormRow>
-          <FormRow label="Body" hint="JSON is sent as application/json unless a Content-Type header says otherwise.">
-            <Textarea
-              value={form.body}
-              onChange={set('body')}
-              placeholder='{"kind": "daily"}'
-              rows={Math.min(12, Math.max(3, form.body.split('\n').length))}
-            />
-          </FormRow>
+          {form.target === 'workflow' ? (
+            <>
+              <FormRow label="Workflow" hint="Its name, as in workly.yaml.">
+                <Input value={form.workflow} onChange={set('workflow')} className="font-mono" />
+              </FormRow>
+              <FormRow label="Input" hint="JSON, the run's input: sent to every step without a body of its own.">
+                <Textarea
+                  value={form.body}
+                  onChange={set('body')}
+                  placeholder='{"kind": "daily"}'
+                  className="font-mono"
+                  rows={Math.min(12, Math.max(3, form.body.split('\n').length))}
+                />
+              </FormRow>
+            </>
+          ) : (
+            <>
+              <FormRow label="Endpoint">
+                <div className="flex items-center gap-2">
+                  <Choice
+                    items={METHODS.map((m) => ({ value: m, label: m }))}
+                    value={form.method}
+                    onChange={(v) => setForm({ ...form, method: v as HttpMethod })}
+                    className="w-28 font-mono"
+                  />
+                  <Input value={form.url} onChange={set('url')} placeholder="https://" className="font-mono" />
+                </div>
+              </FormRow>
+              <FormRow label="Headers" hint="One per line. Workly-* headers are reserved.">
+                <Textarea
+                  value={form.headers}
+                  onChange={set('headers')}
+                  placeholder="Authorization: Bearer …"
+                  rows={Math.min(6, Math.max(2, form.headers.split('\n').length))}
+                />
+              </FormRow>
+              <FormRow
+                label="Body"
+                hint="JSON is sent as application/json unless a Content-Type header says otherwise."
+              >
+                <Textarea
+                  value={form.body}
+                  onChange={set('body')}
+                  placeholder='{"kind": "daily"}'
+                  rows={Math.min(12, Math.max(3, form.body.split('\n').length))}
+                />
+              </FormRow>
+            </>
+          )}
         </FormGroup>
 
         <FormGroup title="Retries">

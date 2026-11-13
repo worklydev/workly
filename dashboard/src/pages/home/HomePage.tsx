@@ -1,7 +1,12 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Layers, Plus } from 'lucide-react';
-import { listQueuesOptions, listSchedulesOptions, searchTasksOptions } from '../../api/@tanstack/react-query.gen';
+import {
+  listQueuesOptions,
+  listSchedulesOptions,
+  listWorkflowsOptions,
+  searchTasksOptions,
+} from '../../api/@tanstack/react-query.gen';
 import type { Queue, Schedule } from '../../api';
 import { EmptyState } from '../../components/EmptyState';
 import { PageHeader } from '../../components/PageHeader';
@@ -111,10 +116,12 @@ function WorkspaceStatus({ queues, schedules, now }: { queues: Queue[]; schedule
   const { data } = useActivity();
   const queueFailures = useQueueFailureGroups();
   const runFailures = useRunFailureGroups();
+  const workflows = useQuery({ ...listWorkflowsOptions(), ...LIVE });
   const created = data?.buckets.reduce((n, b) => n + Object.values(b.counts).reduce((a, c) => a + c, 0), 0);
   const status = workspaceStatus({
     queues,
     schedules,
+    workflows: workflows.data?.workflows,
     queueFailures: queueFailures.groups,
     runFailures: runFailures.groups,
     created,
