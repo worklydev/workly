@@ -85,7 +85,13 @@ export default defineConfig({
             { slug: 'performance' },
           ],
         },
-        { label: 'workly.run', link: 'https://workly.run' },
+        {
+          label: 'Links',
+          items: [
+            { label: 'Workly home', link: 'https://workly.run' },
+            { label: 'Console', link: 'https://console.workly.run' },
+          ],
+        },
       ],
     }),
   ],

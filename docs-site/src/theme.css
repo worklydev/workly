@@ -43,20 +43,29 @@
   --sl-shadow-md: 0 8px 24px oklch(0 0 0 / 12%);
   --sl-shadow-lg: 0 16px 48px oklch(0 0 0 / 20%);
 
-  /* A calmer heading scale than Starlight's; pages are for reading, not posters. */
-  --sl-text-h1: 2rem;
-  --sl-text-h2: 1.375rem;
-  --sl-text-h3: 1.125rem;
+  /* The console's page title (PageHeader: text-xl, regular), and section
+     titles that stand out by weight more than size. */
+  --sl-text-h1: 1.25rem;
+  --sl-text-h2: 1rem;
+  --sl-text-h3: 0.9375rem;
   --sl-text-h4: 1rem;
   --sl-text-h5: 1rem;
-  --sl-line-height-headings: 1.3;
+  --sl-line-height-headings: 1.4;
   --sl-text-code-sm: 0.8125rem;
+
+  /* The console's frame: a 56px header and a 224px sidebar (w-56). */
+  --sl-nav-height: 3.5rem;
+  --sl-nav-pad-y: 1.125rem;
+  --sl-sidebar-width: 14rem;
+  --sl-sidebar-pad-x: 0.5rem;
 }
 @media (min-width: 50em) {
   :root {
-    --sl-text-h1: 2rem;
-    --sl-text-h2: 1.375rem;
-    --sl-text-h3: 1.125rem;
+    --sl-nav-height: 3.5rem;
+    --sl-nav-pad-x: 1rem;
+    --sl-text-h1: 1.25rem;
+    --sl-text-h2: 1rem;
+    --sl-text-h3: 0.9375rem;
     --sl-text-h4: 1rem;
   }
 }
@@ -65,12 +74,22 @@
   background-color: color-mix(in oklch, var(--primary) 25%, transparent);
 }
 
-/* Regular and medium weights only. */
-.sl-markdown-content :is(h1, h2, h3, h4, h5, h6, strong, b, th),
-:is(h1, h2, h3, .site-title),
-.starlight-aside__title,
-.sidebar-content .group-label .large {
+/* Regular and medium weights only; the page title is regular, as in the console. */
+.sl-markdown-content :is(h2, h3, h4, h5, h6, strong, b, th),
+:is(h2, h3),
+.starlight-aside__title {
   font-weight: 500;
+}
+h1#_top {
+  margin-top: 0;
+  font-weight: 400;
+}
+/* No hairline under the title: the console's page header sits on the surface. */
+.content-panel + .content-panel {
+  border-top: none;
+}
+.main-pane .content-panel:has(h1#_top) {
+  padding-bottom: 0;
 }
 .sl-markdown-content :is(h2, h3) {
   letter-spacing: -0.01em;
@@ -142,21 +161,76 @@
   --ec-focusBrd: var(--ring);
 }
 
-/* Tinted, not solid: the current page is a muted fill with an orange marker. */
-.sidebar-content a[aria-current='page'] {
-  background-color: var(--muted);
+/* The console's brand: a 20px mark and "Workly" in mono. */
+.site-title {
+  gap: 0.375rem;
   color: var(--foreground);
-  font-weight: 500;
-  box-shadow: inset 2px 0 0 var(--primary);
+  font-family: var(--sl-font-mono);
+  font-size: var(--sl-text-sm);
+  font-weight: 400;
+  letter-spacing: -0.02em;
 }
-.sidebar-content a:not([aria-current='page']) {
+.site-title img {
+  height: 1.25rem;
+}
+
+/* The sidebar, like the console's (Sidebar.tsx): flat 32px items with 2px
+   gaps, muted text, and a muted fill for the current page. Starlight's groups
+   become small labels, without indentation or guide lines. */
+.sidebar-content {
+  padding-top: 0.5rem;
+}
+.sidebar-content ul {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sidebar-content ul ul li {
+  margin-inline-start: 0;
+  padding-inline-start: 0;
+  border-inline-start: none;
+}
+.sidebar-content .top-level > li + li {
+  margin-top: 0;
+}
+.sidebar-content .top-level > li:has(details) + li,
+.sidebar-content .top-level > li + li:has(details) {
+  margin-top: 1rem;
+}
+.sidebar-content summary {
+  padding: 0 0.625rem 0.25rem;
+}
+.sidebar-content .group-label .large {
+  color: var(--faint);
+  font-size: 0.75rem;
+  font-weight: 400;
+}
+.sidebar-content summary .caret {
+  color: var(--faint);
+  width: 0.875rem;
+  height: 0.875rem;
+}
+.sidebar-content a {
+  display: flex;
+  align-items: center;
+  height: 2rem;
+  padding: 0 0.625rem;
+  border-radius: calc(var(--radius) * 0.8);
   color: var(--muted-foreground);
+  font-size: var(--sl-text-sm);
+  font-weight: 400;
+  transition: color 150ms, background-color 150ms;
 }
 .sidebar-content a:not([aria-current='page']):hover {
+  background-color: color-mix(in oklch, var(--muted) 60%, transparent);
   color: var(--foreground);
 }
-.site-title {
+.sidebar-content a[aria-current='page'],
+.sidebar-content a[aria-current='page']:hover,
+.sidebar-content a[aria-current='page']:focus {
+  background-color: var(--muted);
   color: var(--foreground);
+  font-weight: 400;
 }
 
 /* Header controls, like the dashboard's primitives. Search is an Input: card
@@ -227,4 +301,46 @@ mobile-starlight-toc .display-current {
 }
 .expressive-code pre {
   scrollbar-width: thin;
+}
+
+/* Page footer. Previous/next are cards as in the console: a fill and one
+   hairline, no shadow, a small label over a medium-weight title. */
+.pagination-links a {
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background-color: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: none;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  transition: background-color 150ms, border-color 150ms;
+}
+.pagination-links a:hover {
+  background-color: var(--muted);
+  border-color: var(--input);
+}
+.pagination-links .link-title {
+  display: inline-block;
+  margin-top: 0.125rem;
+  color: var(--foreground);
+  font-size: var(--sl-text-sm);
+  font-weight: 500;
+}
+.pagination-links svg {
+  font-size: 1rem !important;
+  color: var(--faint);
+}
+.pagination-links a:hover svg {
+  color: var(--foreground);
+}
+footer .meta {
+  font-size: 0.75rem;
+}
+footer .meta a {
+  color: var(--faint);
+}
+footer .meta a:hover {
+  color: var(--foreground);
 }
