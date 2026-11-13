@@ -208,6 +208,12 @@ export function NextRun({ task, now, paused = false }: { task: Task; now: number
 
 const finished = (t: Task) => t.state === 'succeeded' || t.state === 'failed' || t.state === 'cancelled';
 
+/** Why a task can't be retried now, if it can't. A workflow step's task is retried with its run. */
+function noRetry(t: Task): string | undefined {
+  if (t.workflow_step) return `A step of workflow run ${t.workflow_step.run_id}: retry the run instead.`;
+  if (t.state === 'running') return 'An attempt is in flight; retry once it finishes.';
+}
+
 function RowActions({ task }: { task: Task }) {
   const qc = useQueryClient();
   const onSuccess = () => qc.invalidateQueries();
@@ -223,16 +229,14 @@ function RowActions({ task }: { task: Task }) {
           failed
         </span>
       )}
-      <DisabledReason
-        reason={task.state === 'running' ? 'An attempt is in flight; retry once it finishes.' : undefined}
-      >
+      <DisabledReason reason={noRetry(task)}>
         <Button
           variant="ghost"
           size="icon"
           title={finished(task) ? 'Retry' : 'Run now'}
           aria-label={finished(task) ? 'Retry' : 'Run now'}
           onClick={() => retry.mutate(path)}
-          disabled={task.state === 'running' || retry.isPending}
+          disabled={noRetry(task) !== undefined || retry.isPending}
         >
           <RotateCcw />
         </Button>
@@ -273,7 +277,8 @@ type Bulk = { action: 'retry' | 'cancel'; ids: string[] };
 function BulkActions({ tasks, sorting, onDone }: { tasks: Task[]; sorting?: TaskSorting; onDone: () => void }) {
   const qc = useQueryClient();
   const [result, setResult] = useState<string>();
-  const retryable = tasks.filter((t) => t.state !== 'running');
+  const retryable = tasks.filter((t) => noRetry(t) === undefined);
+  const steps = tasks.filter((t) => t.workflow_step).length;
   const cancellable = tasks.filter((t) => !finished(t));
   const run = useMutation({
     mutationFn: async ({ action, ids }: Bulk) => {
@@ -304,11 +309,23 @@ function BulkActions({ tasks, sorting, onDone }: { tasks: Task[]; sorting?: Task
           </div>
         )}
         <DisabledReason
-          reason={none ?? (retryable.length ? undefined : 'Running tasks retry once their attempt finishes.')}
+          reason={
+            none ??
+            (retryable.length
+              ? undefined
+              : steps > 0
+                ? 'Workflow steps are retried with their run, from its page.'
+                : 'Running tasks retry once their attempt finishes.')
+          }
         >
           <Button
             variant="ghost"
             size="sm"
+            title={
+              retryable.length && steps > 0
+                ? `${steps} workflow ${steps === 1 ? 'step is' : 'steps are'} left out: retry their runs instead.`
+                : undefined
+            }
             onClick={() => run.mutate({ action: 'retry', ids: retryable.map((t) => t.id) })}
             disabled={!retryable.length || run.isPending}
           >
