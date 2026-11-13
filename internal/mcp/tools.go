@@ -242,7 +242,7 @@ func allTools() []*tool {
 		enqueueTask, retryTask, cancelTask, retryFailedTasks, cancelPendingTasks, pauseQueue, resumeQueue,
 		updateQueuePolicy,
 		updateSchedule, triggerSchedule, pauseSchedule, resumeSchedule, retryRun, cancelRun,
-		triggerWorkflow, cancelWorkflowRun,
+		triggerWorkflow, cancelWorkflowRun, retryWorkflowRun,
 	}
 }
 

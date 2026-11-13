@@ -300,11 +300,7 @@ function Notices({ task, queue, attempts }: { task: Task; queue?: Queue; attempt
             <Link to={`/workflow-runs/${task.workflow_step.run_id}`} className={cn(LINK, 'font-mono text-xs')}>
               {shortId(task.workflow_step.run_id)}
             </Link>
-            : start a new run of{' '}
-            <Link to={`/workflows/${encodeURIComponent(task.workflow_step.workflow)}`} className={LINK}>
-              {task.workflow_step.workflow}
-            </Link>{' '}
-            to try again.
+            of {task.workflow_step.workflow}: retry the run to try again, once the cause is fixed.
           </span>
         )}
       </Notice>

@@ -533,3 +533,178 @@ func testDeleteFinishedWorkflowRuns(t *testing.T, open func() store.Store) {
 	}
 	getWfRun(t, s, ws, running.ID)
 }
+
+// testScheduledWorkflowOverlap: a schedule that starts a workflow overlaps
+// its last slot while the workflow run that slot started is still going,
+// though the schedule's own run finished as soon as it started it.
+func testScheduledWorkflowOverlap(t *testing.T, open func() store.Store) {
+	s := seeded(t, open)
+	ctx, ws := t.Context(), workspace.Default
+	putWorkflow(t, s, ws, "nightly", step("only"))
+	cfg := scheduleConfig()
+	cfg.Workflow = "nightly"
+	sc, _, err := s.PutSchedule(ctx, ws, "nightly-wf", cfg, now().Add(-time.Second))
+	if err != nil {
+		t.Fatalf("PutSchedule: %v", err)
+	}
+
+	// The slot's run starts the workflow run, and succeeds.
+	r := fire(t, s, sc, "")
+	if claims := claimRuns(t, s); len(claims) != 1 || claims[0].Run.ID != r.ID {
+		t.Fatalf("claimed %+v, want run %s", claims, r.ID)
+	}
+	wr, _, err := s.StartWorkflowRun(ctx, ws, "nightly", store.NewWorkflowRun{IdempotencyKey: r.ID, ScheduleRunID: r.ID}, now())
+	if err != nil {
+		t.Fatalf("StartWorkflowRun: %v", err)
+	}
+	finishRun(t, s, getRun(t, s, r), store.RunSucceeded)
+
+	// The next slot comes up while the workflow run is going: skipped.
+	if next := fire(t, s, sc, ""); next.State != store.RunSkipped || next.SkipReason != store.SkipOverlap {
+		t.Fatalf("slot during the workflow run = %+v, want skipped for overlap", next)
+	}
+	// A workflow run started some other way doesn't count.
+	startRun(t, s, ws, "nightly")
+	if _, err := s.CancelWorkflowRun(ctx, ws, wr.ID); err != nil {
+		t.Fatalf("CancelWorkflowRun: %v", err)
+	}
+	if next := fire(t, s, sc, ""); next.State != store.RunPending {
+		t.Fatalf("slot after the workflow run = %+v, want pending", next)
+	}
+}
+
+func retryRun(t *testing.T, s store.Store, ws workspace.ID, id string) store.WorkflowRun {
+	t.Helper()
+	r, err := s.RetryWorkflowRun(t.Context(), ws, id, now())
+	if err != nil {
+		t.Fatalf("RetryWorkflowRun: %v", err)
+	}
+	return r
+}
+
+// testRetryWorkflowRun: a failed or cancelled run reopens in place, under
+// the definition it started with; succeeded steps stay, the rest run
+// again on the tasks they had.
+func testRetryWorkflowRun(t *testing.T, open func() store.Store) {
+	s := seeded(t, open)
+	ctx, ws := t.Context(), workspace.Default
+	putWorkflow(t, s, ws, "fail", step("a"), step("b"), step("c", "b"), step("d", "c"), step("e"))
+	r := startRun(t, s, ws, "fail")
+	tasks := claimSteps(t, s, ws, store.WorkflowQueue)
+	deliver(t, s, tasks["e"], store.TaskPending, nil)
+	deliver(t, s, tasks["b"], store.TaskFailed, nil)
+	failed := getWfRun(t, s, ws, r.ID)
+	wantSteps(t, failed, store.WorkflowFailed, "a=pending", "b=failed", "c=skipped", "d=skipped", "e=skipped")
+
+	// Changing the workflow doesn't change what the retry runs.
+	putWorkflow(t, s, ws, "fail", step("other"))
+	if _, err := s.RetryWorkflowRun(ctx, otherWorkspace, r.ID, now()); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("RetryWorkflowRun in another workspace = %v, want ErrNotFound", err)
+	}
+	run := retryRun(t, s, ws, r.ID)
+	// a's request is still in flight from the first attempt: it stays pending.
+	wantSteps(t, run, store.WorkflowRunning, "a=pending", "b=pending", "c=blocked", "d=blocked", "e=pending")
+	if run.Attempt != 2 || run.RetriedAt == nil || run.Error != "" || run.FinishedAt != nil ||
+		!run.DeadlineAt.After(failed.DeadlineAt.Add(-time.Second)) {
+		t.Fatalf("retried run = %+v", run)
+	}
+	if _, err := s.RetryWorkflowRun(ctx, ws, r.ID, now()); !errors.Is(err, store.ErrInvalidState) {
+		t.Fatalf("RetryWorkflowRun of a running run = %v, want ErrInvalidState", err)
+	}
+	// b and e keep their tasks, pending again with a fresh set of attempts
+	// and the run's new attempt.
+	retried := claimSteps(t, s, ws, store.WorkflowQueue)
+	if len(retried) != 2 || retried["b"].ID != tasks["b"].ID || retried["e"].ID != tasks["e"].ID {
+		t.Fatalf("claimed %v after the retry, want b's and e's tasks again", slices.Collect(mapKeys(retried)))
+	}
+	b := retried["b"]
+	var body store.WorkflowStepBody
+	if err := json.Unmarshal(b.Body, &body); err != nil || body.RunAttempt != 2 ||
+		b.Headers[store.HeaderWorkflowRunAttempt] != "2" || b.RetriedAt == nil || b.ReplayedAttempts != 1 {
+		t.Fatalf("b's task after the retry = %+v, body %s", b, b.Body)
+	}
+	deliver(t, s, tasks["a"], store.TaskSucceeded, nil)
+	deliver(t, s, b, store.TaskSucceeded, nil)
+	deliver(t, s, retried["e"], store.TaskSucceeded, nil)
+	deliver(t, s, claimSteps(t, s, ws, store.WorkflowQueue)["c"], store.TaskSucceeded, nil)
+	deliver(t, s, claimSteps(t, s, ws, store.WorkflowQueue)["d"], store.TaskSucceeded, nil)
+	run = getWfRun(t, s, ws, r.ID)
+	wantSteps(t, run, store.WorkflowSucceeded, "a=succeeded", "b=succeeded", "c=succeeded", "d=succeeded", "e=succeeded")
+	if _, err := s.RetryWorkflowRun(ctx, ws, r.ID, now()); !errors.Is(err, store.ErrInvalidState) {
+		t.Fatalf("RetryWorkflowRun of a succeeded run = %v, want ErrInvalidState", err)
+	}
+
+	// A cancelled run starts over from its first steps, whose cancelled
+	// tasks come back.
+	r = startRun(t, s, ws, "fail")
+	if _, err := s.CancelWorkflowRun(ctx, ws, r.ID); err != nil {
+		t.Fatalf("CancelWorkflowRun: %v", err)
+	}
+	run = retryRun(t, s, ws, r.ID)
+	wantSteps(t, run, store.WorkflowRunning, "other=pending")
+}
+
+// testRetryWorkflowRunWaitFor: a step that was waiting for a group when
+// its run stopped follows the group when the run is retried.
+func testRetryWorkflowRunWaitFor(t *testing.T, open func() store.Store) {
+	s := seeded(t, open)
+	ws := workspace.Default
+	putWorkflow(t, s, ws, "wait", step("prices"), step("fx"), step("analytics", "prices", "fx"))
+	waitFor := func(g store.Group) map[string]string {
+		return map[string]string{store.WaitForHeader: "group/" + g.ID}
+	}
+	// failWhileWaiting runs prices up to waiting for g, then fails fx.
+	failWhileWaiting := func(g store.Group) (store.WorkflowRun, map[string]store.Task) {
+		r := startRun(t, s, ws, "wait")
+		tasks := claimSteps(t, s, ws, store.WorkflowQueue)
+		deliver(t, s, tasks["prices"], store.TaskSucceeded, waitFor(g))
+		deliver(t, s, tasks["fx"], store.TaskFailed, nil)
+		wantSteps(t, getWfRun(t, s, ws, r.ID), store.WorkflowFailed, "prices=skipped", "fx=failed", "analytics=skipped")
+		return r, tasks
+	}
+
+	// The group is still going: prices waits for it again.
+	g := mustCreateGroup(t, s, ws, store.NewGroup{})
+	member := mustCreate(t, s, ws, store.NewTask{Queue: "members", GroupID: g.ID})
+	r, tasks := failWhileWaiting(g)
+	wantSteps(t, retryRun(t, s, ws, r.ID), store.WorkflowRunning, "prices=waiting", "fx=pending", "analytics=blocked")
+	closeGroup(t, s, g)
+	attempt(t, s, member, store.TaskSucceeded)
+	deliver(t, s, claimSteps(t, s, ws, store.WorkflowQueue)["fx"], store.TaskSucceeded, nil)
+	wantSteps(t, getWfRun(t, s, ws, r.ID), store.WorkflowRunning, "prices=succeeded", "fx=succeeded", "analytics=pending")
+	if again := claimSteps(t, s, ws, store.WorkflowQueue); again["prices"].ID != "" || tasks["prices"].ID == "" {
+		t.Fatalf("prices was delivered again: %v", slices.Collect(mapKeys(again)))
+	}
+
+	// The group succeeded since: prices is done, and only fx runs again.
+	g = mustCreateGroup(t, s, ws, store.NewGroup{})
+	r, _ = failWhileWaiting(g)
+	closeGroup(t, s, g)
+	wantSteps(t, retryRun(t, s, ws, r.ID), store.WorkflowRunning, "prices=succeeded", "fx=pending", "analytics=blocked")
+
+	// The group failed: prices runs again, its request on its old task.
+	g = mustCreateGroup(t, s, ws, store.NewGroup{})
+	member = mustCreate(t, s, ws, store.NewTask{Queue: "members", GroupID: g.ID})
+	r, tasks = failWhileWaiting(g)
+	closeGroup(t, s, g)
+	attempt(t, s, member, store.TaskFailed)
+	wantSteps(t, retryRun(t, s, ws, r.ID), store.WorkflowRunning, "prices=pending", "fx=pending", "analytics=blocked")
+	if again := claimSteps(t, s, ws, store.WorkflowQueue); again["prices"].ID != tasks["prices"].ID {
+		t.Fatalf("prices's task after the retry = %q, want %q", again["prices"].ID, tasks["prices"].ID)
+	}
+
+	// A request in flight when the run failed hands over to a group: the
+	// step is skipped, not left waiting, and a retry picks the group up.
+	g = mustCreateGroup(t, s, ws, store.NewGroup{})
+	mustCreate(t, s, ws, store.NewTask{Queue: "members", GroupID: g.ID})
+	r = startRun(t, s, ws, "wait")
+	tasks = claimSteps(t, s, ws, store.WorkflowQueue)
+	deliver(t, s, tasks["fx"], store.TaskFailed, nil)
+	deliver(t, s, tasks["prices"], store.TaskSucceeded, waitFor(g))
+	run := getWfRun(t, s, ws, r.ID)
+	wantSteps(t, run, store.WorkflowFailed, "prices=skipped", "fx=failed", "analytics=skipped")
+	if run.Steps[0].WaitID != g.ID {
+		t.Fatalf("skipped step's wait_id = %q, want %s", run.Steps[0].WaitID, g.ID)
+	}
+	wantSteps(t, retryRun(t, s, ws, r.ID), store.WorkflowRunning, "prices=waiting", "fx=pending", "analytics=blocked")
+}

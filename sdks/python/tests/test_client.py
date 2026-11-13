@@ -751,6 +751,9 @@ def test_workflows() -> None:
         httpx.Response(201, json=WORKFLOW_RUN),
         httpx.Response(200, json=WORKFLOW_RUN),
         httpx.Response(200, json={"workflow_runs": [WORKFLOW_RUN]}),
+        httpx.Response(
+            200, json={**WORKFLOW_RUN, "attempt": 2, "retried_at": "2026-11-13T10:00:00Z"}
+        ),
     )
     c = client(handler)
     w = c.workflows.put(
@@ -789,6 +792,9 @@ def test_workflows() -> None:
     [summary] = list(c.workflow_runs.list(workflow="refresh", status="running"))
     assert summary.id == "wfr_1"
     assert dict(requests[3].url.params) == {"workflow": "refresh", "status": "running"}
+    retried = c.workflow_runs.retry("wfr_1")
+    assert (requests[4].method, requests[4].url.path) == ("POST", "/v1/workflow-runs/wfr_1/retry")
+    assert retried.attempt == 2 and retried.retried_at is not None
 
 
 def test_workflow_trigger_retries_only_with_a_key() -> None:

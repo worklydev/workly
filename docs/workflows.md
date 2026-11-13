@@ -77,7 +77,7 @@ run = workly.workflows.trigger("daily-refresh", input={"date": "2026-11-13"}, id
 const run = await workly.workflows.trigger('daily-refresh', { input: { date: '2026-11-13' }, idempotencyKey: '2026-11-13' });
 ```
 
-Or from the dashboard's Run now, or a [schedule](schedules.md) with `workflow:` instead of `url:`, whose `payload` becomes each run's input. With an `idempotency_key` already used for a run of the workflow, that run is returned and nothing starts; a schedule uses its run's ID, so a retried schedule run never starts a second workflow run.
+Or from the dashboard's Run now, or a [schedule](schedules.md) with `workflow:` instead of `url:`, whose `payload` becomes each run's input. With an `idempotency_key` already used for a run of the workflow, that run is returned and nothing starts; a schedule uses its run's ID, so a retried schedule run never starts a second workflow run. With the schedule's `overlap: skip` (the default), a slot that comes up while the schedule's last workflow run is still going is skipped.
 
 ## What a step receives
 
@@ -88,7 +88,8 @@ Each step's task is delivered with the usual [headers](concepts.md) plus:
 | `Workly-Workflow` | The workflow's name. |
 | `Workly-Workflow-Run-Id` | The run, `wfr_…`. |
 | `Workly-Workflow-Step` | The step's name. |
-| `Workly-Workflow-Step-Id` | The step, `wfs_…`: stable across retries, so use it as an idempotency key. |
+| `Workly-Workflow-Step-Id` | The step, `wfs_…`: the same on every delivery of the step, so use it as an idempotency key. |
+| `Workly-Workflow-Run-Attempt` | `1`, then one more each time the run is [retried](#retry-a-run). |
 
 A step without a body of its own is sent the run's context as JSON:
 
@@ -98,6 +99,7 @@ A step without a body of its own is sent the run's context as JSON:
   "workflow": "daily-refresh",
   "step": "analytics",
   "step_id": "wfs_01M7AH8EPATE4EPK37FWTA5TBQ",
+  "run_attempt": 1,
   "input": {"date": "2026-11-13"}
 }
 ```
@@ -112,9 +114,10 @@ A step that starts work Workly should track answers with `Workly-Wait-For: group
 @app.post("/jobs/start-price-update")
 def start_price_update():
     verify_signature(request.get_data(), request.headers)
-    step_id = request.headers["Workly-Workflow-Step-Id"]
-    # The step ID is the same on every retry, so a retried request reuses its group.
-    group = workly.groups.create(name="daily-stock-prices", idempotency_key=step_id)
+    # The same on every delivery of this step in this run attempt: a redelivered
+    # request reuses its group, and a retried run starts a fresh one.
+    key = f'{request.headers["Workly-Workflow-Step-Id"]}-{request.headers["Workly-Workflow-Run-Attempt"]}'
+    group = workly.groups.create(name="daily-stock-prices", idempotency_key=key)
     if group.status == "open":
         workly.tasks.enqueue_many(
             "stock-prices",
@@ -122,7 +125,7 @@ def start_price_update():
                 {
                     "url": f"{API}/jobs/update-stock-price",
                     "payload": {"symbol": s},
-                    "idempotency_key": f"{step_id}-{s}",
+                    "idempotency_key": f"{key}-{s}",
                     "group_id": group.id,
                 }
                 for s in SYMBOLS
@@ -145,7 +148,17 @@ A run stops at its first failed step:
 - steps waiting for a group are `skipped`; the group itself goes on, and its tasks still run,
 - requests already in flight finish, and their steps record how they went, but start nothing.
 
-The run is `failed`, with the step's error. A run that is still going after `max_duration_seconds` fails the same way, except that its waiting steps are `failed`, since they are what didn't finish in time; cancelling a run (`workly workflows cancel`, or the dashboard) skips what hasn't started. Step tasks can't be retried one at a time: start a new run instead. A step's task says which step and run it delivers (`workflow_step` on the task in the API, and a link to the run on its dashboard page), so a failure found in a queue leads back to its run.
+The run is `failed`, with the step's error. A run that is still going after `max_duration_seconds` fails the same way, except that its waiting steps are `failed`, since they are what didn't finish in time; cancelling a run (`workly workflows cancel`, or the dashboard) skips what hasn't started. Step tasks can't be retried one at a time: [retry the run](#retry-a-run) instead. A step's task says which step and run it delivers (`workflow_step` on the task in the API, and a link to the run on its dashboard page), so a failure found in a queue leads back to its run.
+
+## Retry a run
+
+Once you've fixed what failed, retry the run rather than starting over: the dashboard's Retry run, `workly workflows retry ID`, `workflow_runs.retry(id)` in the SDKs or `retry_workflow_run` over [MCP](mcp.md). A failed or cancelled run then goes back to `running`, under the definition and input it started with, even if the workflow has changed since:
+
+- steps that succeeded stay succeeded, and aren't sent again,
+- failed and skipped steps run again once their dependencies have succeeded, each on the task it had, with a fresh set of attempts,
+- a step that was waiting for a group follows the group: it succeeds if the group has succeeded since, waits again if it is still going, and runs again if it failed.
+
+The run's `attempt` goes up by one, and its `max_duration_seconds` starts over. Steps are sent the attempt as `Workly-Workflow-Run-Attempt`, so work keyed on the step ID and the attempt, like the group in the example above, is redone on a retry instead of reusing what failed. To run a changed definition, start a new run.
 
 ## Statuses
 

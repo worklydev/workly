@@ -113,6 +113,24 @@ func TestWorkflowsAPI(t *testing.T) {
 	if res := do(t, h, "POST", "/v1/workflow-runs/"+runID+"/cancel", ""); res.status != 409 || errorCode(res) != "invalid_state" {
 		t.Fatalf("cancel failed run = %d %s", res.status, res.body)
 	}
+	// Retrying the run runs its failed step again, on the same task.
+	res = do(t, h, "POST", "/v1/workflow-runs/"+runID+"/retry", "")
+	if res.status != 200 || res.json["status"] != "running" || res.json["attempt"] != float64(2) || res.json["retried_at"] == nil {
+		t.Fatalf("retry run = %d %s", res.status, res.body)
+	}
+	if st := res.json["steps"].([]any)[0].(map[string]any); st["status"] != "pending" ||
+		st["task"].(map[string]any)["id"] != task["id"] || st["task"].(map[string]any)["state"] != "pending" {
+		t.Fatalf("retried step = %v", st)
+	}
+	if res := do(t, h, "POST", "/v1/workflow-runs/"+runID+"/retry", ""); res.status != 409 || errorCode(res) != "invalid_state" {
+		t.Fatalf("retry running run = %d %s", res.status, res.body)
+	}
+	if res := do(t, h, "POST", "/v1/workflow-runs/wfr_missing/retry", ""); res.status != 404 || errorCode(res) != "workflow_run_not_found" {
+		t.Fatalf("retry missing run = %d %s", res.status, res.body)
+	}
+	if res := do(t, h, "GET", "/v1/tasks/"+task["id"].(string), ""); res.json["headers"].(map[string]any)["Workly-Workflow-Run-Attempt"] != "2" {
+		t.Fatalf("retried step task = %s", res.body)
+	}
 
 	// _workflows is configurable, but only Workly enqueues into it.
 	if res := doBody(t, h, "POST", "/v1/queues/_workflows/tasks", "", `{"url": "https://e.test"}`); res.status != 400 {

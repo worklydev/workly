@@ -73,6 +73,9 @@ const (
 	HeaderWorkflowRunID  = "Workly-Workflow-Run-Id"
 	HeaderWorkflowStep   = "Workly-Workflow-Step"
 	HeaderWorkflowStepID = "Workly-Workflow-Step-Id"
+	// HeaderWorkflowRunAttempt is the run's attempt, 1 until it is retried:
+	// with the step ID, a key for work that a retried step should redo.
+	HeaderWorkflowRunAttempt = "Workly-Workflow-Run-Attempt"
 )
 
 // TaskWorkflowStep is the workflow step a task delivers.
@@ -100,6 +103,7 @@ type WorkflowStepBody struct {
 	Workflow      string          `json:"workflow"`
 	Step          string          `json:"step"`
 	StepID        string          `json:"step_id"`
+	RunAttempt    int             `json:"run_attempt"`
 	Input         json.RawMessage `json:"input"`
 }
 
@@ -157,6 +161,10 @@ type WorkflowRun struct {
 	DeadlineAt     time.Time
 	CreatedAt      time.Time
 	FinishedAt     *time.Time
+	// Attempt is 1, plus one for each time the run was retried; RetriedAt
+	// is when it last was.
+	Attempt   int
+	RetriedAt *time.Time
 	// Steps are in definition order. Only GetWorkflowRun sets them.
 	Steps []WorkflowStep
 }

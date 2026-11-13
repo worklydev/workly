@@ -206,7 +206,7 @@ func TestMCPModes(t *testing.T) {
 		{server.MCPFull, append(slices.Clone(readTools), "enqueue_task", "retry_task", "cancel_task",
 			"retry_failed_tasks", "cancel_pending_tasks", "pause_queue", "resume_queue", "update_queue_policy",
 			"update_schedule", "trigger_schedule", "pause_schedule", "resume_schedule", "retry_run", "cancel_run",
-			"trigger_workflow", "cancel_workflow_run")},
+			"trigger_workflow", "cancel_workflow_run", "retry_workflow_run")},
 	} {
 		t.Run(string(tc.mode), func(t *testing.T) {
 			c := mcpClient{t: t, h: newServer(t, server.Options{DisableDispatcher: true, MCP: tc.mode}).Handler()}
@@ -789,6 +789,9 @@ func TestMCPWorkflows(t *testing.T) {
 	}
 	if got := c.call("list_workflow_runs", map[string]any{"status": "cancelled"}); len(got["workflow_runs"].([]any)) != 1 {
 		t.Fatalf("list_workflow_runs = %v", got)
+	}
+	if got := c.call("retry_workflow_run", map[string]any{"id": id}); got["status"] != "running" || got["attempt"] != float64(2) {
+		t.Fatalf("retry_workflow_run = %v", got)
 	}
 
 	// update_schedule switches a schedule between calling a URL and

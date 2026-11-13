@@ -323,7 +323,7 @@ class Task:
 
 @dataclass(frozen=True, slots=True)
 class TaskWorkflowStep:
-    """The workflow step a task delivers. Its task can't be retried alone: start a new run."""
+    """The workflow step a task delivers. Its task can't be retried alone: retry its run."""
 
     id: str
     """The step, `wfs_…`."""
@@ -762,6 +762,10 @@ class WorkflowRunSummary:
     finished_at: datetime | None
     duration_ms: int | None
     """From start to finish, or to now while running."""
+    attempt: int = 1
+    """1, plus one for each time the run was retried."""
+    retried_at: datetime | None = None
+    """When the run was last retried."""
 
     @classmethod
     def _from_json(cls, d: dict[str, Any]) -> WorkflowRunSummary:
@@ -781,6 +785,8 @@ def _run_summary_fields(d: dict[str, Any]) -> dict[str, Any]:
         deadline_at=_opt_time(d.get("deadline_at")),
         finished_at=_opt_time(d.get("finished_at")),
         duration_ms=d.get("duration_ms"),
+        attempt=d.get("attempt", 1),
+        retried_at=_opt_time(d.get("retried_at")),
     )
 
 
@@ -917,6 +923,10 @@ class WorkflowRun:
     input: Any
     steps: list[WorkflowStep]
     """In definition order."""
+    attempt: int = 1
+    """1, plus one for each time the run was retried."""
+    retried_at: datetime | None = None
+    """When the run was last retried."""
 
     @classmethod
     def _from_json(cls, d: dict[str, Any]) -> WorkflowRun:

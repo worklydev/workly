@@ -1147,6 +1147,32 @@ paths:
                 $ref: "#/components/schemas/WorkflowRun"
         default:
           $ref: "#/components/responses/Error"
+  /v1/workflow-runs/{id}/retry:
+    parameters:
+      - $ref: "#/components/parameters/WorkflowRunID"
+    post:
+      operationId: retryWorkflowRun
+      summary: Retry a workflow run
+      description: |
+        Reopens a failed or cancelled run, under the definition it started
+        with and with the same input: steps that succeeded stay, and the
+        rest run again. Each step that runs again gets its task back,
+        pending with a fresh set of attempts. A step that was waiting for a
+        group follows the group: it succeeds if the group has since
+        succeeded, and waits for it again if it is still going. The run's
+        `attempt` goes up by one, and its `max_duration_seconds` starts
+        over. Other runs are `invalid_state`.
+      tags: [workflows]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: The run, running again
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowRun"
+        default:
+          $ref: "#/components/responses/Error"
   /v1/alert-channels:
     get:
       operationId: listAlertChannels
@@ -1810,7 +1836,7 @@ components:
       type: object
       description: |
         The workflow step a task delivers, if it is one. A step's task can't be
-        retried on its own: start a new run of the workflow instead.
+        retried on its own: retry its workflow run instead.
       required: [id, name, workflow, run_id]
       properties:
         id:
@@ -2143,8 +2169,9 @@ components:
       default: skip
       description: |
         What happens when a slot comes up while the previous run is still
-        pending or running. `skip` records the slot as a `skipped` run;
-        `allow` runs it alongside.
+        pending or running, or, for a schedule with `workflow`, while the
+        workflow run it started is still running. `skip` records the slot as
+        a `skipped` run; `allow` runs it alongside.
     MissedPolicy:
       type: string
       enum: [skip, catch_up]
@@ -2279,8 +2306,8 @@ components:
       type: string
       enum: [overlap, missed]
       description: |
-        `overlap`: the previous run was still pending or running (overlap
-        policy `skip`). `missed`: the server was down at the slot (missed
+        `overlap`: the previous run, or the workflow run it started, was
+        still going (overlap policy `skip`). `missed`: the server was down at the slot (missed
         policy `skip`).
     Run:
       type: object
@@ -2403,10 +2430,12 @@ components:
         `depends_on` has succeeded. The request fields (`url` to
         `content_type`) work as in `EnqueueRequest`. A step without `payload`
         or `body` is sent the run's context as JSON (`workflow_run_id`,
-        `workflow`, `step`, `step_id`, `input`); every step gets the
-        `Workly-Workflow`, `Workly-Workflow-Run-Id`, `Workly-Workflow-Step`
-        and `Workly-Workflow-Step-Id` headers. The step ID is the same on
-        every retry, so it can serve as an idempotency key.
+        `workflow`, `step`, `step_id`, `run_attempt`, `input`); every step
+        gets the `Workly-Workflow`, `Workly-Workflow-Run-Id`,
+        `Workly-Workflow-Step`, `Workly-Workflow-Step-Id` and
+        `Workly-Workflow-Run-Attempt` headers. The step ID is the same on
+        every delivery of the step, so it can serve as an idempotency key;
+        with the run attempt, it keys work that a retried run should redo.
       required: [name, url]
       properties:
         name:
@@ -2530,7 +2559,7 @@ components:
       enum: [blocked, pending, running, waiting, succeeded, failed, skipped]
     WorkflowRunSummary:
       type: object
-      required: [id, workflow, version, status, created_at]
+      required: [id, workflow, version, status, attempt, created_at]
       properties:
         id:
           type: string
@@ -2549,6 +2578,15 @@ components:
         schedule_run_id:
           type: string
           description: The schedule run that started it, if any.
+        attempt:
+          type: integer
+          description: |
+            1, plus one for each time the run was retried. Steps are sent it
+            as `Workly-Workflow-Run-Attempt`.
+        retried_at:
+          type: string
+          format: date-time
+          description: When the run was last retried. Absent if never.
         created_at:
           type: string
           format: date-time

@@ -75,7 +75,7 @@ var getWorkflow = newTool("get_workflow", "Get workflow",
 	})
 
 var workflowRunKeys = []string{"id", "workflow", "version", "status", "error", "idempotency_key",
-	"schedule_run_id", "created_at", "deadline_at", "finished_at", "duration_ms"}
+	"schedule_run_id", "attempt", "retried_at", "created_at", "deadline_at", "finished_at", "duration_ms"}
 
 func workflowRunSummary(r map[string]any) map[string]any {
 	out := map[string]any{}
@@ -185,6 +185,20 @@ var cancelWorkflowRun = newTool("cancel_workflow_run", "Cancel workflow run",
 	}) (any, error) {
 		var r map[string]any
 		if err := api.do(ctx, "POST", apiPath("/v1/workflow-runs/%s/cancel", args.ID), nil, nil, &r); err != nil {
+			return nil, err
+		}
+		return workflowRunDetail(r), nil
+	})
+
+var retryWorkflowRun = newTool("retry_workflow_run", "Retry workflow run",
+	"Reopens a failed or cancelled workflow run under the definition it started with: steps that succeeded stay, the rest run again (each on its old task, with a fresh set of attempts), and a step that was waiting for a group follows the group. Use it after fixing what made a step fail. The run's attempt goes up by one. Returns the run with its steps; follow up with get_workflow_run.",
+	object(map[string]any{"id": workflowRunIDProp}, "id"),
+	annotations{OpenWorldHint: true},
+	func(ctx context.Context, api apiClient, args struct {
+		ID string `json:"id"`
+	}) (any, error) {
+		var r map[string]any
+		if err := api.do(ctx, "POST", apiPath("/v1/workflow-runs/%s/retry", args.ID), nil, nil, &r); err != nil {
 			return nil, err
 		}
 		return workflowRunDetail(r), nil

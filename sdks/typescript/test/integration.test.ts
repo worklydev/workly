@@ -377,6 +377,11 @@ describe('integration', { skip: server ? false : 'set WORKLY_BIN or install Go' 
     assert.equal(task.headers['Workly-Workflow-Step-Id'], run.steps[2]!.id);
     assert.deepEqual(task.workflowStep, { id: run.steps[2]!.id, name: 'analytics', workflow: name, runId: run.id });
     assert.equal((await workly.workflows.get(name)).lastRun?.id, run.id);
+    // A succeeded run can't be retried; a cancelled one can.
+    await assert.rejects(workly.workflowRuns.retry(run.id), ConflictError);
+    const cancelled = await workly.workflowRuns.cancel((await workly.workflows.trigger(name)).id);
+    const retried = await workly.workflowRuns.retry(cancelled.id);
+    assert.equal(retried.attempt, 2);
     await workly.workflows.delete(name);
     await assert.rejects(workly.workflows.get(name), NotFoundError);
   });

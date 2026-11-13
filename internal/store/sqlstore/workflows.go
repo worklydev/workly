@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -181,7 +182,7 @@ func (s *Store) DeleteWorkflow(ctx context.Context, ws workspace.ID, name string
 // Runs
 
 const workflowRunColumns = `id, workspace_id, workflow, version, config, input, status, error,
-	idempotency_key, schedule_run_id, deadline_at, created_at, finished_at`
+	idempotency_key, schedule_run_id, deadline_at, created_at, finished_at, attempt, retried_at`
 
 func scanWorkflowRun(row interface{ Scan(...any) error }) (store.WorkflowRun, error) {
 	var (
@@ -189,9 +190,10 @@ func scanWorkflowRun(row interface{ Scan(...any) error }) (store.WorkflowRun, er
 		cfg, input                  []byte
 		errText, idemKey, schedRun  sql.NullString
 		deadline, created, finished dbTime
+		retried                     dbTime
 	)
 	err := row.Scan(&r.ID, &r.WorkspaceID, &r.Workflow, &r.Version, &cfg, &input, &r.Status, &errText,
-		&idemKey, &schedRun, &deadline, &created, &finished)
+		&idemKey, &schedRun, &deadline, &created, &finished, &r.Attempt, &retried)
 	if err != nil {
 		return r, err
 	}
@@ -202,7 +204,7 @@ func scanWorkflowRun(row interface{ Scan(...any) error }) (store.WorkflowRun, er
 		r.Input = json.RawMessage(input)
 	}
 	r.Error, r.IdempotencyKey, r.ScheduleRunID = errText.String, idemKey.String, schedRun.String
-	r.DeadlineAt, r.CreatedAt, r.FinishedAt = deadline.Time, created.Time, finished.ptr()
+	r.DeadlineAt, r.CreatedAt, r.FinishedAt, r.RetriedAt = deadline.Time, created.Time, finished.ptr(), retried.ptr()
 	return r, nil
 }
 
@@ -229,7 +231,7 @@ func (s *Store) StartWorkflowRun(ctx context.Context, ws workspace.ID, name stri
 		maxDuration := w.EffectiveMaxDuration()
 		runID := id.New("wfr")
 		res, err := s.exec(ctx, tx, `INSERT INTO workflow_runs (`+workflowRunColumns+`)
-			VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL)
+			VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL, 1, NULL)
 			ON CONFLICT (workspace_id, workflow, idempotency_key) WHERE idempotency_key IS NOT NULL
 			DO NOTHING`,
 			runID, ws, name, w.Version, string(cfg), input, store.WorkflowRunning,
@@ -408,6 +410,149 @@ func (s *Store) CancelWorkflowRun(ctx context.Context, ws workspace.ID, id strin
 	return s.GetWorkflowRun(ctx, ws, id)
 }
 
+func (s *Store) RetryWorkflowRun(ctx context.Context, ws workspace.ID, id string, now time.Time) (store.WorkflowRun, error) {
+	now = now.UTC().Truncate(time.Millisecond)
+	enqueued := false
+	err := s.inTx(ctx, func(tx *sql.Tx) error {
+		r, err := s.getWorkflowRunRow(ctx, tx, ws, id)
+		if err != nil {
+			return err
+		}
+		steps, err := s.listSteps(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		// The groups steps were waiting for are locked first, in ID order, as
+		// completeGroup holds a group when it reaches the run: lock order is
+		// group, run, step.
+		var groupIDs []string
+		for _, st := range steps {
+			if st.WaitType == "group" && st.Status != store.StepSucceeded && !slices.Contains(groupIDs, st.WaitID) {
+				groupIDs = append(groupIDs, st.WaitID)
+			}
+		}
+		slices.Sort(groupIDs)
+		groups := map[string]store.Group{}
+		for _, gid := range groupIDs {
+			g, err := scanGroup(s.queryRow(ctx, tx, `UPDATE task_groups SET status = status
+				WHERE workspace_id = ? AND id = ? RETURNING `+groupColumns, ws, gid))
+			if errors.Is(err, sql.ErrNoRows) {
+				continue // swept: its step runs again
+			}
+			if err != nil {
+				return err
+			}
+			groups[gid] = g
+		}
+		if r, err = s.lockRun(ctx, tx, ws, id); err != nil {
+			return err
+		}
+		if r.Status != store.WorkflowFailed && r.Status != store.WorkflowCancelled {
+			return store.ErrInvalidState
+		}
+		if steps, err = s.listSteps(ctx, tx, id); err != nil {
+			return err
+		}
+		r.Attempt++
+		r.Status, r.Error, r.FinishedAt, r.RetriedAt = store.WorkflowRunning, "", nil, &now
+		r.DeadlineAt = now.Add(r.Config.EffectiveMaxDuration())
+		if _, err := s.exec(ctx, tx, `UPDATE workflow_runs SET status = ?, error = NULL, finished_at = NULL,
+				attempt = ?, retried_at = ?, deadline_at = ? WHERE id = ?`,
+			r.Status, r.Attempt, s.ts(now), s.ts(r.DeadlineAt), r.ID); err != nil {
+			return err
+		}
+
+		status := map[string]store.StepStatus{}
+		for i, st := range steps {
+			next := st.Status
+			switch st.Status {
+			case store.StepSucceeded, store.StepPending, store.StepWaiting:
+				// Done, or a request still in flight from before the run
+				// stopped, which now advances the run again.
+			case store.StepFailed, store.StepSkipped, store.StepBlocked:
+				next = store.StepBlocked
+				if g, ok := groups[st.WaitID]; ok && st.WaitType == "group" && g.Status != store.GroupFailed {
+					// Its request succeeded and handed over to a group that
+					// didn't fail: the step follows the group.
+					next = store.StepWaiting
+					if g.Status == store.GroupSucceeded {
+						next = store.StepSucceeded
+					}
+				}
+				if err := s.reopenStep(ctx, tx, st, next, now); err != nil {
+					return err
+				}
+			}
+			steps[i].Status, status[st.Name] = next, next
+		}
+
+		// Steps whose dependencies have all succeeded start, as at the start
+		// of a run. A step that just succeeded through its group may have
+		// readied others, so this goes round in definition order until
+		// nothing more starts; each pass starts at least one step or ends.
+		for started := true; started && r.Status == store.WorkflowRunning; {
+			started = false
+			for i, st := range steps {
+				if st.Status != store.StepBlocked {
+					continue
+				}
+				ready := true
+				for _, dep := range st.DependsOn {
+					ready = ready && status[dep] == store.StepSucceeded
+				}
+				if !ready {
+					continue
+				}
+				e, err := s.startStep(ctx, tx, &r, st, now)
+				if err != nil {
+					return err
+				}
+				enqueued = enqueued || e
+				steps[i].Status, status[st.Name], started = store.StepPending, store.StepPending, true
+				if r.Status.Finished() {
+					return nil
+				}
+			}
+		}
+		for _, v := range status {
+			if v != store.StepSucceeded {
+				return nil
+			}
+		}
+		// Every step left was waiting for a group that has since succeeded.
+		_, err = s.exec(ctx, tx, `UPDATE workflow_runs SET status = ?, finished_at = ? WHERE id = ?`,
+			store.WorkflowSucceeded, s.ts(now), r.ID)
+		return err
+	})
+	if err != nil {
+		return store.WorkflowRun{}, err
+	}
+	if enqueued {
+		s.wake()
+	}
+	return s.GetWorkflowRun(ctx, ws, id)
+}
+
+// reopenStep puts a stopped step of a retried run back to status: blocked
+// to run again, waiting for its group, or succeeded through it. What it
+// waited for stays on a step that follows its group.
+func (s *Store) reopenStep(ctx context.Context, tx *sql.Tx, st store.WorkflowStep, status store.StepStatus, now time.Time) error {
+	switch status {
+	case store.StepBlocked:
+		_, err := s.exec(ctx, tx, `UPDATE workflow_steps SET status = ?, error = NULL, finished_at = NULL,
+			ready_at = NULL, http_done_at = NULL, wait_type = NULL, wait_id = NULL WHERE id = ?`, status, st.ID)
+		return err
+	case store.StepWaiting:
+		_, err := s.exec(ctx, tx, `UPDATE workflow_steps SET status = ?, error = NULL, finished_at = NULL
+			WHERE id = ?`, status, st.ID)
+		return err
+	default:
+		_, err := s.exec(ctx, tx, `UPDATE workflow_steps SET status = ?, error = NULL, finished_at = ?
+			WHERE id = ?`, status, s.ts(now), st.ID)
+		return err
+	}
+}
+
 // lockRun reads a run, locking its row so that its status can't change
 // under the transaction. Steps finishing at once, in concurrent
 // transactions, take turns on it.
@@ -534,7 +679,10 @@ func stepConfig(r *store.WorkflowRun, name string) (store.WorkflowStepConfig, bo
 }
 
 // startStep enqueues a blocked step's task and reports whether it did. A
-// step whose queue no longer exists fails, which stops the run.
+// step that has a task from an earlier attempt of the run gets it back,
+// pending again with a fresh set of attempts, so a step keeps one task
+// however often its run is retried. A step whose queue no longer exists
+// fails, which stops the run.
 func (s *Store) startStep(ctx context.Context, tx *sql.Tx, r *store.WorkflowRun, st store.WorkflowStep, now time.Time) (bool, error) {
 	// The guard makes a step that two events unblock start once.
 	res, err := s.exec(ctx, tx, `UPDATE workflow_steps SET status = ?, ready_at = ?
@@ -559,10 +707,12 @@ func (s *Store) startStep(ctx context.Context, tx *sql.Tx, r *store.WorkflowRun,
 	headers[store.HeaderWorkflowRunID] = r.ID
 	headers[store.HeaderWorkflowStep] = st.Name
 	headers[store.HeaderWorkflowStepID] = st.ID
+	headers[store.HeaderWorkflowRunAttempt] = strconv.Itoa(r.Attempt)
 	body := sc.Body
 	if body == nil {
 		body, err = json.Marshal(store.WorkflowStepBody{
-			WorkflowRunID: r.ID, Workflow: r.Workflow, Step: st.Name, StepID: st.ID, Input: inputOrNull(r.Input),
+			WorkflowRunID: r.ID, Workflow: r.Workflow, Step: st.Name, StepID: st.ID, RunAttempt: r.Attempt,
+			Input: inputOrNull(r.Input),
 		})
 		if err != nil {
 			return false, err
@@ -570,6 +720,13 @@ func (s *Store) startStep(ctx context.Context, tx *sql.Tx, r *store.WorkflowRun,
 		if !hasHeader(headers, "Content-Type") {
 			headers["Content-Type"] = "application/json"
 		}
+	}
+	if st.TaskID != "" {
+		retried, err := s.replayStepTask(ctx, tx, r.WorkspaceID, st.TaskID, headers, body, now)
+		if err != nil || retried {
+			return retried, err
+		}
+		// Swept with old tasks: a new one takes its place.
 	}
 	t, _, err := s.createTask(ctx, tx, r.WorkspaceID, store.NewTask{
 		Queue: sc.Queue, Method: sc.Method, URL: sc.URL, Headers: headers, Body: body, RunAt: now,
@@ -589,6 +746,26 @@ func (s *Store) startStep(ctx context.Context, tx *sql.Tx, r *store.WorkflowRun,
 	}
 	_, err = s.exec(ctx, tx, `UPDATE workflow_steps SET task_id = ? WHERE id = ?`, t.ID, st.ID)
 	return err == nil, err
+}
+
+// replayStepTask makes a finished step task pending again, as RetryTask
+// does, with its request as of the run's new attempt. It reports false if
+// the task no longer exists.
+func (s *Store) replayStepTask(ctx context.Context, tx *sql.Tx, ws workspace.ID, taskID string,
+	headers map[string]string, body []byte, now time.Time) (bool, error) {
+	h, err := marshalHeaders(headers)
+	if err != nil {
+		return false, err
+	}
+	res, err := s.exec(ctx, tx, `UPDATE tasks SET replayed_attempts = attempt_count, state = 'pending',
+			run_at = ?, finished_at = NULL, updated_at = ?, retried_at = ?, headers = ?, body = ?
+		WHERE workspace_id = ? AND id = ? AND state IN ('succeeded', 'failed', 'cancelled')`,
+		s.ts(now), s.ts(now), s.ts(now), h, body, ws, taskID)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
 }
 
 func inputOrNull(in json.RawMessage) json.RawMessage {
@@ -770,6 +947,13 @@ func (s *Store) advanceStep(ctx context.Context, tx *sql.Tx, e stepEvent) (bool,
 				return false, err
 			}
 			if !wait.group.Status.Finished() {
+				if r.Status != store.WorkflowRunning {
+					// A request in flight when the run stopped: skipped like
+					// the run's other waiting steps. What it waits for stays,
+					// for a retry of the run to follow.
+					return false, s.setStep(ctx, tx, st.ID, store.StepSkipped,
+						"not run: workflow run "+string(r.Status), now, store.StepPending)
+				}
 				// Until the group completes; completeGroup finishes the step.
 				_, err := s.exec(ctx, tx, `UPDATE workflow_steps SET status = ? WHERE id = ? AND status = ?`,
 					store.StepWaiting, st.ID, store.StepPending)

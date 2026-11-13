@@ -718,3 +718,11 @@ class AsyncWorkflowRuns:
     async def cancel(self, run_id: str) -> WorkflowRun:
         """Stop a run: steps not yet started are skipped. Requests in flight finish."""
         return WorkflowRun._from_json(await self._client._send(r.cancel_workflow_run(run_id)))
+
+    async def retry(self, run_id: str) -> WorkflowRun:
+        """Reopen a failed or cancelled run under the definition it started with.
+
+        Steps that succeeded stay; the rest run again, each on its old task with a
+        fresh set of attempts. A step that was waiting for a group follows the group.
+        """
+        return WorkflowRun._from_json(await self._client._send(r.retry_workflow_run(run_id)))

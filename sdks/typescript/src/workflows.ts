@@ -161,4 +161,15 @@ export class WorkflowRuns {
       signal: options.signal,
     });
   }
+
+  /**
+   * Reopens a failed or cancelled run under the definition it started with.
+   * Steps that succeeded stay; the rest run again, each on its old task with
+   * a fresh set of attempts. A step that was waiting for a group follows the
+   * group.
+   */
+  async retry(id: string, options: RequestOptions = {}): Promise<WorkflowRun> {
+    // Not idempotent: once the run is going again, retrying is invalid_state.
+    return this.#client.send({ method: 'POST', path: `/v1/workflow-runs/${seg(id)}/retry`, signal: options.signal });
+  }
 }

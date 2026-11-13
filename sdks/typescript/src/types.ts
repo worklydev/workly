@@ -184,7 +184,7 @@ export interface Task {
   workflowStep?: TaskWorkflowStep;
 }
 
-/** The workflow step a task delivers. Its task can't be retried alone: start a new run instead. */
+/** The workflow step a task delivers. Its task can't be retried alone: retry its run instead. */
 export interface TaskWorkflowStep {
   /** The step, `wfs_…`. */
   id: string;
@@ -613,6 +613,10 @@ export interface WorkflowRunSummary {
   idempotencyKey?: string;
   /** The schedule run that started it, if any. */
   scheduleRunId?: string;
+  /** 1, plus one for each time the run was retried. */
+  attempt: number;
+  /** When the run was last retried. */
+  retriedAt?: string;
   createdAt: string;
   /** When a run still going fails (`maxDurationSeconds`). */
   deadlineAt?: string;

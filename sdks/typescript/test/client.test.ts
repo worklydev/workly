@@ -719,6 +719,7 @@ describe('workflows', () => {
       json({ workflow_runs: [run], next_cursor: 'c1' }),
       json({ workflow_runs: [run] }),
       json({ ...run, status: 'cancelled' }),
+      json({ ...run, attempt: 2 }),
     );
     const workly = new Workly({ fetch });
     await workly.workflows.put('refresh', {
@@ -751,6 +752,8 @@ describe('workflows', () => {
     assert.equal(sent[3]?.url.search, '?workflow=refresh&cursor=c1&limit=1');
     assert.equal((await workly.workflowRuns.cancel('wfr_1')).status, 'cancelled');
     assert.equal(`${sent[4]?.method} ${sent[4]?.url.pathname}`, 'POST /v1/workflow-runs/wfr_1/cancel');
+    await workly.workflowRuns.retry('wfr_1');
+    assert.equal(`${sent[5]?.method} ${sent[5]?.url.pathname}`, 'POST /v1/workflow-runs/wfr_1/retry');
   });
 
   test('a schedule can start a workflow', async () => {

@@ -25,7 +25,7 @@ with workly deploy.`,
 	}
 	addClientFlags(cmd)
 	cmd.AddCommand(workflowsListCmd(), workflowsGetCmd(), workflowsDeleteCmd(), workflowsTriggerCmd(),
-		workflowRunsCmd(), workflowRunCmd(), workflowCancelCmd())
+		workflowRunsCmd(), workflowRunCmd(), workflowCancelCmd(), workflowRetryCmd())
 	return cmd
 }
 
@@ -264,6 +264,29 @@ func workflowCancelCmd() *cobra.Command {
 	}
 }
 
+func workflowRetryCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "retry ID",
+		Short: "Retry a failed or cancelled workflow run: its failed and skipped steps run again",
+		Long: `Reopen a failed or cancelled workflow run, under the definition it
+started with and with the same input. Steps that succeeded stay; the rest
+run again, each on its old task with a fresh set of attempts, and a step
+that was waiting for a group follows the group.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := newClient(cmd)
+			if err != nil {
+				return err
+			}
+			res, err := c.RetryWorkflowRunWithResponse(cmd.Context(), args[0])
+			if err := check(res, err); err != nil {
+				return err
+			}
+			return output(cmd, res.Body, func(w io.Writer) { printWorkflowRun(w, res.JSON200) })
+		},
+	}
+}
+
 func printWorkflowRun(w io.Writer, r *client.WorkflowRun) {
 	rows := [][]string{
 		{"ID:", r.Id},
@@ -279,6 +302,13 @@ func printWorkflowRun(w io.Writer, r *client.WorkflowRun) {
 	}
 	if r.ScheduleRunId != nil {
 		rows = append(rows, []string{"Started by:", "schedule run " + *r.ScheduleRunId})
+	}
+	if r.Attempt > 1 {
+		retried := ""
+		if r.RetriedAt != nil {
+			retried = ", last retried " + ago(*r.RetriedAt)
+		}
+		rows = append(rows, []string{"Attempt:", strconv.Itoa(r.Attempt) + retried})
 	}
 	table(w, "", rows)
 	fmt.Fprintln(w)

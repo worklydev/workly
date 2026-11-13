@@ -501,10 +501,17 @@ func (s *Store) FireSchedule(ctx context.Context, f store.Fire, now time.Time) (
 		}
 		state, reason := store.RunPending, f.SkipReason
 		if reason == "" && sc.Overlap == store.OverlapSkip {
+			// A schedule that starts a workflow is still going while that
+			// workflow run is, though its own run finished once it started it.
 			var active int
-			err := s.queryRow(ctx, tx, `SELECT count(*) FROM (SELECT 1 FROM runs
-				WHERE workspace_id = ? AND schedule = ? AND state IN ('pending', 'running') LIMIT 1) a`,
-				f.WorkspaceID, f.Schedule).Scan(&active)
+			err := s.queryRow(ctx, tx, `SELECT count(*) FROM (
+				SELECT 1 FROM runs
+				WHERE workspace_id = ? AND schedule = ? AND state IN ('pending', 'running')
+				UNION ALL
+				SELECT 1 FROM workflow_runs w JOIN runs ON runs.id = w.schedule_run_id
+				WHERE w.status = 'running' AND w.workspace_id = ? AND runs.schedule = ?
+				LIMIT 1) a`,
+				f.WorkspaceID, f.Schedule, f.WorkspaceID, f.Schedule).Scan(&active)
 			if err != nil {
 				return err
 			}

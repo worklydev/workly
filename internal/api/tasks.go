@@ -328,7 +328,7 @@ func (h Handlers) RetryTask(ctx context.Context, req RetryTaskRequestObject) (Re
 	case errors.Is(err, store.ErrInvalidState):
 		return nil, invalidState("task %q has an attempt in flight; retry it once the attempt finishes", req.Id)
 	case errors.Is(err, store.ErrWorkflowStepTask):
-		return nil, invalidState("task %q is a workflow step and can't be retried alone; start a new run of the workflow", req.Id)
+		return nil, invalidState("task %q is a workflow step and can't be retried alone; retry its workflow run (POST /v1/workflow-runs/{id}/retry)", req.Id)
 	case err != nil:
 		return nil, err
 	}

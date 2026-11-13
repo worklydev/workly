@@ -211,6 +211,11 @@ function Runs({ workflow }: { workflow: Workflow }) {
                         {shortId(r.id)}
                       </Link>
                       {r.schedule_run_id && <span className="text-xs text-faint">scheduled</span>}
+                      {r.attempt > 1 && (
+                        <span className="text-xs text-faint" title={`Retried ${r.attempt - 1}×`}>
+                          attempt {r.attempt}
+                        </span>
+                      )}
                       {r.version !== workflow.version && (
                         <span className="font-mono text-xs text-faint" title="Ran under an earlier definition">
                           v{r.version}

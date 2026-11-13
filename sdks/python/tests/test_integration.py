@@ -407,6 +407,12 @@ def test_workflows(client: workly.Workly, server_url: str) -> None:
     )
     assert client.workflows.get(name).last_run is not None
     assert any(r.id == run.id for r in client.workflow_runs.list(workflow=name))
+    # A succeeded run can't be retried; a cancelled one can.
+    with pytest.raises(workly.ConflictError):
+        client.workflow_runs.retry(run.id)
+    cancelled = client.workflow_runs.cancel(client.workflows.trigger(name).id)
+    retried = client.workflow_runs.retry(cancelled.id)
+    assert retried.status in ("running", "succeeded") and retried.attempt == 2
     client.workflows.delete(name)
     with pytest.raises(workly.NotFoundError):
         client.workflows.get(name)

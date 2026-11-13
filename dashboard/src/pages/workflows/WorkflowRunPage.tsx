@@ -1,7 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { XCircle } from 'lucide-react';
+import { RotateCcw, XCircle } from 'lucide-react';
 import { Link, useParams } from 'react-router';
-import { cancelWorkflowRunMutation, getGroupOptions, getWorkflowRunOptions } from '../../api/@tanstack/react-query.gen';
+import {
+  cancelWorkflowRunMutation,
+  getGroupOptions,
+  getWorkflowRunOptions,
+  retryWorkflowRunMutation,
+} from '../../api/@tanstack/react-query.gen';
 import type { WorkflowRun, WorkflowStep } from '../../api';
 import { CodePanel } from '../../components/CodePanel';
 import { CopyButton } from '../../components/CopyButton';
@@ -17,6 +22,7 @@ import { errorMessage, LIVE } from '../../lib/api';
 import { useFromHere } from '../../lib/from';
 import { formatDuration, shortId } from '../../lib/format';
 import { stepDetail, stepDuration } from '../../lib/workflows';
+import { Button } from '../../primitives/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../primitives/table';
 import { GroupProgress } from '../groups/GroupProgress';
 import { WorkflowDag } from './WorkflowDag';
@@ -52,6 +58,7 @@ export function WorkflowRunPage() {
           }
           badge={<WorkflowRunStatusBadge status={run.status} />}
         >
+          <RetryRun run={run} />
           <CancelRun run={run} />
         </PageHeader>
         <InlineFields
@@ -61,6 +68,24 @@ export function WorkflowRunPage() {
               label: run.finished_at ? 'Took' : 'Running for',
               value: run.duration_ms !== undefined ? formatDuration(run.duration_ms) : '—',
             },
+            ...(run.attempt > 1
+              ? [
+                  {
+                    label: 'Attempt',
+                    value: (
+                      <>
+                        {run.attempt}
+                        {run.retried_at && (
+                          <span className="text-muted-foreground">
+                            {' '}
+                            · retried <RelativeTime iso={run.retried_at} />
+                          </span>
+                        )}
+                      </>
+                    ),
+                  },
+                ]
+              : []),
             ...(run.status === 'running' && run.deadline_at
               ? [{ label: 'Fails', value: <RelativeTime iso={run.deadline_at} /> }]
               : []),
@@ -86,7 +111,8 @@ export function WorkflowRunPage() {
       {run.error && (
         <p className="text-sm text-muted-foreground">
           <span className={run.status === 'failed' ? 'text-destructive' : undefined}>{run.error}</span>
-          {run.status === 'failed' && ' Steps not yet started were skipped; requests already in flight finished.'}
+          {run.status === 'failed' &&
+            ' Steps not yet started were skipped; requests already in flight finished. Retry the run to run them once the cause is fixed.'}
         </p>
       )}
       <Section title="Steps">
@@ -205,6 +231,30 @@ function StepTable({ run, now }: { run: WorkflowRun; now: number }) {
         </TableBody>
       </Table>
     </Section>
+  );
+}
+
+/**
+ * A failed or cancelled run reopens in place: what succeeded stays, the rest
+ * runs again under the definition the run started with.
+ */
+function RetryRun({ run }: { run: WorkflowRun }) {
+  const qc = useQueryClient();
+  const retry = useMutation({ ...retryWorkflowRunMutation(), onSuccess: () => qc.invalidateQueries() });
+  if (run.status !== 'failed' && run.status !== 'cancelled') return null;
+  return (
+    <>
+      {retry.error && <span className="text-xs text-destructive">{errorMessage(retry.error)}</span>}
+      <Button
+        variant={run.status === 'failed' ? 'default' : 'secondary'}
+        onClick={() => retry.mutate({ path: { id: run.id } })}
+        disabled={retry.isPending}
+        title="Run the failed and skipped steps again, under the definition this run started with. Steps that succeeded stay."
+      >
+        <RotateCcw />
+        Retry run
+      </Button>
+    </>
   );
 }
 

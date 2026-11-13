@@ -399,7 +399,7 @@ export type Task = {
 
 /**
  * The workflow step a task delivers, if it is one. A step's task can't be
- * retried on its own: start a new run of the workflow instead.
+ * retried on its own: retry its workflow run instead.
  *
  */
 export type TaskWorkflowStep = {
@@ -675,8 +675,9 @@ export type ScheduleConfig = {
 
 /**
  * What happens when a slot comes up while the previous run is still
- * pending or running. `skip` records the slot as a `skipped` run;
- * `allow` runs it alongside.
+ * pending or running, or, for a schedule with `workflow`, while the
+ * workflow run it started is still running. `skip` records the slot as
+ * a `skipped` run; `allow` runs it alongside.
  *
  */
 export type OverlapPolicy = 'skip' | 'allow';
@@ -775,8 +776,8 @@ export type RunState = 'pending' | 'running' | 'succeeded' | 'failed' | 'cancell
 export type RunTrigger = 'schedule' | 'manual';
 
 /**
- * `overlap`: the previous run was still pending or running (overlap
- * policy `skip`). `missed`: the server was down at the slot (missed
+ * `overlap`: the previous run, or the workflow run it started, was
+ * still going (overlap policy `skip`). `missed`: the server was down at the slot (missed
  * policy `skip`).
  *
  */
@@ -874,10 +875,12 @@ export type RunList = {
  * `depends_on` has succeeded. The request fields (`url` to
  * `content_type`) work as in `EnqueueRequest`. A step without `payload`
  * or `body` is sent the run's context as JSON (`workflow_run_id`,
- * `workflow`, `step`, `step_id`, `input`); every step gets the
- * `Workly-Workflow`, `Workly-Workflow-Run-Id`, `Workly-Workflow-Step`
- * and `Workly-Workflow-Step-Id` headers. The step ID is the same on
- * every retry, so it can serve as an idempotency key.
+ * `workflow`, `step`, `step_id`, `run_attempt`, `input`); every step
+ * gets the `Workly-Workflow`, `Workly-Workflow-Run-Id`,
+ * `Workly-Workflow-Step`, `Workly-Workflow-Step-Id` and
+ * `Workly-Workflow-Run-Attempt` headers. The step ID is the same on
+ * every delivery of the step, so it can serve as an idempotency key;
+ * with the run attempt, it keys work that a retried run should redo.
  *
  */
 export type WorkflowStepConfig = {
@@ -993,6 +996,16 @@ export type WorkflowRunSummary = {
      * The schedule run that started it, if any.
      */
     schedule_run_id?: string;
+    /**
+     * 1, plus one for each time the run was retried. Steps are sent it
+     * as `Workly-Workflow-Run-Attempt`.
+     *
+     */
+    attempt: number;
+    /**
+     * When the run was last retried. Absent if never.
+     */
+    retried_at?: string;
     created_at: string;
     /**
      * When a run still going fails (`max_duration_seconds`).
@@ -3120,6 +3133,41 @@ export type CancelWorkflowRunResponses = {
 };
 
 export type CancelWorkflowRunResponse = CancelWorkflowRunResponses[keyof CancelWorkflowRunResponses];
+
+export type RetryWorkflowRunData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/v1/workflow-runs/{id}/retry';
+};
+
+export type RetryWorkflowRunErrors = {
+    /**
+     * An error. Codes include `invalid_request`, `unauthorized`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
+     * `alert_channel_not_found`,
+     * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
+     * `invalid_state` (409), `payload_too_large` and
+     * `internal`.
+     *
+     */
+    default: Error;
+};
+
+export type RetryWorkflowRunError = RetryWorkflowRunErrors[keyof RetryWorkflowRunErrors];
+
+export type RetryWorkflowRunResponses = {
+    /**
+     * The run, running again
+     */
+    200: WorkflowRun;
+};
+
+export type RetryWorkflowRunResponse = RetryWorkflowRunResponses[keyof RetryWorkflowRunResponses];
 
 export type ListAlertChannelsData = {
     body?: never;

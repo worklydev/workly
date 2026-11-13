@@ -135,6 +135,7 @@ Write tools (`WORKLY_MCP=full`):
 | `retry_run`, `cancel_run` | Delivers a run again, or cancels it |
 | `trigger_workflow` | Starts a workflow run, with optional input and idempotency key |
 | `cancel_workflow_run` | Cancels a workflow run: steps not yet started are skipped |
+| `retry_workflow_run` | Reopens a failed or cancelled workflow run: its failed and skipped steps run again |
 
 Write tools that change one task, run, queue or schedule return it as changed, so an agent can confirm the change without reading it again. Deleting queues isn't offered: it can't be undone, so it stays in the dashboard, CLI and API.
 

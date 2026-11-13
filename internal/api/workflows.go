@@ -240,7 +240,7 @@ func toWorkflowRunSummary(r store.WorkflowRun) WorkflowRunSummary {
 		Id: r.ID, Workflow: r.Workflow, Version: r.Version, Status: WorkflowRunStatus(r.Status),
 		Error: optional(r.Error), IdempotencyKey: optional(r.IdempotencyKey), ScheduleRunId: optional(r.ScheduleRunID),
 		CreatedAt: r.CreatedAt, DeadlineAt: &deadline, FinishedAt: r.FinishedAt,
-		DurationMs: runDuration(r.CreatedAt, r.FinishedAt),
+		DurationMs: runDuration(r.CreatedAt, r.FinishedAt), Attempt: r.Attempt, RetriedAt: r.RetriedAt,
 	}
 }
 
@@ -250,6 +250,7 @@ func toWorkflowRun(r store.WorkflowRun) WorkflowRun {
 		Id: s.Id, Workflow: s.Workflow, Version: s.Version, Status: s.Status, Error: s.Error,
 		IdempotencyKey: s.IdempotencyKey, ScheduleRunId: s.ScheduleRunId, CreatedAt: s.CreatedAt,
 		DeadlineAt: s.DeadlineAt, FinishedAt: s.FinishedAt, DurationMs: s.DurationMs,
+		Attempt: s.Attempt, RetriedAt: s.RetriedAt,
 		Steps: make([]WorkflowStep, len(r.Steps)),
 	}
 	if len(r.Input) > 0 {
@@ -489,4 +490,19 @@ func (h Handlers) CancelWorkflowRun(ctx context.Context, req CancelWorkflowRunRe
 		return nil, err
 	}
 	return CancelWorkflowRun200JSONResponse(toWorkflowRun(r)), nil
+}
+
+// RetryWorkflowRun reopens a stopped run. It reuses the steps' tasks, as
+// retrying a task does, so like that it isn't subject to admission.
+func (h Handlers) RetryWorkflowRun(ctx context.Context, req RetryWorkflowRunRequestObject) (RetryWorkflowRunResponseObject, error) {
+	r, err := h.Store.RetryWorkflowRun(ctx, workspaceID(ctx), req.Id, time.Now())
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		return nil, workflowRunNotFound(req.Id)
+	case errors.Is(err, store.ErrInvalidState):
+		return nil, invalidState("workflow run %q is not failed or cancelled, so it can't be retried", req.Id)
+	case err != nil:
+		return nil, err
+	}
+	return RetryWorkflowRun200JSONResponse(toWorkflowRun(r)), nil
 }

@@ -198,6 +198,14 @@ type Store interface {
 	// cancelled run is a no-op; any other finished run returns
 	// ErrInvalidState.
 	CancelWorkflowRun(ctx context.Context, ws workspace.ID, id string) (WorkflowRun, error)
+	// RetryWorkflowRun reopens a failed or cancelled run, under the
+	// definition it started with: its succeeded steps stay, and the rest
+	// run again, each step reusing its task with a fresh set of attempts. A
+	// step that was waiting for a group follows the group: done if it
+	// succeeded since, waiting again if it is still going. Its attempt goes
+	// up by one and its deadline starts over. Any other run is
+	// ErrInvalidState.
+	RetryWorkflowRun(ctx context.Context, ws workspace.ID, id string, now time.Time) (WorkflowRun, error)
 
 	// CreateAlertChannel adds a channel. It returns ErrExists if the
 	// workspace has one of the same type and target.

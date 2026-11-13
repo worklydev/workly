@@ -885,8 +885,9 @@ type NewGroup struct {
 type Outcome string
 
 // OverlapPolicy What happens when a slot comes up while the previous run is still
-// pending or running. `skip` records the slot as a `skipped` run;
-// `allow` runs it alongside.
+// pending or running, or, for a schedule with `workflow`, while the
+// workflow run it started is still running. `skip` records the slot as
+// a `skipped` run; `allow` runs it alongside.
 type OverlapPolicy string
 
 // Queue defines model for Queue.
@@ -1065,8 +1066,8 @@ type Run struct {
 	// ScheduledFor The cron slot, or when a manual run was triggered. Sent as `Workly-Scheduled-For`.
 	ScheduledFor time.Time `json:"scheduled_for"`
 
-	// SkipReason `overlap`: the previous run was still pending or running (overlap
-	// policy `skip`). `missed`: the server was down at the slot (missed
+	// SkipReason `overlap`: the previous run, or the workflow run it started, was
+	// still going (overlap policy `skip`). `missed`: the server was down at the slot (missed
 	// policy `skip`).
 	SkipReason *SkipReason `json:"skip_reason,omitempty"`
 
@@ -1171,8 +1172,9 @@ type Schedule struct {
 	OnComplete *Callback `json:"on_complete,omitempty"`
 
 	// Overlap What happens when a slot comes up while the previous run is still
-	// pending or running. `skip` records the slot as a `skipped` run;
-	// `allow` runs it alongside.
+	// pending or running, or, for a schedule with `workflow`, while the
+	// workflow run it started is still running. `skip` records the slot as
+	// a `skipped` run; `allow` runs it alongside.
 	Overlap OverlapPolicy `json:"overlap"`
 	Paused  bool          `json:"paused"`
 
@@ -1243,8 +1245,9 @@ type ScheduleConfig struct {
 	OnComplete *Callback `json:"on_complete,omitempty"`
 
 	// Overlap What happens when a slot comes up while the previous run is still
-	// pending or running. `skip` records the slot as a `skipped` run;
-	// `allow` runs it alongside.
+	// pending or running, or, for a schedule with `workflow`, while the
+	// workflow run it started is still running. `skip` records the slot as
+	// a `skipped` run; `allow` runs it alongside.
 	Overlap *OverlapPolicy `json:"overlap,omitempty"`
 
 	// Payload A JSON body, sent with `Content-Type: application/json`. Use this or `body`.
@@ -1283,8 +1286,8 @@ type ScheduleList struct {
 	Schedules []Schedule `json:"schedules"`
 }
 
-// SkipReason `overlap`: the previous run was still pending or running (overlap
-// policy `skip`). `missed`: the server was down at the slot (missed
+// SkipReason `overlap`: the previous run, or the workflow run it started, was
+// still going (overlap policy `skip`). `missed`: the server was down at the slot (missed
 // policy `skip`).
 type SkipReason string
 
@@ -1384,7 +1387,7 @@ type Task struct {
 	Url            string    `json:"url"`
 
 	// WorkflowStep The workflow step a task delivers, if it is one. A step's task can't be
-	// retried on its own: start a new run of the workflow instead.
+	// retried on its own: retry its workflow run instead.
 	WorkflowStep *TaskWorkflowStep `json:"workflow_step,omitempty"`
 }
 
@@ -1423,7 +1426,7 @@ type TaskSummary struct {
 }
 
 // TaskWorkflowStep The workflow step a task delivers, if it is one. A step's task can't be
-// retried on its own: start a new run of the workflow instead.
+// retried on its own: retry its workflow run instead.
 type TaskWorkflowStep struct {
 	// Id The step, `wfs_…`.
 	//
@@ -1479,6 +1482,9 @@ type WorkflowList struct {
 
 // WorkflowRun defines model for WorkflowRun.
 type WorkflowRun struct {
+	// Attempt 1, plus one for each time the run was retried. Steps are sent it
+	// as `Workly-Workflow-Run-Attempt`.
+	Attempt   int       `json:"attempt"`
 	CreatedAt time.Time `json:"created_at"`
 
 	// DeadlineAt When a run still going fails (`max_duration_seconds`).
@@ -1495,6 +1501,9 @@ type WorkflowRun struct {
 	Id             string           `json:"id"`
 	IdempotencyKey *string          `json:"idempotency_key,omitempty"`
 	Input          *json.RawMessage `json:"input,omitempty"`
+
+	// RetriedAt When the run was last retried. Absent if never.
+	RetriedAt *time.Time `json:"retried_at,omitempty"`
 
 	// ScheduleRunId The schedule run that started it, if any.
 	ScheduleRunId *string           `json:"schedule_run_id,omitempty"`
@@ -1518,6 +1527,9 @@ type WorkflowRunStatus string
 
 // WorkflowRunSummary defines model for WorkflowRunSummary.
 type WorkflowRunSummary struct {
+	// Attempt 1, plus one for each time the run was retried. Steps are sent it
+	// as `Workly-Workflow-Run-Attempt`.
+	Attempt   int       `json:"attempt"`
 	CreatedAt time.Time `json:"created_at"`
 
 	// DeadlineAt When a run still going fails (`max_duration_seconds`).
@@ -1533,6 +1545,9 @@ type WorkflowRunSummary struct {
 	// Id Example: wfr_01J9ZK3M5Q8R2T4V6W8X0Y2Z4A
 	Id             string  `json:"id"`
 	IdempotencyKey *string `json:"idempotency_key,omitempty"`
+
+	// RetriedAt When the run was last retried. Absent if never.
+	RetriedAt *time.Time `json:"retried_at,omitempty"`
 
 	// ScheduleRunId The schedule run that started it, if any.
 	ScheduleRunId *string           `json:"schedule_run_id,omitempty"`
@@ -1588,10 +1603,12 @@ type WorkflowStep struct {
 // `depends_on` has succeeded. The request fields (`url` to
 // `content_type`) work as in `EnqueueRequest`. A step without `payload`
 // or `body` is sent the run's context as JSON (`workflow_run_id`,
-// `workflow`, `step`, `step_id`, `input`); every step gets the
-// `Workly-Workflow`, `Workly-Workflow-Run-Id`, `Workly-Workflow-Step`
-// and `Workly-Workflow-Step-Id` headers. The step ID is the same on
-// every retry, so it can serve as an idempotency key.
+// `workflow`, `step`, `step_id`, `run_attempt`, `input`); every step
+// gets the `Workly-Workflow`, `Workly-Workflow-Run-Id`,
+// `Workly-Workflow-Step`, `Workly-Workflow-Step-Id` and
+// `Workly-Workflow-Run-Attempt` headers. The step ID is the same on
+// every delivery of the step, so it can serve as an idempotency key;
+// with the run attempt, it keys work that a retried run should redo.
 type WorkflowStepConfig struct {
 	// Body A raw text body. Use this or `payload`.
 	Body *string `json:"body,omitempty"`
@@ -2443,6 +2460,20 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /v1/workflow-runs/{id}/cancel (the `CancelWorkflowRun` operationId).
 	CancelWorkflowRun(ctx context.Context, id WorkflowRunID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RetryWorkflowRun Retry a workflow run
+	//
+	// Reopens a failed or cancelled run, under the definition it started
+	// with and with the same input: steps that succeeded stay, and the
+	// rest run again. Each step that runs again gets its task back,
+	// pending with a fresh set of attempts. A step that was waiting for a
+	// group follows the group: it succeeds if the group has since
+	// succeeded, and waits for it again if it is still going. The run's
+	// `attempt` goes up by one, and its `max_duration_seconds` starts
+	// over. Other runs are `invalid_state`.
+	//
+	// Corresponds with POST /v1/workflow-runs/{id}/retry (the `RetryWorkflowRun` operationId).
+	RetryWorkflowRun(ctx context.Context, id WorkflowRunID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListWorkflows List workflows
 	//
@@ -3518,6 +3549,30 @@ func (c *Client) GetWorkflowRun(ctx context.Context, id WorkflowRunID, reqEditor
 // Corresponds with POST /v1/workflow-runs/{id}/cancel (the `CancelWorkflowRun` operationId).
 func (c *Client) CancelWorkflowRun(ctx context.Context, id WorkflowRunID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCancelWorkflowRunRequest(c.Server, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RetryWorkflowRun Retry a workflow run
+//
+// Reopens a failed or cancelled run, under the definition it started
+// with and with the same input: steps that succeeded stay, and the
+// rest run again. Each step that runs again gets its task back,
+// pending with a fresh set of attempts. A step that was waiting for a
+// group follows the group: it succeeds if the group has since
+// succeeded, and waits for it again if it is still going. The run's
+// `attempt` goes up by one, and its `max_duration_seconds` starts
+// over. Other runs are `invalid_state`.
+//
+// Corresponds with POST /v1/workflow-runs/{id}/retry (the `RetryWorkflowRun` operationId).
+func (c *Client) RetryWorkflowRun(ctx context.Context, id WorkflowRunID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRetryWorkflowRunRequest(c.Server, id)
 	if err != nil {
 		return nil, err
 	}
@@ -5867,6 +5922,40 @@ func NewCancelWorkflowRunRequest(server string, id WorkflowRunID) (*http.Request
 	return req, nil
 }
 
+// NewRetryWorkflowRunRequest constructs an http.Request for the RetryWorkflowRun method
+func NewRetryWorkflowRunRequest(server string, id WorkflowRunID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/workflow-runs/%s/retry", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListWorkflowsRequest constructs an http.Request for the ListWorkflows method
 func NewListWorkflowsRequest(server string) (*http.Request, error) {
 	var err error
@@ -6670,6 +6759,22 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /v1/workflow-runs/{id}/cancel (the `CancelWorkflowRun` operationId).
 	CancelWorkflowRunWithResponse(ctx context.Context, id WorkflowRunID, reqEditors ...RequestEditorFn) (*CancelWorkflowRunResponse, error)
+
+	// RetryWorkflowRunWithResponse Retry a workflow run
+	//
+	// Reopens a failed or cancelled run, under the definition it started
+	// with and with the same input: steps that succeeded stay, and the
+	// rest run again. Each step that runs again gets its task back,
+	// pending with a fresh set of attempts. A step that was waiting for a
+	// group follows the group: it succeeds if the group has since
+	// succeeded, and waits for it again if it is still going. The run's
+	// `attempt` goes up by one, and its `max_duration_seconds` starts
+	// over. Other runs are `invalid_state`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/workflow-runs/{id}/retry (the `RetryWorkflowRun` operationId).
+	RetryWorkflowRunWithResponse(ctx context.Context, id WorkflowRunID, reqEditors ...RequestEditorFn) (*RetryWorkflowRunResponse, error)
 
 	// ListWorkflowsWithResponse List workflows
 	//
@@ -8991,6 +9096,54 @@ func (r CancelWorkflowRunResponse) ContentType() string {
 	return ""
 }
 
+type RetryWorkflowRunResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *WorkflowRun
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r RetryWorkflowRunResponse) GetJSON200() *WorkflowRun {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r RetryWorkflowRunResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r RetryWorkflowRunResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RetryWorkflowRunResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RetryWorkflowRunResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RetryWorkflowRunResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type ListWorkflowsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -10125,6 +10278,28 @@ func (c *ClientWithResponses) CancelWorkflowRunWithResponse(ctx context.Context,
 		return nil, err
 	}
 	return ParseCancelWorkflowRunResponse(rsp)
+}
+
+// RetryWorkflowRunWithResponse Retry a workflow run
+//
+// Reopens a failed or cancelled run, under the definition it started
+// with and with the same input: steps that succeeded stay, and the
+// rest run again. Each step that runs again gets its task back,
+// pending with a fresh set of attempts. A step that was waiting for a
+// group follows the group: it succeeds if the group has since
+// succeeded, and waits for it again if it is still going. The run's
+// `attempt` goes up by one, and its `max_duration_seconds` starts
+// over. Other runs are `invalid_state`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/workflow-runs/{id}/retry (the `RetryWorkflowRun` operationId).
+func (c *ClientWithResponses) RetryWorkflowRunWithResponse(ctx context.Context, id WorkflowRunID, reqEditors ...RequestEditorFn) (*RetryWorkflowRunResponse, error) {
+	rsp, err := c.RetryWorkflowRun(ctx, id, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRetryWorkflowRunResponse(rsp)
 }
 
 // ListWorkflowsWithResponse List workflows
@@ -11771,6 +11946,39 @@ func ParseCancelWorkflowRunResponse(rsp *http.Response) (*CancelWorkflowRunRespo
 	}
 
 	response := &CancelWorkflowRunResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest WorkflowRun
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRetryWorkflowRunResponse parses an HTTP response from a RetryWorkflowRunWithResponse call
+func ParseRetryWorkflowRunResponse(rsp *http.Response) (*RetryWorkflowRunResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RetryWorkflowRunResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}

@@ -524,3 +524,8 @@ def get_workflow_run(run_id: str) -> Request:
 
 def cancel_workflow_run(run_id: str) -> Request:
     return Request("POST", f"/v1/workflow-runs/{_q(run_id)}/cancel", idempotent=True)
+
+
+def retry_workflow_run(run_id: str) -> Request:
+    # Not idempotent: once it is running again, retrying is invalid_state.
+    return Request("POST", f"/v1/workflow-runs/{_q(run_id)}/retry")

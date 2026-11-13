@@ -254,7 +254,7 @@ To debug failures: get_queue groups a queue's failed tasks by error, with the la
 	if s.mode(r) == Full {
 		b.WriteString(`
 
-To test a handler: enqueue_task to its URL, then wait_for_task to see how the first attempt went. After fixing a handler, retry_task delivers a task again at once (retry_failed_tasks for a whole queue, or one group of failures with last_error). For a schedule's handler, trigger_schedule runs it now and wait_for_run shows the result; update_schedule creates or changes a schedule. trigger_workflow starts a workflow run and cancel_workflow_run stops one. Tools that change one task, run, queue or schedule return it as changed, so there is no need to read it again.`)
+To test a handler: enqueue_task to its URL, then wait_for_task to see how the first attempt went. After fixing a handler, retry_task delivers a task again at once (retry_failed_tasks for a whole queue, or one group of failures with last_error). For a schedule's handler, trigger_schedule runs it now and wait_for_run shows the result; update_schedule creates or changes a schedule. trigger_workflow starts a workflow run and cancel_workflow_run stops one; after fixing what failed a run, retry_workflow_run runs its failed and skipped steps again. Tools that change one task, run, queue or schedule return it as changed, so there is no need to read it again.`)
 	} else if s.opts.Mode == Full {
 		b.WriteString(`
 
