@@ -20,7 +20,7 @@ const FAILED = 'bg-destructive';
  */
 export function DeliveriesChart({ fresh = false }: { fresh?: boolean }) {
   const { value: range, per, setRange } = useRange();
-  const { data, error, outcomes } = useActivity();
+  const { data, error } = useActivity();
   const [hovered, setHovered] = useState<number>();
   const setting = useSetting();
 
@@ -48,17 +48,6 @@ export function DeliveriesChart({ fresh = false }: { fresh?: boolean }) {
           <div className="h-5" />
           <ChartSkeleton bars={BARS[range]} />
           <ChartAxis ticks={['', '', '']} />
-          <div className="h-4" />
-        </>
-      ) : !outcomes ? (
-        <>
-          <div className="h-5" />
-          <ChartEmpty
-            bars={data.buckets.length}
-            title="This server doesn't report deliveries yet"
-            hint="Update Workly to see the tasks that succeeded and failed over time."
-          />
-          <ChartAxis ticks={axisTicks(data)} />
           <div className="h-4" />
         </>
       ) : total === 0 ? (

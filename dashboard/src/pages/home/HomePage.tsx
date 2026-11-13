@@ -136,7 +136,7 @@ function WorkspaceStatus({ queues, schedules, now }: { queues: Queue[]; schedule
  */
 function Stats({ queues, now }: { queues: Queue[]; now: number }) {
   const { value: range } = useRange();
-  const { data, outcomes } = useActivity();
+  const { data } = useActivity();
   const setting = useSetting();
   const stat = (key: 'due' | 'scheduled' | 'running') =>
     Math.min(
@@ -156,13 +156,12 @@ function Stats({ queues, now }: { queues: Queue[]; now: number }) {
   const total = (pick: (b: NonNullable<typeof data>['buckets'][number]) => number) =>
     data ? data.buckets.reduce((n, b) => n + pick(b), 0) : undefined;
   const created = total((b) => Object.values(b.counts).reduce((a, c) => a + c, 0));
-  // Unknown against a server that doesn't count finished tasks per bucket.
-  const succeeded = outcomes === false ? undefined : total((b) => b.succeeded);
-  const failed = outcomes === false ? undefined : total((b) => b.failed);
+  const succeeded = total((b) => b.succeeded);
+  const failed = total((b) => b.failed);
   const finished = (succeeded ?? 0) + (failed ?? 0);
   const rate = finished > 0 ? succeeded! / finished : undefined;
   const kept = `Counts tasks still kept${setting('WORKLY_RETENTION')}.`;
-  const show = (n: number | undefined) => (n !== undefined ? formatCount(n) : outcomes === false ? '—' : '…');
+  const show = (n: number | undefined) => (n === undefined ? '…' : formatCount(n));
 
   return (
     <div className="grid gap-x-6 gap-y-8 xl:grid-cols-[minmax(0,3fr)_minmax(0,4fr)]">
@@ -226,13 +225,7 @@ function Stats({ queues, now }: { queues: Queue[]; now: number }) {
           <StatCard
             label="Success rate"
             value={data === undefined ? '…' : rate === undefined ? '—' : formatRate(rate)}
-            detail={
-              outcomes === false
-                ? 'needs a newer server'
-                : data && rate === undefined
-                  ? 'nothing finished'
-                  : 'of finished'
-            }
+            detail={data && rate === undefined ? 'nothing finished' : 'of finished'}
             tone={rate !== undefined && rate < LOW_SUCCESS ? 'danger' : undefined}
             title={`Succeeded out of succeeded and failed, in the last ${range}. ${kept}`}
           />
