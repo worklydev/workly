@@ -6,7 +6,7 @@ Workly is an open-source HTTP task queue and scheduler. You enqueue a task with 
 enqueue → queue → HTTP delivery → retry → success/failure
 ```
 
-Next to queues, [schedules](schedules.md) call an endpoint on a cron timetable, with the same retries, signing and history, and [task groups](groups.md) call you back once a set of tasks has finished.
+Next to queues, [schedules](schedules.md) call an endpoint on a cron timetable, with the same retries, signing and history, [task groups](groups.md) call you back once a set of tasks has finished, and [workflows](workflows.md) run HTTP steps in dependency order.
 
 The same binary runs everywhere: `workly dev` on your laptop (SQLite, no configuration), `workly serve` with Postgres in your own infrastructure, or hosted at [workly.run](https://workly.run). Moving between them means changing environment variables, not code.
 
@@ -16,9 +16,10 @@ The same binary runs everywhere: `workly dev` on your laptop (SQLite, no configu
 - [Concepts](concepts.md): queues, tasks, attempts, retries, delivery semantics and signing, including verifying signatures without an SDK.
 - [Schedules](schedules.md): call an endpoint on a cron timetable.
 - [Task groups](groups.md): fan out tasks and get one callback when they've all finished.
+- [Workflows](workflows.md): run HTTP steps in dependency order, each delivered as a task, waiting for groups where they fan out.
 - [Callbacks](callbacks.md): be called with the outcome each time a task or a schedule's run finishes.
 - [Alerts](alerts.md): hear about failed tasks and runs by email or in Slack.
-- [Configuration as code](deploy.md): keep queues and schedules in a `workly.yaml` and deploy it with `workly deploy`.
+- [Configuration as code](deploy.md): keep queues, workflows and schedules in a `workly.yaml` and deploy it with `workly deploy`.
 - [Self-hosting](self-hosting.md): run it in production on Docker, Compose or Kubernetes.
 - [MCP](mcp.md): let coding agents see inside your queues and act on them.
 

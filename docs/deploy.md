@@ -1,12 +1,12 @@
 # Configuration as code
 
-Keep your queues and schedules in a `workly.yaml` next to your code, and deploy them with one command:
+Keep your queues, workflows and schedules in a `workly.yaml` next to your code, and deploy them with one command:
 
 ```sh
 workly deploy
 ```
 
-`workly deploy` compares the file with the server, shows what it will change, and creates and updates queues and schedules until the server matches. Running it again changes nothing, so it can run on every deploy of your app, and it replaces scripts that call the API to set things up.
+`workly deploy` compares the file with the server, shows what it will change, and creates and updates queues, workflows and schedules until the server matches. Running it again changes nothing, so it can run on every deploy of your app, and it replaces scripts that call the API to set things up.
 
 ## Example
 
@@ -88,9 +88,10 @@ All three read `workly.yaml` in the current directory, or the file given with `-
 |---|---|
 | `version` | Required. `1`. |
 | `queues` | Queue names to their settings. |
+| `workflows` | Workflow names to their `steps` (a list) and `max_duration_seconds`. |
 | `schedules` | Schedule names to their settings. |
 
-A queue or schedule's settings are the fields of its `PUT` request in the [API](../api/openapi.yaml), with the same names, defaults and limits: for queues `max_attempts`, `min_backoff_seconds`, `max_backoff_seconds`, `backoff_multiplier`, `timeout_seconds`, `retry_on_4xx`, `rate_per_second` and `max_concurrency`; for schedules `cron` and `url` (required), `timezone`, `method`, `headers`, `payload` or `body` and `content_type`, the retry settings, `overlap` and `missed` (see [Schedules](schedules.md)). A `payload` can be any YAML, and is sent as JSON.
+A queue or schedule's settings are the fields of its `PUT` request in the [API](../api/openapi.yaml), with the same names, defaults and limits: for queues `max_attempts`, `min_backoff_seconds`, `max_backoff_seconds`, `backoff_multiplier`, `timeout_seconds`, `retry_on_4xx`, `rate_per_second` and `max_concurrency`; for workflows `steps`, each with the settings in [Workflows](workflows.md#define-a-workflow), and `max_duration_seconds`; for schedules `cron` and `url` or `workflow` (required), `timezone`, `method`, `headers`, `payload` or `body` and `content_type`, the retry settings, `overlap` and `missed` (see [Schedules](schedules.md)). A `payload` can be any YAML, and is sent as JSON.
 
 Settings work as `PUT` does: **a setting left out of the file gets its default**, not whatever it was before. So the file describes each queue and schedule completely, and a change made in the dashboard to something the file declares is undone by the next deploy. To change it for good, change the file.
 
@@ -102,8 +103,8 @@ The plan never shows header values or bodies, only that they changed, since they
 
 ## What deploying changes, and what it doesn't
 
-- It **creates** queues and schedules the file declares that the server doesn't have, and **updates** those whose settings differ. One whose settings already match isn't touched, so its `updated_at` stays put.
-- It **never deletes** anything. A queue or schedule the file doesn't declare is left alone; the plan lists the schedules on the server that aren't in the file, so you notice the ones you meant to remove. Remove those with `workly schedules rm NAME`. Queues aren't listed: enqueueing a task creates its queue, so most queues have never been in a file.
+- It **creates** queues, workflows and schedules the file declares that the server doesn't have, and **updates** those whose settings differ. Workflows go before schedules, so a schedule can start one declared in the same file. A workflow run already going keeps the definition it started with. One whose settings already match isn't touched, so its `updated_at` stays put.
+- It **never deletes** anything. A queue or schedule the file doesn't declare is left alone; the plan lists the workflows and schedules on the server that aren't in the file, so you notice the ones you meant to remove. Remove those with `workly schedules rm NAME` or `workly workflows rm NAME`. Queues aren't listed: enqueueing a task creates its queue, so most queues have never been in a file.
 - It **never pauses or resumes**. Pausing is something you do during an incident, and a deploy shouldn't undo it: a paused queue or schedule stays paused, and the plan says so.
 - A section left out of the file isn't managed by it: a file without `schedules` doesn't look at schedules at all. An empty one (`schedules: {}`) declares none, which only changes what the plan lists.
 

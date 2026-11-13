@@ -86,6 +86,7 @@ The expression is read in the schedule's `timezone`, an IANA name such as `Europ
 | `cron` | required | When to run. |
 | `timezone` | `UTC` | |
 | `url` | required | The endpoint to call. |
+| `workflow` | none | Instead of `url`: start a run of this [workflow](workflows.md), with `payload` as its input. |
 | `method`, `headers`, `payload` or `body`, `content_type` | `POST` | The request, as for [tasks](quickstart.md). |
 | `timeout_seconds` | `30` | How long to wait for a response. |
 | `max_attempts` | `3` | Attempts per run before it fails. |
@@ -94,6 +95,8 @@ The expression is read in the schedule's `timezone`, an IANA name such as `Europ
 | `overlap` | `skip` | What to do when a run is due while the previous one is still going. |
 | `missed` | `skip` | What to do about times missed while the server was down. |
 | `on_complete` | none | A [callback](callbacks.md), `{url, headers}`, called with a summary each time a run finishes. |
+
+A schedule with `workflow` sends no request of its own: each run starts a workflow run, using the schedule run's ID as its idempotency key, and succeeds once it has started (a workflow that doesn't exist yet is retried like a failed request). The schedule run links to the workflow run, which has its own status. `method`, `headers`, `body` and `content_type` don't apply.
 
 Retries are fewer and shorter than a queue's by default, so a failing run gives up well before a frequent schedule's next one.
 

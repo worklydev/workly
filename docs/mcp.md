@@ -113,6 +113,10 @@ Read tools (marked read-only, so clients can run them without asking):
 | `get_run` | A run with its attempts |
 | `get_run_delivery` | The exact signed request for a run, with a curl command |
 | `wait_for_run` | Waits for the first attempt of a run, and returns how it went |
+| `list_workflows` | All [workflows](workflows.md): their steps and how the last run went |
+| `get_workflow` | One workflow's definition: steps, dependencies, queues |
+| `list_workflow_runs` | Runs of one workflow or of all of them, newest first, optionally by status |
+| `get_workflow_run` | A run with each step's status, task, last result and what it is blocked by or waiting for |
 
 Write tools (`WORKLY_MCP=full`):
 
@@ -129,6 +133,8 @@ Write tools (`WORKLY_MCP=full`):
 | `trigger_schedule` | Runs a schedule now |
 | `pause_schedule`, `resume_schedule` | Stops and restarts a schedule |
 | `retry_run`, `cancel_run` | Delivers a run again, or cancels it |
+| `trigger_workflow` | Starts a workflow run, with optional input and idempotency key |
+| `cancel_workflow_run` | Cancels a workflow run: steps not yet started are skipped |
 
 Write tools that change one task, run, queue or schedule return it as changed, so an agent can confirm the change without reading it again. Deleting queues isn't offered: it can't be undone, so it stays in the dashboard, CLI and API.
 

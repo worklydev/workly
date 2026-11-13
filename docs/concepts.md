@@ -76,7 +76,7 @@ So make handlers safe to run twice. Every delivery carries headers to help:
 | `Workly-Timestamp`, `Workly-Signature` | The signature (see [Signing](#signing)). |
 | `traceparent` | The trace context of the request that enqueued the task, if it had one, so your handler's spans join that trace. |
 
-Your own `headers` are sent too; `Workly-*` names are reserved. Schedule runs carry `Workly-Run-Id`, `Workly-Schedule` and `Workly-Scheduled-For` instead of the task headers ([schedules](schedules.md#handling-a-run)).
+Your own `headers` are sent too; `Workly-*` names are reserved. Schedule runs carry `Workly-Run-Id`, `Workly-Schedule` and `Workly-Scheduled-For` instead of the task headers ([schedules](schedules.md#handling-a-run)), and a [workflow](workflows.md#what-a-step-receives)'s steps carry `Workly-Workflow`, `Workly-Workflow-Run-Id`, `Workly-Workflow-Step` and `Workly-Workflow-Step-Id` as well.
 
 Order isn't guaranteed. Tasks in a queue are started roughly in the order they're due, but with more than one delivery at a time, and with retries, they can finish in any order. If order matters, set `max_concurrency: 1`, and keep in mind that a retry still lets later tasks go first.
 
