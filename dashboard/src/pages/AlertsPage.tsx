@@ -30,10 +30,7 @@ export function AlertsPage() {
 
   return (
     <>
-      <PageHeader
-        title="Alerts"
-        description="Hear about failed tasks and schedule runs without watching the dashboard."
-      />
+      <PageHeader title="Alerts" description="Get an email or Slack message when something fails." />
       {isPending ? (
         <Muted>Loading…</Muted>
       ) : error ? (

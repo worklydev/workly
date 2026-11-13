@@ -7,7 +7,7 @@ export const ITEMS: NavItem[] = [
   { to: '/queues', label: 'Queues', icon: Layers },
   { to: '/tasks', label: 'Tasks', icon: ListChecks },
   { to: '/groups', label: 'Groups', icon: Boxes },
-  { to: '/failures', label: 'Failures', icon: TriangleAlert },
   { to: '/schedules', label: 'Schedules', icon: CalendarClock },
+  { to: '/failures', label: 'Failures', icon: TriangleAlert },
   { to: '/alerts', label: 'Alerts', icon: Bell },
 ];

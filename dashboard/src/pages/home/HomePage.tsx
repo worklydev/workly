@@ -57,7 +57,7 @@ export function HomePage() {
 
   return (
     <>
-      <PageHeader title="Home" description="Everything in this workspace at a glance, live.">
+      <PageHeader title="Home" description="How your queues and schedules are doing.">
         <Button variant="ghost" onClick={() => setCreating('queue')}>
           <Plus />
           New queue

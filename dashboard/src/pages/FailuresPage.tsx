@@ -22,10 +22,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 export function FailuresPage() {
   return (
     <>
-      <PageHeader
-        title="Failures"
-        description="Failed tasks and schedule runs, grouped by the error they ended with. Fix the cause, then retry them."
-      >
+      <PageHeader title="Failures" description="Everything that failed, grouped by error.">
         <AlertsLink />
       </PageHeader>
       <QueueFailures />

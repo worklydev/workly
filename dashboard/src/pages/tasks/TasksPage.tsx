@@ -84,7 +84,7 @@ export function TasksPage() {
 
   return (
     <>
-      <PageHeader title="Tasks" description="Search across all queues." />
+      <PageHeader title="Tasks" description="Every task, across all queues." />
       {/* Filters, sort and the table belong together, so they don't get the page's section spacing. */}
       <div className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">

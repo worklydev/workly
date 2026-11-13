@@ -33,10 +33,7 @@ export function QueuesPage() {
 
   return (
     <>
-      <PageHeader
-        title="Queues"
-        description="HTTP tasks delivered to your endpoints, with retries, rate limits and concurrency set per queue."
-      >
+      <PageHeader title="Queues" description="Tasks waiting to be delivered to your endpoints.">
         <Button onClick={() => setCreating(true)}>
           <Plus />
           New queue

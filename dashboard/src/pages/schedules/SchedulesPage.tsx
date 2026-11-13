@@ -34,10 +34,7 @@ export function SchedulesPage() {
 
   return (
     <>
-      <PageHeader
-        title="Schedules"
-        description="Cron for HTTP endpoints. Each call is a run, retried and recorded like a task, separately from queues."
-      >
+      <PageHeader title="Schedules" description="Endpoints called on a cron timetable.">
         <Button onClick={() => setCreating(true)}>
           <Plus />
           New schedule
