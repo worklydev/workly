@@ -973,7 +973,8 @@ export type WorkflowRunStatus = 'running' | 'succeeded' | 'failed' | 'cancelled'
  * `blocked` waits for its dependencies; `pending` has its task
  * enqueued (or retrying); `running` is being delivered; `waiting`
  * succeeded and waits for the resource its response named in
- * `Workly-Wait-For`; `skipped` never ran because the run stopped.
+ * `Workly-Wait-For`; `skipped` never ran, or stopped waiting, because
+ * the run stopped.
  *
  */
 export type StepStatus = 'blocked' | 'pending' | 'running' | 'waiting' | 'succeeded' | 'failed' | 'skipped';

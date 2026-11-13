@@ -26,8 +26,8 @@ GroupStatus = Literal["open", "running", "succeeded", "failed"]
 WorkflowRunStatus = Literal["running", "succeeded", "failed", "cancelled"]
 StepStatus = Literal["blocked", "pending", "running", "waiting", "succeeded", "failed", "skipped"]
 """`blocked` waits for its dependencies; `pending` has its task queued or retrying; `running` is
-being delivered; `waiting` succeeded and waits for its `wait_for` group; `skipped` never ran
-because the run stopped."""
+being delivered; `waiting` succeeded and waits for its `wait_for` group; `skipped` never ran,
+or stopped waiting, because the run stopped."""
 
 
 def _time(value: str) -> datetime:

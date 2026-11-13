@@ -414,6 +414,22 @@ func testWorkflowWaitFor(t *testing.T, open func() store.Store) {
 	wantSteps(t, run, store.WorkflowCancelled, "prices=skipped", "analytics=skipped")
 	closeGroup(t, s, g)
 	wantSteps(t, getWfRun(t, s, ws, r.ID), store.WorkflowCancelled, "prices=skipped", "analytics=skipped")
+
+	// Another step failing skips a waiting one too, and its group finishing
+	// later changes nothing.
+	putWorkflow(t, s, ws, "wait-fail", step("prices"), step("fx"), step("analytics", "prices", "fx"))
+	r = startRun(t, s, ws, "wait-fail")
+	g = mustCreateGroup(t, s, ws, store.NewGroup{})
+	tasks := claimSteps(t, s, ws, store.WorkflowQueue)
+	deliver(t, s, tasks["prices"], store.TaskSucceeded, waitFor(g))
+	deliver(t, s, tasks["fx"], store.TaskFailed, nil)
+	run = getWfRun(t, s, ws, r.ID)
+	wantSteps(t, run, store.WorkflowFailed, "prices=skipped", "fx=failed", "analytics=skipped")
+	if st := run.Steps[0]; st.FinishedAt == nil || st.Error == "" {
+		t.Fatalf("skipped waiting step = %+v", st)
+	}
+	closeGroup(t, s, g)
+	wantSteps(t, getWfRun(t, s, ws, r.ID), store.WorkflowFailed, "prices=skipped", "fx=failed", "analytics=skipped")
 }
 
 // testWorkflowWaitRace closes groups while the steps naming them are being

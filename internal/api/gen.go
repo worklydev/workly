@@ -1261,7 +1261,8 @@ type StartWorkflowRun struct {
 // StepStatus `blocked` waits for its dependencies; `pending` has its task
 // enqueued (or retrying); `running` is being delivered; `waiting`
 // succeeded and waits for the resource its response named in
-// `Workly-Wait-For`; `skipped` never ran because the run stopped.
+// `Workly-Wait-For`; `skipped` never ran, or stopped waiting, because
+// the run stopped.
 type StepStatus string
 
 // Task defines model for Task.
@@ -1506,7 +1507,8 @@ type WorkflowStep struct {
 	// Status `blocked` waits for its dependencies; `pending` has its task
 	// enqueued (or retrying); `running` is being delivered; `waiting`
 	// succeeded and waits for the resource its response named in
-	// `Workly-Wait-For`; `skipped` never ran because the run stopped.
+	// `Workly-Wait-For`; `skipped` never ran, or stopped waiting, because
+	// the run stopped.
 	Status StepStatus `json:"status"`
 
 	// Task The step's task, which records its attempts.

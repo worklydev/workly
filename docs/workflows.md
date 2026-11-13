@@ -142,9 +142,10 @@ A run stops at its first failed step:
 
 - steps still blocked are `skipped`,
 - step tasks not yet delivered are cancelled and their steps `skipped`,
+- steps waiting for a group are `skipped`; the group itself goes on, and its tasks still run,
 - requests already in flight finish, and their steps record how they went, but start nothing.
 
-The run is `failed`, with the step's error. A run that is still going after `max_duration_seconds` fails the same way, with any waiting steps; cancelling a run (`workly workflows cancel`, or the dashboard) skips what hasn't started. Step tasks can't be retried one at a time: start a new run instead. A step's task says which step and run it delivers (`workflow_step` on the task in the API, and a link to the run on its dashboard page), so a failure found in a queue leads back to its run.
+The run is `failed`, with the step's error. A run that is still going after `max_duration_seconds` fails the same way, except that its waiting steps are `failed`, since they are what didn't finish in time; cancelling a run (`workly workflows cancel`, or the dashboard) skips what hasn't started. Step tasks can't be retried one at a time: start a new run instead. A step's task says which step and run it delivers (`workflow_step` on the task in the API, and a link to the run on its dashboard page), so a failure found in a queue leads back to its run.
 
 ## Statuses
 
@@ -155,7 +156,7 @@ The run is `failed`, with the step's error. A run that is still going after `max
 | `running` | Its request is being delivered. |
 | `waiting` | Its request succeeded, and it waits for the group it named. |
 | `succeeded`, `failed` | Finished. |
-| `skipped` | Never ran: the run stopped first. |
+| `skipped` | Never ran, or was waiting for a group: the run stopped first. |
 
 A run is `running`, then `succeeded`, `failed` or `cancelled`. `GET /v1/workflow-runs/{id}` (`workly workflows run ID`, `get_workflow_run` over [MCP](mcp.md)) shows each step with its task, its last status and error, what it is blocked by or waiting for, and how long each phase took.
 

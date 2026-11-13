@@ -582,7 +582,7 @@ func (s *Store) startStep(ctx context.Context, tx *sql.Tx, r *store.WorkflowRun,
 		if err := s.setStep(ctx, tx, st.ID, store.StepFailed, reason, now, store.StepPending); err != nil {
 			return false, err
 		}
-		return false, s.stopRun(ctx, tx, r, store.WorkflowFailed, stepFailure(st.Name, reason), "", now)
+		return false, s.stopRun(ctx, tx, r, store.WorkflowFailed, stepFailure(st.Name, reason), store.StepSkipped, now)
 	}
 	if err != nil {
 		return false, err
@@ -624,7 +624,9 @@ func (s *Store) setStep(ctx context.Context, tx *sql.Tx, stepID string, status s
 // stopRun finishes a running run: its blocked steps are skipped, and so
 // are pending ones whose task hasn't started (which is cancelled). Tasks
 // being delivered finish, and their steps record how they went, but start
-// nothing. Waiting steps become waiting, unless that is empty.
+// nothing. Steps waiting for a group become waiting (skipped, or failed
+// when the run timed out); their group goes on, it just no longer decides
+// anything.
 func (s *Store) stopRun(ctx context.Context, tx *sql.Tx, r *store.WorkflowRun, status store.WorkflowRunStatus,
 	reason string, waiting store.StepStatus, now time.Time) error {
 	res, err := s.exec(ctx, tx, `UPDATE workflow_runs SET status = ?, error = ?, finished_at = ?
@@ -666,9 +668,6 @@ func (s *Store) stopRun(ctx context.Context, tx *sql.Tx, r *store.WorkflowRun, s
 		if err := s.setStep(ctx, tx, stepID, store.StepSkipped, skipped, now, store.StepPending); err != nil {
 			return err
 		}
-	}
-	if waiting == "" {
-		return nil
 	}
 	msg := skipped
 	if waiting == store.StepFailed {
@@ -791,7 +790,7 @@ func (s *Store) failStep(ctx context.Context, tx *sql.Tx, r *store.WorkflowRun, 
 	}
 	// Fail-stop: nothing else starts. Other branches' tasks already being
 	// delivered, and steps waiting on groups, finish as they would.
-	return s.stopRun(ctx, tx, r, store.WorkflowFailed, stepFailure(st.Name, reason), "", now)
+	return s.stopRun(ctx, tx, r, store.WorkflowFailed, stepFailure(st.Name, reason), store.StepSkipped, now)
 }
 
 func (s *Store) succeedStep(ctx context.Context, tx *sql.Tx, r *store.WorkflowRun, st store.WorkflowStep, now time.Time) (bool, error) {
