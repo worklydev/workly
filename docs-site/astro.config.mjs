@@ -1,3 +1,4 @@
+import { sep } from 'node:path';
 import starlight from '@astrojs/starlight';
 import { defineConfig } from 'astro/config';
 import starlightLlmsTxt from 'starlight-llms-txt';
@@ -11,7 +12,8 @@ const docs = {
     'astro:server:setup': ({ server }) => {
       server.watcher.add(docsDir);
       server.watcher.on('all', (_, path) => {
-        if (path.startsWith(docsDir)) sync();
+        // The separator matters: docs-site/, where sync writes, shares the prefix.
+        if (path.startsWith(docsDir + sep)) sync();
       });
     },
   },
@@ -32,6 +34,14 @@ export default defineConfig({
       favicon: '/favicon.svg',
       logo: { src: './public/favicon.svg', alt: '' },
       customCss: ['./src/theme.css'],
+      // Colours, borders and fonts come from the tokens in theme.css; these are
+      // the parts Expressive Code only takes as options.
+      expressiveCode: {
+        themes: ['vitesse-dark', 'vitesse-light'],
+        // No traffic-light title bar on shell blocks: a plain panel, like the dashboard's CodePanel.
+        defaultProps: { frame: 'code' },
+        styleOverrides: { frames: { terminalTitlebarDotsOpacity: '0' } },
+      },
       // /docs/llms.txt, llms-full.txt and llms-small.txt, so an assistant can
       // read all the docs in one fetch. workly.run/llms.txt links here.
       plugins: [
@@ -75,7 +85,13 @@ export default defineConfig({
             { slug: 'performance' },
           ],
         },
-        { label: 'workly.run', link: 'https://workly.run' },
+        {
+          label: 'Links',
+          items: [
+            { label: 'Workly home', link: 'https://workly.run' },
+            { label: 'Console', link: 'https://console.workly.run' },
+          ],
+        },
       ],
     }),
   ],

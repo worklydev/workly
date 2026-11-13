@@ -1,6 +1,6 @@
 # Design guidelines
 
-Live reference: **`/design`** in the dashboard (`src/pages/DesignPage.tsx`). Tokens live in `src/index.css`, and building blocks live in `src/primitives/`.
+Live reference: **`/design`** in the dashboard (`src/pages/DesignPage.tsx`). Tokens live in `src/tokens.css` (plain CSS, also imported by the docs site), wired into Tailwind in `src/index.css`, and building blocks live in `src/primitives/`.
 
 ## Direction
 
