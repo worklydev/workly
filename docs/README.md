@@ -39,3 +39,5 @@ The same binary runs everywhere: `workly dev` on your laptop (SQLite, no configu
 - [Metrics](metrics.md): Prometheus metrics and example alerts.
 - [Performance](performance.md): load test results.
 - SDKs: [Python](../sdks/python) and [TypeScript](../sdks/typescript).
+
+For AI agents, [workly.run/docs/llms-full.txt](https://workly.run/docs/llms-full.txt) has all of these docs in one file, and each page is also published as Markdown at its address with `.md`, such as [workly.run/docs/quickstart.md](https://workly.run/docs/quickstart.md).

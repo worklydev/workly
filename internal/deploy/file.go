@@ -32,6 +32,19 @@ type File struct {
 	Workflows                             []Workflow
 	Schedules                             []Schedule
 	HasQueues, HasWorkflows, HasSchedules bool
+	// Defaults lists the ${NAME:-default} references that took their
+	// default, in file order, so plan can show them: a variable CI forgot
+	// to set would otherwise deploy a local default without a word.
+	Defaults []Default
+}
+
+// Default is a ${NAME:-value} reference whose variable wasn't set (or was
+// empty), so value was used for it in Field.
+type Default struct {
+	Line  int
+	Field string
+	Name  string
+	Value string
 }
 
 // Queue is a declared queue: Config is the PUT body, settings what it
@@ -102,12 +115,15 @@ func Parse(path string, data []byte, getenv func(string) (string, bool)) (*File,
 		return nil, &InvalidError{path, p.problems}
 	}
 	f.Path = path
+	f.Defaults = p.defaults
 	return f, nil
 }
 
 type parser struct {
 	getenv   func(string) (string, bool)
 	problems []Problem
+	defaults []Default
+	nodes    int
 }
 
 func (p *parser) add(n *yaml.Node, field, format string, args ...any) {
@@ -140,7 +156,10 @@ func (p *parser) file(data []byte) *File {
 		p.problems = append(p.problems, Problem{Message: "the file is empty: start it with version: 1"})
 		return nil
 	}
-	root := doc.Content[0]
+	root, ok := p.resolve(doc.Content[0], 0)
+	if !ok {
+		return nil
+	}
 	if root.Kind != yaml.MappingNode {
 		p.add(root, "", "expected a mapping with version, queues, workflows and schedules")
 		return nil
@@ -161,6 +180,11 @@ func (p *parser) file(data []byte) *File {
 			f.HasSchedules = true
 			p.schedules(f, kv[1])
 		default:
+			// x- keys hold anchors for the rest of the file to share, as in
+			// Docker Compose.
+			if strings.HasPrefix(key, "x-") {
+				continue
+			}
 			p.unknown(kv[0], key, []string{"version", "queues", "workflows", "schedules"})
 		}
 	}
@@ -277,6 +301,83 @@ func (p *parser) workflows(f *File, n *yaml.Node) {
 		}
 		f.Workflows = append(f.Workflows, w)
 	}
+}
+
+// maxNodes bounds what a file may expand to once its aliases are resolved,
+// so a few lines of aliases of aliases can't use up the CLI's memory.
+const maxNodes = 100_000
+
+// resolve returns a copy of n with aliases replaced by copies of what they
+// refer to and merge keys (<<) merged, so the rest of the parser sees plain
+// mappings, and expanding ${NAME} in one place never changes another. A
+// copy made for an alias takes the alias's line (if line isn't 0), which is
+// where its problems are reported: the field path says which value it was.
+func (p *parser) resolve(n *yaml.Node, line int) (*yaml.Node, bool) {
+	if n.Kind == yaml.AliasNode {
+		if line == 0 {
+			line = n.Line
+		}
+		n = n.Alias
+	}
+	if p.nodes++; p.nodes > maxNodes {
+		p.add(n, "", "the file is too large once its aliases are expanded")
+		return nil, false
+	}
+	c := *n
+	c.Anchor, c.Content = "", nil
+	if line != 0 {
+		c.Line = line
+	}
+	if n.Kind != yaml.MappingNode {
+		for _, child := range n.Content {
+			rc, ok := p.resolve(child, line)
+			if !ok {
+				return nil, false
+			}
+			c.Content = append(c.Content, rc)
+		}
+		return &c, true
+	}
+	// Keys given in the mapping win over merged ones, and among merged
+	// mappings the first to give a key wins, as YAML's merge key specifies.
+	var merged []*yaml.Node
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		key, val := n.Content[i], n.Content[i+1]
+		rk, ok := p.resolve(key, line)
+		if !ok {
+			return nil, false
+		}
+		rv, ok := p.resolve(val, line)
+		if !ok {
+			return nil, false
+		}
+		if key.Kind != yaml.ScalarNode || key.ShortTag() != "!!merge" {
+			c.Content = append(c.Content, rk, rv)
+			continue
+		}
+		sources := []*yaml.Node{rv}
+		if rv.Kind == yaml.SequenceNode {
+			sources = rv.Content
+		}
+		for _, src := range sources {
+			if src.Kind != yaml.MappingNode {
+				p.add(src, "", "<< merges a mapping: give it an alias of one, such as <<: *defaults")
+				return nil, false
+			}
+			merged = append(merged, src.Content...)
+		}
+	}
+	given := map[string]bool{}
+	for i := 0; i < len(c.Content); i += 2 {
+		given[c.Content[i].Value] = true
+	}
+	for i := 0; i+1 < len(merged); i += 2 {
+		if k := merged[i].Value; !given[k] {
+			given[k] = true
+			c.Content = append(c.Content, merged[i], merged[i+1])
+		}
+	}
+	return &c, true
 }
 
 // mapping returns a mapping's key and value nodes, reporting duplicate keys.
@@ -408,8 +509,10 @@ var envRef = regexp.MustCompile(`\$\{([^}]*)\}`)
 
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// expand replaces ${NAME} in string values, in place. An unquoted value is
-// read again afterwards, so `max_concurrency: ${CONCURRENCY}` is a number.
+// expand replaces ${NAME} in string values, in place, and ${NAME:-default}
+// with default when NAME is unset or empty, as in the shell. An unquoted
+// value is read again afterwards, so `max_concurrency: ${CONCURRENCY}` is a
+// number.
 func (p *parser) expand(n *yaml.Node, field string) bool {
 	ok := true
 	switch n.Kind {
@@ -426,14 +529,18 @@ func (p *parser) expand(n *yaml.Node, field string) bool {
 			return true
 		}
 		n.Value = envRef.ReplaceAllStringFunc(n.Value, func(ref string) string {
-			name := ref[2 : len(ref)-1]
+			name, def, hasDef := strings.Cut(ref[2:len(ref)-1], ":-")
 			if !envName.MatchString(name) {
-				p.add(n, field, "%s isn't a valid environment variable reference", ref)
+				p.add(n, field, "%s isn't a valid environment variable reference: use ${NAME} or ${NAME:-default}", ref)
 				ok = false
 				return ref
 			}
 			val, set := p.getenv(name)
-			if !set {
+			switch {
+			case hasDef && val == "":
+				p.defaults = append(p.defaults, Default{n.Line, field, name, def})
+				return def
+			case !set:
 				p.add(n, field, "environment variable %s isn't set", name)
 				ok = false
 			}

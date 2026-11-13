@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http/httptest"
 	"os"
@@ -388,5 +389,65 @@ schedules:
 	}
 	if r := cli(t, "", "validate", "-f", filepath.Join(t.TempDir(), "missing.yaml")); r.err == nil || !strings.Contains(r.err.Error(), "not found") {
 		t.Fatalf("validate a missing file: %v", r.err)
+	}
+}
+
+// Plan and validate list the defaults a file took, so CI can't deploy a
+// local default unnoticed.
+func TestDeployDefaults(t *testing.T) {
+	newTestServer(t, "")
+	path := filepath.Join(t.TempDir(), "workly.yaml")
+	src := `version: 1
+schedules:
+  nightly:
+    cron: "@daily"
+    url: ${APP_URL:-http://localhost:8000}/nightly
+  weekly:
+    cron: "@weekly"
+    url: ${APP_URL:-http://localhost:8000}/weekly
+`
+	if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want := "Not set, so their defaults were used:\n  APP_URL: \"http://localhost:8000\" (schedules.nightly.url, schedules.weekly.url)\n"
+	contains(t, mustRun(t, "validate", "-f", path), want)
+	contains(t, mustRun(t, "plan", "-f", path), "+ create schedule nightly", want)
+
+	t.Setenv("APP_URL", "https://app.example.com")
+	if out := mustRun(t, "plan", "-f", path); strings.Contains(out, "defaults") {
+		t.Errorf("plan with APP_URL set:\n%s", out)
+	}
+}
+
+func TestDevConfig(t *testing.T) {
+	url := newTestServer(t, "")
+	path := filepath.Join(t.TempDir(), "workly.yaml")
+	if err := os.WriteFile(path, []byte("version: 1\nqueues:\n  emails: {max_concurrency: 4}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := loadPath(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var port int
+	if _, err := fmt.Sscanf(url[strings.LastIndex(url, ":")+1:], "%d", &port); err != nil {
+		t.Fatal(err)
+	}
+	got, err := applyDev(t.Context(), f, port)
+	if err != nil || got != path+" (1 created, 0 updated, 0 unchanged)" {
+		t.Fatalf("applyDev = %q, %v", got, err)
+	}
+	contains(t, mustRun(t, "queues", "get", "emails"), "Max concurrency:  4")
+	if got, _ := applyDev(t.Context(), f, port); got != path+" (0 created, 0 updated, 1 unchanged)" {
+		t.Errorf("applying again = %q", got)
+	}
+
+	// An invalid file stops dev before the server starts.
+	if err := os.WriteFile(path, []byte("version: 1\nqueues:\n  emails: {concurrency: 4}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKLY_DATABASE_URL", "sqlite://"+filepath.Join(t.TempDir(), "dev.db"))
+	if r := cli(t, "", "dev", "--config", path); r.err == nil || !strings.Contains(r.err.Error(), "queues.emails.concurrency: unknown field") {
+		t.Fatalf("dev with an invalid file: %v", r.err)
 	}
 }

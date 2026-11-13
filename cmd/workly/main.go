@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/worklydev/workly/internal/config"
+	"github.com/worklydev/workly/internal/deploy"
 	"github.com/worklydev/workly/server"
 )
 
@@ -84,10 +85,24 @@ func devCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "dev",
 		Short: "Run a local development server (SQLite, no auth)",
+		Long: `Run a local development server (SQLite, no auth).
+
+--config applies a workly.yaml once the server is listening, as workly deploy
+would, so a fresh database starts with the file's queues, workflows and
+schedules rather than default settings. It's applied each time the server
+starts: restart it to apply changes to the file.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := loadConfig(cmd)
 			if err != nil {
 				return err
+			}
+			// Read the file first, so a mistake in it stops dev before the
+			// server starts.
+			var file *deploy.File
+			if path, _ := cmd.Flags().GetString("config"); path != "" {
+				if file, err = loadPath(path); err != nil {
+					return err
+				}
 			}
 			if cfg.DatabaseURL == "" {
 				cfg.DatabaseURL = devDatabaseURL
@@ -104,24 +119,64 @@ func devCmd() *cobra.Command {
 				cfg.MCP = server.MCPFull // local agents may enqueue and retry
 			}
 
-			return run(cmd.Context(), cfg, true, func(addr net.Addr) {
+			ctx, cancel := context.WithCancel(cmd.Context())
+			defer cancel()
+			var applyErr error
+			err = run(ctx, cfg, true, func(addr net.Addr) {
 				port := addr.(*net.TCPAddr).Port
+				var applied string
+				if file != nil {
+					if applied, applyErr = applyDev(ctx, file, port); applyErr != nil {
+						cancel()
+						return
+					}
+				}
 				fmt.Fprintf(os.Stderr, "\n  Workly %s running\n\n", version)
 				fmt.Fprintf(os.Stderr, "  API:             http://localhost:%d\n", port)
 				fmt.Fprintf(os.Stderr, "  Dashboard:       http://localhost:%d\n", port)
 				fmt.Fprintf(os.Stderr, "  Echo target:     http://localhost:%d/_dev/echo\n", port)
 				fmt.Fprintf(os.Stderr, "  Storage:         %s\n", cfg.DatabaseURL)
 				fmt.Fprintf(os.Stderr, "  Signing secret:  %s\n", cfg.SigningSecret)
+				if file != nil {
+					fmt.Fprintf(os.Stderr, "  Config:          %s\n", applied)
+				}
 				if cfg.MCP != server.MCPOff {
 					fmt.Fprintf(os.Stderr, "  MCP:             http://localhost:%d/mcp (%s)\n", port, cfg.MCP)
 					fmt.Fprintf(os.Stderr, "\n  Connect Claude Code: claude mcp add --transport http workly http://localhost:%d/mcp\n", port)
 				}
 				fmt.Fprintln(os.Stderr)
 			})
+			if applyErr != nil {
+				return fmt.Errorf("apply %s: %w", file.Path, applyErr)
+			}
+			return err
 		},
 	}
 	bindFlags(cmd)
+	cmd.Flags().String("config", "", "a workly.yaml to apply at startup, as workly deploy would")
 	return cmd
+}
+
+// applyDev applies f to the dev server on port, and sums up what it did.
+func applyDev(ctx context.Context, f *deploy.File, port int) (string, error) {
+	c, err := clientFor(fmt.Sprintf("http://localhost:%d", port), "")
+	if err != nil {
+		return "", err
+	}
+	plan, err := planWith(ctx, c, f)
+	if err != nil {
+		return "", err
+	}
+	for _, ch := range plan.Changes {
+		if ch.Action == deploy.Unchanged {
+			continue
+		}
+		if err := apply(ctx, c, ch); err != nil {
+			return "", fmt.Errorf("%s %s: %w", ch.Kind, ch.Name, err)
+		}
+	}
+	return fmt.Sprintf("%s (%d created, %d updated, %d unchanged)", f.Path,
+		plan.Count(deploy.Create), plan.Count(deploy.Update), plan.Count(deploy.Unchanged)), nil
 }
 
 func serveCmd() *cobra.Command {

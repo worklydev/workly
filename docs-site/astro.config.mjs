@@ -2,7 +2,7 @@ import { sep } from 'node:path';
 import starlight from '@astrojs/starlight';
 import { defineConfig } from 'astro/config';
 import starlightLlmsTxt from 'starlight-llms-txt';
-import { docsDir, sync } from './scripts/sync.mjs';
+import { docsDir, ref, sync } from './scripts/sync.mjs';
 
 /** Keeps src/content/docs in step with ../docs, including while `astro dev` runs. */
 const docs = {
@@ -34,6 +34,8 @@ export default defineConfig({
       favicon: '/favicon.svg',
       logo: { src: './public/favicon.svg', alt: '' },
       customCss: ['./src/theme.css'],
+      // The header shows which release the docs describe.
+      components: { SiteTitle: './src/components/SiteTitle.astro' },
       // Colours, borders and fonts come from the tokens in theme.css; these are
       // the parts Expressive Code only takes as options.
       expressiveCode: {
@@ -43,7 +45,9 @@ export default defineConfig({
         styleOverrides: { frames: { terminalTitlebarDotsOpacity: '0' } },
       },
       // /docs/llms.txt, llms-full.txt and llms-small.txt, so an assistant can
-      // read all the docs in one fetch. workly.run/llms.txt links here.
+      // read all the docs in one fetch. workly.run/llms.txt links here, and
+      // so does every page's <head>.
+      head: [{ tag: 'link', attrs: { rel: 'alternate', type: 'text/plain', title: 'All of the docs, for LLMs', href: '/docs/llms-full.txt' } }],
       plugins: [
         starlightLlmsTxt({
           description:
@@ -52,6 +56,7 @@ export default defineConfig({
             '- Handlers are plain HTTP endpoints in any language; there are Python (`pip install workly`) and TypeScript (`npm install @worklydev/sdk`) SDKs, a CLI and an MCP server.',
             '- `workly dev` runs a local server and dashboard on localhost:7337 with no configuration. Hosted Workly is at https://api.workly.run with an API key.',
             '- Delivery is at least once: handlers should be idempotent, using the `Workly-Task-Id` header.',
+            `- These docs describe Workly ${ref}. Every page is also available as Markdown: https://workly.run/docs/quickstart.md for https://workly.run/docs/quickstart/, and https://workly.run/docs/index.md for the overview.`,
           ].join('\n'),
           // Starlight's "Section titled …" heading links are noise in plain text.
           customSelectors: { all: ['.sl-anchor-link'] },

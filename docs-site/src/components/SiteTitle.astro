@@ -1,0 +1,32 @@
+---
+// Starlight's site title, followed by the release these docs describe, so a
+// reader (or an agent) can tell which version of Workly they're reading about.
+import Default from '@astrojs/starlight/components/SiteTitle.astro';
+import { ref } from '../../scripts/sync.mjs';
+---
+
+<div class="title-with-version">
+  <Default><slot /></Default>
+  <a class="version" href={`https://github.com/worklydev/workly/releases${ref === 'main' ? '' : `/tag/${ref}`}`}>{ref}</a>
+</div>
+
+<style>
+  .title-with-version {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .version {
+    font-family: var(--sl-font-mono);
+    font-size: var(--sl-text-xs);
+    color: var(--sl-color-gray-3);
+    text-decoration: none;
+    border: 1px solid var(--sl-color-hairline);
+    border-radius: 999px;
+    padding: 0.05rem 0.5rem;
+    white-space: nowrap;
+  }
+  .version:hover {
+    color: var(--sl-color-white);
+  }
+</style>

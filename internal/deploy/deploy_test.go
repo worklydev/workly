@@ -77,6 +77,8 @@ func TestParseErrors(t *testing.T) {
 		{"version: 1\nqueue: {}", "workly.yaml:2: queue: unknown field: did you mean queues?"},
 		{"version: 1\ndestructive: true", "workly.yaml:2: destructive: unknown field: workly deploy never deletes anything"},
 		{"version: 1\nqueues: [a]", "workly.yaml:2: queues: expected a mapping"},
+		{"version: 1\nqueues:\n  a: {max_attempts: '${MAX:-}'}", "workly.yaml:3: queues.a.max_attempts: must be a whole number"},
+		{"version: 1\nqueues:\n  a: {max_attempts: '${1X:-3}'}", "${1X:-3} isn't a valid environment variable reference"},
 		{"version: 1\nqueues:\n  Emails: {}", `workly.yaml:3: queues.Emails: queue name "Emails" must be`},
 		{"version: 1\nqueues:\n  a: {}\n  a: {}", "workly.yaml:4: queues.a: defined more than once"},
 		{"version: 1\nqueues:\n  a: {concurency: 2}", "workly.yaml:3: queues.a.concurency: unknown field: did you mean max_concurrency?"},
@@ -104,6 +106,120 @@ func TestParseErrors(t *testing.T) {
 		if !errors.As(err, &invalid) || !strings.Contains(err.Error(), tt.want) {
 			t.Errorf("%q:\n got %v\nwant %s", tt.src, err, tt.want)
 		}
+	}
+}
+
+// Anchors and aliases share settings, directly or through merge keys, and
+// x- keys at the top hold anchors without declaring anything.
+func TestParseAliases(t *testing.T) {
+	f := parse(t, `
+version: 1
+x-yahoo: &yahoo
+  max_concurrency: 2
+  rate_per_second: 1
+x-auth: &auth
+  Authorization: "Bearer ${TOKEN}"
+queues:
+  stock-prices: *yahoo
+  earnings-dates:
+    <<: *yahoo
+    max_concurrency: 5
+  dividends:
+    <<: [*yahoo, {max_attempts: 3, rate_per_second: 9}]
+schedules:
+  nightly: &nightly
+    cron: "@daily"
+    url: ${API_URL}/nightly
+    headers: *auth
+  weekly:
+    <<: *nightly
+    cron: "@weekly"
+`)
+	if len(f.Queues) != 3 || len(f.Schedules) != 2 {
+		t.Fatalf("file = %+v", f)
+	}
+	for _, tt := range []struct {
+		q           Queue
+		concurrency int
+		rate        float64
+		attempts    *int
+	}{
+		{f.Queues[0], 2, 1, nil},
+		{f.Queues[1], 5, 1, nil},
+		{f.Queues[2], 2, 1, ptr(3)},
+	} {
+		c := tt.q.Config
+		if *c.MaxConcurrency != tt.concurrency || *c.RatePerSecond != tt.rate || fmt.Sprint(deref(c.MaxAttempts)) != fmt.Sprint(deref(tt.attempts)) {
+			t.Errorf("%s = %+v", tt.q.Name, c)
+		}
+	}
+	for _, s := range f.Schedules {
+		if *s.Config.Url != "https://api.example.com/nightly" || (*s.Config.Headers)["Authorization"] != "Bearer s3cret" {
+			t.Errorf("%s = %+v", s.Name, s.Config)
+		}
+	}
+	if f.Schedules[1].Config.Cron != "@weekly" {
+		t.Errorf("weekly cron = %q", f.Schedules[1].Config.Cron)
+	}
+
+	// A problem in an alias's copy is reported at the alias, under its own name.
+	_, err := Parse("workly.yaml", []byte("version: 1\nx-bad: &bad {max_attempts: 0}\nqueues:\n  a: {}\n  b: *bad\n"), getenv)
+	if err == nil || err.Error() != "workly.yaml:5: queues.b.max_attempts: must be between 1 and 1000" {
+		t.Errorf("got %v", err)
+	}
+	// Aliases of aliases can't expand without bound.
+	src := "version: 1\nx-0: &a0 [x, x, x, x, x, x, x, x, x, x]\n"
+	for i := 1; i < 8; i++ {
+		src += fmt.Sprintf("x-%d: &a%d [*a%d, *a%d, *a%d, *a%d, *a%d, *a%d, *a%d, *a%d, *a%d, *a%d]\n", i, i, i-1, i-1, i-1, i-1, i-1, i-1, i-1, i-1, i-1, i-1)
+	}
+	if _, err := Parse("workly.yaml", []byte(src), getenv); err == nil || !strings.Contains(err.Error(), "too large once its aliases are expanded") {
+		t.Errorf("got %v", err)
+	}
+	if _, err := Parse("workly.yaml", []byte("version: 1\nqueues:\n  a:\n    <<: 3\n"), getenv); err == nil || !strings.Contains(err.Error(), "workly.yaml:4: << merges a mapping") {
+		t.Errorf("got %v", err)
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
+
+func deref[T any](p *T) any {
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
+// ${NAME:-default} takes the default when NAME is unset or empty, and the
+// file lists each default it took.
+func TestParseDefaults(t *testing.T) {
+	env["EMPTY"] = ""
+	t.Cleanup(func() { delete(env, "EMPTY") })
+	f := parse(t, `
+version: 1
+queues:
+  a:
+    max_concurrency: ${CONCURRENCY:-1}
+    rate_per_second: ${RATE:-2.5}
+schedules:
+  nightly:
+    cron: "@daily"
+    url: ${APP_URL:-http://localhost:8000}/nightly
+    headers: {Authorization: "Bearer ${EMPTY:-dev}"}
+`)
+	if *f.Queues[0].Config.MaxConcurrency != 7 || *f.Queues[0].Config.RatePerSecond != 2.5 {
+		t.Errorf("queue = %+v", f.Queues[0].Config)
+	}
+	s := f.Schedules[0].Config
+	if *s.Url != "http://localhost:8000/nightly" || (*s.Headers)["Authorization"] != "Bearer dev" {
+		t.Errorf("schedule = %+v", s)
+	}
+	want := []Default{
+		{6, "queues.a.rate_per_second", "RATE", "2.5"},
+		{10, "schedules.nightly.url", "APP_URL", "http://localhost:8000"},
+		{11, "schedules.nightly.headers.Authorization", "EMPTY", "dev"},
+	}
+	if fmt.Sprint(f.Defaults) != fmt.Sprint(want) {
+		t.Errorf("defaults = %+v\nwant %+v", f.Defaults, want)
 	}
 }
 
