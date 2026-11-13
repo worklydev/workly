@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/worklydev/workly/internal/api"
@@ -22,9 +23,10 @@ const (
 	Update
 )
 
-// Change is what deploying does to one declared queue or schedule.
+// Change is what deploying does to one declared queue, workflow or
+// schedule.
 type Change struct {
-	Kind   string // "queue" or "schedule"
+	Kind   string // "queue", "workflow" or "schedule"
 	Name   string
 	Action Action
 	// Diffs lists the settings an update changes.
@@ -32,7 +34,8 @@ type Change struct {
 	// Paused is set for an existing queue or schedule that is paused.
 	// Deploying leaves it paused.
 	Paused bool
-	// Body is the PUT request body: an api.QueueConfig or api.ScheduleConfig.
+	// Body is the PUT request body: an api.QueueConfig, api.WorkflowConfig
+	// or api.ScheduleConfig.
 	Body any
 }
 
@@ -45,14 +48,18 @@ type Diff struct {
 }
 
 type Plan struct {
-	// Changes has every declared queue and then every declared schedule, in
-	// file order, unchanged ones included.
+	// Changes has every declared queue, then every declared workflow, then
+	// every declared schedule, in file order, unchanged ones included. That
+	// is the order they are applied in, so a schedule's workflow exists by
+	// the time the schedule is put.
 	Changes []Change
 	// Undeclared lists the schedules on the server the file doesn't
 	// declare, if it has a schedules section. Deploying leaves them alone.
 	// Queues aren't listed: enqueueing creates them, so most aren't in a
 	// file.
 	Undeclared []string
+	// UndeclaredWorkflows does the same for workflows.
+	UndeclaredWorkflows []string
 }
 
 func (p Plan) Count(a Action) int {
@@ -65,8 +72,9 @@ func (p Plan) Count(a Action) int {
 	return n
 }
 
-// Plan compares the file with the queues and schedules on the server.
-func (f *File) Plan(queues []api.Queue, schedules []api.Schedule) (Plan, error) {
+// Plan compares the file with the queues, workflows and schedules on the
+// server.
+func (f *File) Plan(queues []api.Queue, workflows []api.Workflow, schedules []api.Schedule) (Plan, error) {
 	var plan Plan
 	current := map[string]api.Queue{}
 	for _, q := range queues {
@@ -85,6 +93,27 @@ func (f *File) Plan(queues []api.Queue, schedules []api.Schedule) (Plan, error) 
 			return plan, fmt.Errorf("queue %s: names starting with '_' are reserved for Workly's own queues", q.Name)
 		}
 		plan.Changes = append(plan.Changes, c)
+	}
+
+	workflowsByName := map[string]api.Workflow{}
+	for _, w := range workflows {
+		workflowsByName[w.Name] = w
+	}
+	for _, w := range f.Workflows {
+		c := Change{Kind: "workflow", Name: w.Name, Action: Create, Body: w.Config}
+		if cur, ok := workflowsByName[w.Name]; ok {
+			settings, err := api.WorkflowSettings(workflowConfig(cur), 1<<62)
+			if err != nil {
+				return plan, fmt.Errorf("workflow %s on the server: %w", w.Name, err)
+			}
+			c.Diffs = workflowDiffs(settings, w.settings)
+			c.Action = action(c.Diffs)
+			delete(workflowsByName, w.Name)
+		}
+		plan.Changes = append(plan.Changes, c)
+	}
+	if f.HasWorkflows {
+		plan.UndeclaredWorkflows = slices.Sorted(maps.Keys(workflowsByName))
 	}
 
 	byName := map[string]api.Schedule{}
@@ -134,11 +163,11 @@ func queueConfig(q api.Queue) api.QueueConfig {
 // scheduleConfig turns a schedule back into the request that sets it. Its
 // headers include the Content-Type that goes with its body.
 func scheduleConfig(s api.Schedule) api.ScheduleConfig {
-	return api.ScheduleConfig{
+	cfg := api.ScheduleConfig{
 		Cron:              s.Cron,
 		Timezone:          &s.Timezone,
 		Method:            &s.Method,
-		Url:               s.Url,
+		Url:               &s.Url,
 		Headers:           &s.Headers,
 		Payload:           s.Payload,
 		Body:              s.Body,
@@ -152,6 +181,11 @@ func scheduleConfig(s api.Schedule) api.ScheduleConfig {
 		Missed:            &s.Missed,
 		OnComplete:        s.OnComplete,
 	}
+	if s.Workflow != nil {
+		// It has no request; its payload is the workflow run's input.
+		cfg.Workflow, cfg.Url, cfg.Method, cfg.Headers, cfg.Body = s.Workflow, nil, nil, nil, nil
+	}
+	return cfg
 }
 
 type field[T any] struct {
@@ -204,6 +238,12 @@ func unlisted(diffs []Diff, same bool) []Diff {
 var scheduleFields = []field[store.ScheduleConfig]{
 	{"cron", func(c store.ScheduleConfig) string { return c.Cron }},
 	{"timezone", func(c store.ScheduleConfig) string { return c.Timezone }},
+	{"workflow", func(c store.ScheduleConfig) string {
+		if c.Workflow == "" {
+			return "none"
+		}
+		return c.Workflow
+	}},
 	{"method", func(c store.ScheduleConfig) string { return c.Method }},
 	{"url", func(c store.ScheduleConfig) string { return c.URL }},
 	{"timeout_seconds", func(c store.ScheduleConfig) string { return secs(c.Timeout) }},
@@ -269,4 +309,81 @@ func sameBody(a, b []byte) bool {
 	}
 	var x, y any
 	return json.Unmarshal(a, &x) == nil && json.Unmarshal(b, &y) == nil && reflect.DeepEqual(x, y)
+}
+
+// workflowConfig turns a workflow back into the request that sets it.
+func workflowConfig(w api.Workflow) api.WorkflowConfig {
+	return api.WorkflowConfig{Steps: w.Steps, MaxDurationSeconds: &w.MaxDurationSeconds}
+}
+
+// workflowDiffs lists what changes in a workflow: its max_duration, and its
+// steps, by name.
+func workflowDiffs(from, to store.WorkflowConfig) []Diff {
+	var out []Diff
+	if from.MaxDuration != to.MaxDuration {
+		out = append(out, Diff{"max_duration_seconds", secs(from.MaxDuration) + " → " + secs(to.MaxDuration)})
+	}
+	old := map[string]store.WorkflowStepConfig{}
+	var oldOrder, newOrder []string
+	for _, sc := range from.Steps {
+		old[sc.Name] = sc
+		oldOrder = append(oldOrder, sc.Name)
+	}
+	for _, sc := range to.Steps {
+		newOrder = append(newOrder, sc.Name)
+		prev, ok := old[sc.Name]
+		if !ok {
+			out = append(out, Diff{"steps." + sc.Name, "added"})
+			continue
+		}
+		delete(old, sc.Name)
+		out = append(out, stepDiffs("steps."+sc.Name+".", prev, sc)...)
+	}
+	for _, name := range oldOrder {
+		if _, ok := old[name]; ok {
+			out = append(out, Diff{"steps." + name, "removed"})
+		}
+	}
+	if len(out) == 0 && !slices.Equal(oldOrder, newOrder) {
+		out = append(out, Diff{"steps", "reordered"})
+	}
+	return out
+}
+
+var stepFields = []field[store.WorkflowStepConfig]{
+	{"depends_on", func(c store.WorkflowStepConfig) string { return "[" + strings.Join(c.DependsOn, ", ") + "]" }},
+	{"method", func(c store.WorkflowStepConfig) string { return c.Method }},
+	{"url", func(c store.WorkflowStepConfig) string { return c.URL }},
+	{"queue", func(c store.WorkflowStepConfig) string { return c.Queue }},
+	{"timeout_seconds", func(c store.WorkflowStepConfig) string {
+		if c.Timeout == nil {
+			return "the queue's"
+		}
+		return secs(*c.Timeout)
+	}},
+	{"max_attempts", func(c store.WorkflowStepConfig) string {
+		if c.MaxAttempts == nil {
+			return "the queue's"
+		}
+		return strconv.Itoa(*c.MaxAttempts)
+	}},
+}
+
+func stepDiffs(prefix string, from, to store.WorkflowStepConfig) []Diff {
+	var out []Diff
+	for _, d := range diffs(stepFields, from, to) {
+		out = append(out, Diff{prefix + d.Field, d.Change})
+	}
+	if !maps.Equal(from.Headers, to.Headers) {
+		out = append(out, Diff{prefix + "headers", "changed"})
+	}
+	switch {
+	case from.Body == nil && to.Body != nil:
+		out = append(out, Diff{prefix + "body", "added"})
+	case from.Body != nil && to.Body == nil:
+		out = append(out, Diff{prefix + "body", "removed (the run's context is sent instead)"})
+	case !sameBody(from.Body, to.Body):
+		out = append(out, Diff{prefix + "body", "changed"})
+	}
+	return out
 }

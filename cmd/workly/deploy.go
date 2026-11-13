@@ -47,8 +47,12 @@ set in the environment.`,
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "%s is valid: %d %s, %d %s.\n", f.Path,
-				len(f.Queues), plural(len(f.Queues), "queue"), len(f.Schedules), plural(len(f.Schedules), "schedule"))
+			counts := []string{fmt.Sprintf("%d %s", len(f.Queues), plural(len(f.Queues), "queue"))}
+			if f.HasWorkflows {
+				counts = append(counts, fmt.Sprintf("%d %s", len(f.Workflows), plural(len(f.Workflows), "workflow")))
+			}
+			counts = append(counts, fmt.Sprintf("%d %s", len(f.Schedules), plural(len(f.Schedules), "schedule")))
+			fmt.Fprintf(cmd.OutOrStdout(), "%s is valid: %s.\n", f.Path, strings.Join(counts, ", "))
 			return nil
 		},
 	}
@@ -78,11 +82,12 @@ func planCmd() *cobra.Command {
 func deployCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "deploy",
-		Short: "Create and update the queues and schedules in workly.yaml",
-		Long: `Create and update the queues and schedules in workly.yaml, so the server
-matches it. Shows the plan and asks first; --yes skips the question, as CI
-needs. Running it again changes nothing. It never deletes, pauses or resumes
-anything, and leaves queues and schedules the file doesn't declare alone.`,
+		Short: "Create and update the queues, workflows and schedules in workly.yaml",
+		Long: `Create and update the queues, workflows and schedules in workly.yaml, so
+the server matches it. Shows the plan and asks first; --yes skips the
+question, as CI needs. Running it again changes nothing. It never deletes,
+pauses or resumes anything, and leaves what the file doesn't declare alone.
+Workflow runs already going keep the definition they started with.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			f, c, plan, err := makePlan(cmd)
@@ -137,6 +142,16 @@ func makePlan(cmd *cobra.Command) (*deploy.File, *client.ClientWithResponses, de
 	ctx := cmd.Context()
 	var queues api.QueueList
 	var schedules api.ScheduleList
+	var workflows api.WorkflowList
+	if f.HasWorkflows {
+		res, err := c.ListWorkflowsWithResponse(ctx)
+		if err := check(res, err); err != nil {
+			return nil, nil, deploy.Plan{}, err
+		}
+		if err := json.Unmarshal(res.Body, &workflows); err != nil {
+			return nil, nil, deploy.Plan{}, err
+		}
+	}
 	if f.HasQueues {
 		res, err := c.ListQueuesWithResponse(ctx)
 		if err := check(res, err); err != nil {
@@ -155,7 +170,7 @@ func makePlan(cmd *cobra.Command) (*deploy.File, *client.ClientWithResponses, de
 			return nil, nil, deploy.Plan{}, err
 		}
 	}
-	plan, err := f.Plan(queues.Queues, schedules.Schedules)
+	plan, err := f.Plan(queues.Queues, workflows.Workflows, schedules.Schedules)
 	return f, c, plan, err
 }
 
@@ -182,6 +197,10 @@ func printPlan(w io.Writer, cmd *cobra.Command, f *deploy.File, plan deploy.Plan
 		}
 		fmt.Fprintf(w, "\n%d to create, %d to update, %d unchanged.\n", creates, updates, same)
 	}
+	if len(plan.UndeclaredWorkflows) > 0 {
+		fmt.Fprintf(w, "\nNot in %s, left as they are: %s %s.\n", f.Path,
+			plural(len(plan.UndeclaredWorkflows), "workflow"), strings.Join(plan.UndeclaredWorkflows, ", "))
+	}
 	if len(plan.Undeclared) > 0 {
 		fmt.Fprintf(w, "\nNot in %s, left as they are: %s %s.\n", f.Path,
 			plural(len(plan.Undeclared), "schedule"), strings.Join(plan.Undeclared, ", "))
@@ -193,8 +212,12 @@ func apply(cmd *cobra.Command, c *client.ClientWithResponses, ch deploy.Change) 
 	if err != nil {
 		return err
 	}
-	if ch.Kind == "queue" {
+	switch ch.Kind {
+	case "queue":
 		res, err := c.PutQueueWithBodyWithResponse(cmd.Context(), ch.Name, "application/json", bytes.NewReader(body))
+		return check(res, err)
+	case "workflow":
+		res, err := c.PutWorkflowWithBodyWithResponse(cmd.Context(), ch.Name, "application/json", bytes.NewReader(body))
 		return check(res, err)
 	}
 	res, err := c.PutScheduleWithBodyWithResponse(cmd.Context(), ch.Name, "application/json", bytes.NewReader(body))

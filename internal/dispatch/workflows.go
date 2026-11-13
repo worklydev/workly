@@ -2,6 +2,9 @@ package dispatch
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/worklydev/workly/internal/store"
@@ -50,4 +53,39 @@ func (d *Dispatcher) sweepWorkflowRuns(ctx context.Context, sw store.Sweep, rete
 	if total > 0 {
 		d.log.Info("deleted workflow runs past retention", "count", total, "retention", retention.String(), "workspace", sw.Workspace)
 	}
+}
+
+// startWorkflow is a run's "delivery" for a schedule that starts a
+// workflow: it starts a workflow run, with the schedule run's body as its
+// input. The schedule run's ID is the idempotency key, so a retry, or a
+// second leader claiming the run, starts the same workflow run, and its
+// slot gets one however often it is attempted.
+func (s *scheduler) startWorkflow(ctx context.Context, c store.RunClaim) result {
+	r := result{started: time.Now(), headers: map[string]string{}}
+	nr := store.NewWorkflowRun{IdempotencyKey: c.Run.ID, ScheduleRunID: c.Run.ID}
+	if len(c.Run.Body) > 0 {
+		if !json.Valid(c.Run.Body) {
+			r.finished, r.outcome = time.Now(), store.OutcomeNetworkError
+			r.err = "the schedule's body is not JSON, so it can't be a workflow run's input"
+			return r
+		}
+		nr.Input = json.RawMessage(c.Run.Body)
+	}
+	wr, _, err := s.d.store.StartWorkflowRun(ctx, c.Run.WorkspaceID, c.Schedule.Workflow, nr, time.Now())
+	r.finished = time.Now()
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		// Retried, as a failed delivery is: the workflow may be deployed
+		// after the schedule.
+		r.outcome, r.err = store.OutcomeNetworkError, fmt.Sprintf("workflow %q does not exist", c.Schedule.Workflow)
+	case err != nil:
+		r.outcome, r.err = store.OutcomeNetworkError, "starting workflow run: "+err.Error()
+	default:
+		r.outcome = store.OutcomeSuccess
+		r.headers["Content-Type"] = "application/json"
+		b, _ := json.Marshal(map[string]string{"workflow_run_id": wr.ID, "workflow": wr.Workflow})
+		r.body = string(b)
+		s.d.opts.Changed(c.Run.WorkspaceID)
+	}
+	return r
 }

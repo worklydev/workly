@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -73,9 +74,9 @@ func schedulesListCmd() *cobra.Command {
 					if l := s.LastRun; l != nil {
 						last = string(l.State) + " " + ago(l.ScheduledFor)
 					}
-					rows = append(rows, []string{s.Name, s.Cron, s.Timezone, next, last, s.Url})
+					rows = append(rows, []string{s.Name, s.Cron, s.Timezone, next, last, scheduleTarget(&s)})
 				}
-				table(w, "NAME\tCRON\tTIMEZONE\tNEXT RUN\tLAST RUN\tURL", rows)
+				table(w, "NAME\tCRON\tTIMEZONE\tNEXT RUN\tLAST RUN\tDOES", rows)
 			})
 		},
 	}
@@ -115,10 +116,11 @@ func schedulesGetCmd() *cobra.Command {
 
 func schedulesPutCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "put NAME URL",
+		Use:     "put NAME [URL]",
 		Aliases: []string{"create", "update"},
-		Short:   "Create or update a schedule that calls URL",
-		Long: `Create or update a schedule that calls URL.
+		Short:   "Create or update a schedule that calls URL, or starts a workflow",
+		Long: `Create or update a schedule that calls URL, or with --workflow (and no
+URL) starts a run of that workflow, with --payload as the run's input.
 
 Declarative, like the API: the schedule ends up with exactly the settings
 given, and settings you leave out are reset to their defaults. Pausing is
@@ -129,8 +131,9 @@ separate (see pause and resume). --payload and --body take a value, @file, or
 @hourly, @daily, @weekly, @monthly or @yearly.`,
 		Example: `  workly schedules put nightly-report https://api.example.com/reports/nightly \
       --cron '0 3 * * *' --timezone Europe/Stockholm -d '{"kind": "daily"}'
-  workly schedules put sync https://api.example.com/sync --cron '*/15 * * * mon-fri' --overlap allow`,
-		Args: cobra.ExactArgs(2),
+  workly schedules put sync https://api.example.com/sync --cron '*/15 * * * mon-fri' --overlap allow
+  workly schedules put daily-refresh --workflow daily-refresh --cron '0 3 * * *'`,
+		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			f := cmd.Flags()
 			r, err := readRequestFlags(cmd)
@@ -138,8 +141,18 @@ separate (see pause and resume). --payload and --body take a value, @file, or
 				return err
 			}
 			cfg := client.ScheduleConfig{
-				Cron: must(f.GetString("cron")), Url: args[1],
+				Cron:    must(f.GetString("cron")),
 				Payload: r.payload, Body: r.body, ContentType: r.contentType, Method: r.method, Headers: r.headers,
+			}
+			switch wf := must(f.GetString("workflow")); {
+			case wf != "" && len(args) == 2:
+				return errors.New("give a URL or --workflow, not both")
+			case wf != "":
+				cfg.Workflow = &wf
+			case len(args) == 2:
+				cfg.Url = &args[1]
+			default:
+				return errors.New("give the URL to call, or --workflow")
 			}
 			setIf(f.Changed("timezone"), &cfg.Timezone, must(f.GetString("timezone")))
 			setIf(f.Changed("timeout"), &cfg.TimeoutSeconds, must(f.GetDuration("timeout")).Seconds())
@@ -182,6 +195,7 @@ separate (see pause and resume). --payload and --body take a value, @file, or
 	f.String("overlap", "skip", "a slot that comes while the previous run is still going: skip or allow")
 	f.String("missed", "skip", "slots missed while the server was down: skip, or catch_up (run the latest once)")
 	f.String("on-complete", "", "POST a summary of each run to this URL when it finishes")
+	f.String("workflow", "", "start a run of this workflow instead of calling a URL")
 	_ = cmd.MarkFlagRequired("cron")
 	return cmd
 }
@@ -392,7 +406,7 @@ func printSchedule(w io.Writer, s *client.Schedule) {
 		{"Name", s.Name},
 		{"Status", status},
 		{"Cron", s.Cron + " (" + s.Timezone + ")"},
-		{"Request", string(s.Method) + " " + s.Url},
+		{"Request", scheduleTarget(s)},
 		{"Timeout", seconds(s.TimeoutSeconds)},
 		{"Max attempts", strconv.Itoa(s.MaxAttempts)},
 		{"Backoff", fmt.Sprintf("%s to %s, x%g", seconds(s.MinBackoffSeconds), seconds(s.MaxBackoffSeconds), s.BackoffMultiplier)},
@@ -451,6 +465,11 @@ func printRun(w io.Writer, r *client.Run, attempts []client.Attempt) {
 		[]string{"Trigger", string(r.Trigger)},
 		[]string{"Scheduled for", r.ScheduledFor.Local().Format(time.DateTime) + " (" + ago(r.ScheduledFor) + ")"},
 		[]string{"Request", string(r.Method) + " " + r.Url})
+	if r.WorkflowRunId != nil {
+		rows[len(rows)-1] = []string{"Workflow run", *r.WorkflowRunId + "  (workly workflows run " + *r.WorkflowRunId + ")"}
+	} else if r.Url == "" {
+		rows = rows[:len(rows)-1] // a workflow run, not started yet
+	}
 	if r.State == client.RunStatePending {
 		rows = append(rows, []string{"Runs", ago(r.RunAt)})
 	}
@@ -483,4 +502,13 @@ func printBody(w io.Writer, payload *json.RawMessage, body *string) {
 	case body != nil:
 		fmt.Fprintf(w, "\nBody:\n  %s\n", *body)
 	}
+}
+
+// scheduleTarget is what a schedule's runs do: call a URL or start a
+// workflow.
+func scheduleTarget(s *client.Schedule) string {
+	if s.Workflow != nil {
+		return "start workflow " + *s.Workflow
+	}
+	return string(s.Method) + " " + s.Url
 }

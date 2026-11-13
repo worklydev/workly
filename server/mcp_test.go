@@ -123,7 +123,8 @@ func (c mcpClient) toolNames() []string {
 }
 
 var readTools = []string{"list_queues", "get_queue", "list_tasks", "get_task", "get_task_delivery", "wait_for_task",
-	"list_groups", "get_group", "list_schedules", "get_schedule", "list_runs", "get_run", "get_run_delivery", "wait_for_run"}
+	"list_groups", "get_group", "list_schedules", "get_schedule", "list_runs", "get_run", "get_run_delivery", "wait_for_run",
+	"list_workflows", "get_workflow", "list_workflow_runs", "get_workflow_run"}
 
 func TestMCPProtocol(t *testing.T) {
 	c := mcpClient{t: t, h: newServer(t, server.Options{DisableDispatcher: true, Version: "1.2.3"}).Handler()}
@@ -204,7 +205,8 @@ func TestMCPModes(t *testing.T) {
 		{server.MCPReadOnly, readTools},
 		{server.MCPFull, append(slices.Clone(readTools), "enqueue_task", "retry_task", "cancel_task",
 			"retry_failed_tasks", "cancel_pending_tasks", "pause_queue", "resume_queue", "update_queue_policy",
-			"update_schedule", "trigger_schedule", "pause_schedule", "resume_schedule", "retry_run", "cancel_run")},
+			"update_schedule", "trigger_schedule", "pause_schedule", "resume_schedule", "retry_run", "cancel_run",
+			"trigger_workflow", "cancel_workflow_run")},
 	} {
 		t.Run(string(tc.mode), func(t *testing.T) {
 			c := mcpClient{t: t, h: newServer(t, server.Options{DisableDispatcher: true, MCP: tc.mode}).Handler()}
@@ -752,4 +754,57 @@ func nullKeys(m map[string]any, keys ...string) bool {
 		}
 	}
 	return true
+}
+
+func TestMCPWorkflows(t *testing.T) {
+	h := newServer(t, server.Options{DisableDispatcher: true, MCP: server.MCPFull}).Handler()
+	c := mcpClient{t: t, h: h}
+	doBody(t, h, "PUT", "/v1/workflows/refresh", "", `{"steps": [
+		{"name": "prices", "url": "https://example.test/prices"},
+		{"name": "analytics", "url": "https://example.test/analytics", "depends_on": ["prices"]}]}`)
+
+	list := c.call("list_workflows", map[string]any{})
+	w := list["workflows"].([]any)[0].(map[string]any)
+	if w["name"] != "refresh" || fmt.Sprint(w["steps"]) != "[map[depends_on:[] name:prices] map[depends_on:[prices] name:analytics]]" {
+		t.Fatalf("list_workflows = %v", list)
+	}
+	run := c.call("trigger_workflow", map[string]any{"workflow": "refresh", "input": map[string]any{"date": "2026-11-13"}, "idempotency_key": "d1"})
+	id, _ := run["id"].(string)
+	steps := run["steps"].([]any)
+	if run["status"] != "running" || steps[1].(map[string]any)["status"] != "blocked" {
+		t.Fatalf("trigger_workflow = %v", run)
+	}
+	if again := c.call("trigger_workflow", map[string]any{"workflow": "refresh", "idempotency_key": "d1"}); again["id"] != id {
+		t.Fatalf("trigger_workflow again = %v", again)
+	}
+	got := c.call("get_workflow_run", map[string]any{"id": id})
+	if fmt.Sprint(got["steps"].([]any)[1].(map[string]any)["blocked_by"]) != "[prices]" {
+		t.Fatalf("get_workflow_run = %v", got)
+	}
+	if got := c.call("get_workflow", map[string]any{"workflow": "refresh"}); len(got["recent_runs"].([]any)) != 1 {
+		t.Fatalf("get_workflow = %v", got)
+	}
+	if got := c.call("cancel_workflow_run", map[string]any{"id": id}); got["status"] != "cancelled" {
+		t.Fatalf("cancel_workflow_run = %v", got)
+	}
+	if got := c.call("list_workflow_runs", map[string]any{"status": "cancelled"}); len(got["workflow_runs"].([]any)) != 1 {
+		t.Fatalf("list_workflow_runs = %v", got)
+	}
+
+	// update_schedule switches a schedule between calling a URL and
+	// starting a workflow.
+	s := c.call("update_schedule", map[string]any{"schedule": "nightly", "cron": "0 3 * * *", "url": "https://example.test/x"})
+	if s["url"] != "https://example.test/x" {
+		t.Fatalf("update_schedule = %v", s)
+	}
+	s = c.call("update_schedule", map[string]any{"schedule": "nightly", "workflow": "refresh"})
+	if s["workflow"] != "refresh" || s["url"] != "" {
+		t.Fatalf("update_schedule to a workflow = %v", s)
+	}
+	if s = c.call("update_schedule", map[string]any{"schedule": "nightly", "timezone": "Europe/Stockholm"}); s["workflow"] != "refresh" {
+		t.Fatalf("update_schedule of a workflow schedule = %v", s)
+	}
+	if s = c.call("update_schedule", map[string]any{"schedule": "nightly", "url": "https://example.test/y"}); s["url"] != "https://example.test/y" || s["workflow"] != nil {
+		t.Fatalf("update_schedule back to a url = %v", s)
+	}
 }

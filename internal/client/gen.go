@@ -1081,6 +1081,9 @@ type Run struct {
 	Trigger   RunTrigger `json:"trigger"`
 	UpdatedAt time.Time  `json:"updated_at"`
 	Url       string     `json:"url"`
+
+	// WorkflowRunId The workflow run this run started, for a schedule that starts a workflow.
+	WorkflowRunId *string `json:"workflow_run_id,omitempty"`
 }
 
 // RunList defines model for RunList.
@@ -1183,10 +1186,15 @@ type Schedule struct {
 	Timezone       string           `json:"timezone"`
 	UpdatedAt      time.Time        `json:"updated_at"`
 	Url            string           `json:"url"`
+
+	// Workflow The workflow each run starts, for a schedule that starts one. `url` is then empty.
+	Workflow *string `json:"workflow,omitempty"`
 }
 
 // ScheduleConfig A schedule's settings. Omitted fields take the default. The request
-// fields (`url` to `content_type`) work as in `EnqueueRequest`.
+// fields (`url` to `content_type`) work as in `EnqueueRequest`. Set
+// `url` to call an endpoint, or `workflow` to start a run of that
+// workflow instead.
 type ScheduleConfig struct {
 	// BackoffMultiplier Retries back off as for queues (see `QueueConfig`).
 	BackoffMultiplier *float64 `json:"backoff_multiplier,omitempty"`
@@ -1254,10 +1262,20 @@ type ScheduleConfig struct {
 	// once.
 	Timezone *string `json:"timezone,omitempty"`
 
-	// Url The http(s) URL to call.
+	// Url The http(s) URL to call. Use this or `workflow`.
 	//
 	// Example: https://api.example.com/reports/nightly
-	Url string `json:"url"`
+	Url *string `json:"url,omitempty"`
+
+	// Workflow A workflow to start a run of instead of calling a URL. The
+	// `payload`, if any, is the run's `input`; `method`, `headers` and
+	// `body` don't apply. Each run's attempt starts the workflow run
+	// (`workflow_run_id`), which then goes on independently: the run
+	// succeeding means the workflow started, not that it succeeded.
+	//
+	//
+	// Example: daily-refresh
+	Workflow *string `json:"workflow,omitempty"`
 }
 
 // ScheduleList defines model for ScheduleList.

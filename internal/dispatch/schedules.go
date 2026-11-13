@@ -161,7 +161,12 @@ func (s *scheduler) claim(ctx, deliverCtx context.Context, wg *sync.WaitGroup, d
 				default:
 				}
 			}()
-			r := d.deliverer.deliverRun(deliverCtx, c.Run, c.Schedule.Timeout)
+			var r result
+			if c.Schedule.Workflow != "" {
+				r = s.startWorkflow(deliverCtx, c)
+			} else {
+				r = d.deliverer.deliverRun(deliverCtx, c.Run, c.Schedule.Timeout)
+			}
 			s.finish(c.Run, decideRun(c.Schedule.ScheduleConfig, c.Run, r, rand.Float64))
 		})
 	}

@@ -2026,8 +2026,10 @@ components:
       type: object
       description: |
         A schedule's settings. Omitted fields take the default. The request
-        fields (`url` to `content_type`) work as in `EnqueueRequest`.
-      required: [cron, url]
+        fields (`url` to `content_type`) work as in `EnqueueRequest`. Set
+        `url` to call an endpoint, or `workflow` to start a run of that
+        workflow instead.
+      required: [cron]
       properties:
         cron:
           type: string
@@ -2047,8 +2049,17 @@ components:
             once.
         url:
           type: string
-          description: The http(s) URL to call.
+          description: The http(s) URL to call. Use this or `workflow`.
           example: https://api.example.com/reports/nightly
+        workflow:
+          type: string
+          description: |
+            A workflow to start a run of instead of calling a URL. The
+            `payload`, if any, is the run's `input`; `method`, `headers` and
+            `body` don't apply. Each run's attempt starts the workflow run
+            (`workflow_run_id`), which then goes on independently: the run
+            succeeding means the workflow started, not that it succeeded.
+          example: daily-refresh
         method:
           $ref: "#/components/schemas/HTTPMethod"
         headers:
@@ -2127,6 +2138,9 @@ components:
       properties:
         name:
           type: string
+        workflow:
+          type: string
+          description: The workflow each run starts, for a schedule that starts one. `url` is then empty.
         cron:
           type: string
         timezone:
@@ -2255,6 +2269,9 @@ components:
           example: run_01J9ZK3M5Q8R2T4V6W8X0Y2Z4A
         schedule:
           type: string
+        workflow_run_id:
+          type: string
+          description: The workflow run this run started, for a schedule that starts a workflow.
         state:
           $ref: "#/components/schemas/RunState"
         trigger:

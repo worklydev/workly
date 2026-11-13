@@ -1,4 +1,4 @@
-// Package deploy reads a workly.yaml, which declares queues and schedules,
+// Package deploy reads a workly.yaml, which declares queues, workflows and schedules,
 // and works out the changes that make a server match it. The CLI's
 // validate, plan and deploy commands are built on it.
 package deploy
@@ -24,12 +24,14 @@ import (
 const Version = 1
 
 // File is a valid workly.yaml. A section left out of the file isn't managed
-// by it (HasQueues, HasSchedules); an empty one declares nothing.
+// by it (HasQueues, HasWorkflows, HasSchedules); an empty one declares
+// nothing.
 type File struct {
-	Path                    string
-	Queues                  []Queue
-	Schedules               []Schedule
-	HasQueues, HasSchedules bool
+	Path                                  string
+	Queues                                []Queue
+	Workflows                             []Workflow
+	Schedules                             []Schedule
+	HasQueues, HasWorkflows, HasSchedules bool
 }
 
 // Queue is a declared queue: Config is the PUT body, settings what it
@@ -44,6 +46,12 @@ type Schedule struct {
 	Name     string
 	Config   api.ScheduleConfig
 	settings store.ScheduleConfig
+}
+
+type Workflow struct {
+	Name     string
+	Config   api.WorkflowConfig
+	settings store.WorkflowConfig
 }
 
 // Problem is one thing wrong with a file: where, which field (a path such as
@@ -115,7 +123,10 @@ var hints = map[string]string{
 	"retries":     `use max_attempts, which counts the first attempt too`,
 	"timeout":     `use timeout_seconds`,
 	"queue":       `schedules call their url directly; they don't use a queue`,
-	"destructive": `workly deploy never deletes anything; remove queues and schedules with workly queues rm and workly schedules rm`,
+	"needs":       `use depends_on`,
+	"after":       `use depends_on`,
+	"depends":     `use depends_on`,
+	"destructive": `workly deploy never deletes anything; remove queues, workflows and schedules with workly queues rm, workly workflows rm and workly schedules rm`,
 	"paused":      `deploying doesn't pause or resume; use workly queues pause or workly schedules pause`,
 }
 
@@ -131,7 +142,7 @@ func (p *parser) file(data []byte) *File {
 	}
 	root := doc.Content[0]
 	if root.Kind != yaml.MappingNode {
-		p.add(root, "", "expected a mapping with version, queues and schedules")
+		p.add(root, "", "expected a mapping with version, queues, workflows and schedules")
 		return nil
 	}
 	f := &File{}
@@ -143,11 +154,14 @@ func (p *parser) file(data []byte) *File {
 		case "queues":
 			f.HasQueues = true
 			p.queues(f, kv[1])
+		case "workflows":
+			f.HasWorkflows = true
+			p.workflows(f, kv[1])
 		case "schedules":
 			f.HasSchedules = true
 			p.schedules(f, kv[1])
 		default:
-			p.unknown(kv[0], key, []string{"version", "queues", "schedules"})
+			p.unknown(kv[0], key, []string{"version", "queues", "workflows", "schedules"})
 		}
 	}
 	var v int
@@ -199,6 +213,69 @@ func (p *parser) schedules(f *File, n *yaml.Node) {
 			continue
 		}
 		f.Schedules = append(f.Schedules, s)
+	}
+}
+
+func (p *parser) workflows(f *File, n *yaml.Node) {
+	for _, kv := range p.mapping(n, "workflows") {
+		w := Workflow{Name: kv[0].Value}
+		path := "workflows." + w.Name
+		if err := api.ValidateName("workflow", w.Name); err != nil {
+			p.add(kv[0], path, "%v", err)
+			continue
+		}
+		before := len(p.problems)
+		var steps *yaml.Node
+		for _, f := range p.mapping(kv[1], path) {
+			switch key := f[0].Value; key {
+			case "steps":
+				steps = f[1]
+			case "max_duration_seconds":
+				var d float64
+				if !p.expand(f[1], path+"."+key) {
+					continue
+				}
+				if f[1].Decode(&d) != nil {
+					p.add(f[1], path+"."+key, "must be a number")
+					continue
+				}
+				w.Config.MaxDurationSeconds = &d
+			default:
+				p.unknown(f[0], path+"."+key, []string{"steps", "max_duration_seconds"})
+			}
+		}
+		if steps == nil {
+			if len(p.problems) == before {
+				p.add(kv[1], path+".steps", "required: a workflow needs at least one step")
+			}
+			continue
+		}
+		if steps.Kind != yaml.SequenceNode {
+			p.add(steps, path+".steps", "expected a list of steps")
+			continue
+		}
+		for i, sn := range steps.Content {
+			var sc api.WorkflowStepConfig
+			if _, ok := p.fields(sn, fmt.Sprintf("%s.steps[%d]", path, i), &sc); ok {
+				w.Config.Steps = append(w.Config.Steps, sc)
+			}
+		}
+		if len(p.problems) > before {
+			continue
+		}
+		var err error
+		if w.settings, err = api.WorkflowSettings(w.Config, config.Default().MaxPayloadBytes); err != nil {
+			// The API's messages name the step they're about: "steps[1]: …".
+			msg, at := err.Error(), kv[0]
+			var i int
+			if _, scanErr := fmt.Sscanf(msg, "steps[%d]:", &i); scanErr == nil && i < len(steps.Content) {
+				at, msg = steps.Content[i], strings.TrimSpace(msg[strings.Index(msg, ":")+1:])
+				path = fmt.Sprintf("%s.steps[%d]", path, i)
+			}
+			p.add(at, path, "%s", msg)
+			continue
+		}
+		f.Workflows = append(f.Workflows, w)
 	}
 }
 

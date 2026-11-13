@@ -246,3 +246,73 @@ func TestWorkflowEndToEnd(t *testing.T) {
 		t.Fatalf("calls = %v, want analytics last", order)
 	}
 }
+
+// TestScheduledWorkflow triggers a schedule that starts a workflow, with
+// its payload as the run's input.
+func TestScheduledWorkflow(t *testing.T) {
+	ready := make(chan net.Addr, 1)
+	srv := newServer(t, server.Options{
+		Addr: "127.0.0.1:0", DevEndpoints: true,
+		OnReady: func(addr net.Addr) { ready <- addr },
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx) }()
+	defer func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Errorf("Run: %v", err)
+		}
+	}()
+	h := srv.Handler()
+	base := "http://" + (<-ready).String()
+
+	if res := doBody(t, h, "PUT", "/v1/schedules/nightly", "", `{"cron": "0 3 * * *", "workflow": "refresh"}`); res.status != 404 || errorCode(res) != "workflow_not_found" {
+		t.Fatalf("schedule of a missing workflow = %d %s", res.status, res.body)
+	}
+	if res := doBody(t, h, "PUT", "/v1/workflows/refresh", "", fmt.Sprintf(`{"steps": [{"name": "a", "url": "%s/_dev/echo"}]}`, base)); res.status != 201 {
+		t.Fatalf("put workflow = %d %s", res.status, res.body)
+	}
+	for _, body := range []string{
+		`{"cron": "0 3 * * *"}`,
+		`{"cron": "0 3 * * *", "workflow": "refresh", "url": "https://e.test"}`,
+		`{"cron": "0 3 * * *", "workflow": "refresh", "body": "x"}`,
+	} {
+		if res := doBody(t, h, "PUT", "/v1/schedules/nightly", "", body); res.status != 400 {
+			t.Errorf("put %s = %d %s", body, res.status, res.body)
+		}
+	}
+	res := doBody(t, h, "PUT", "/v1/schedules/nightly", "", `{"cron": "0 3 * * *", "workflow": "refresh", "payload": {"full": true}}`)
+	if res.status != 201 || res.json["workflow"] != "refresh" || res.json["url"] != "" {
+		t.Fatalf("put schedule = %d %s", res.status, res.body)
+	}
+	runID := do(t, h, "POST", "/v1/schedules/nightly/trigger", "").json["id"].(string)
+
+	deadline := time.Now().Add(10 * time.Second)
+	var run map[string]any
+	for {
+		if time.Now().After(deadline) {
+			t.Fatalf("schedule run after 10s = %v", run)
+		}
+		time.Sleep(20 * time.Millisecond)
+		if run = do(t, h, "GET", "/v1/runs/"+runID, "").json; run["state"] == "succeeded" || run["state"] == "failed" {
+			break
+		}
+	}
+	wfRunID, _ := run["workflow_run_id"].(string)
+	if run["state"] != "succeeded" || wfRunID == "" {
+		t.Fatalf("schedule run = %v", run)
+	}
+	for {
+		if time.Now().After(deadline) {
+			t.Fatalf("workflow run after 10s = %v", run)
+		}
+		time.Sleep(20 * time.Millisecond)
+		if run = do(t, h, "GET", "/v1/workflow-runs/"+wfRunID, "").json; run["status"] != "running" {
+			break
+		}
+	}
+	if run["status"] != "succeeded" || run["schedule_run_id"] != runID || fmt.Sprint(run["input"]) != "map[full:true]" {
+		t.Fatalf("workflow run = %v", run)
+	}
+}

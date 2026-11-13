@@ -574,7 +574,9 @@ export type GroupList = {
 
 /**
  * A schedule's settings. Omitted fields take the default. The request
- * fields (`url` to `content_type`) work as in `EnqueueRequest`.
+ * fields (`url` to `content_type`) work as in `EnqueueRequest`. Set
+ * `url` to call an endpoint, or `workflow` to start a run of that
+ * workflow instead.
  *
  */
 export type ScheduleConfig = {
@@ -595,9 +597,18 @@ export type ScheduleConfig = {
      */
     timezone?: string;
     /**
-     * The http(s) URL to call.
+     * The http(s) URL to call. Use this or `workflow`.
      */
-    url: string;
+    url?: string;
+    /**
+     * A workflow to start a run of instead of calling a URL. The
+     * `payload`, if any, is the run's `input`; `method`, `headers` and
+     * `body` don't apply. Each run's attempt starts the workflow run
+     * (`workflow_run_id`), which then goes on independently: the run
+     * succeeding means the workflow started, not that it succeeded.
+     *
+     */
+    workflow?: string;
     method?: HttpMethod;
     /**
      * Headers sent with every run. `Workly-*` headers are reserved.
@@ -659,6 +670,10 @@ export type MissedPolicy = 'skip' | 'catch_up';
 
 export type Schedule = {
     name: string;
+    /**
+     * The workflow each run starts, for a schedule that starts one. `url` is then empty.
+     */
+    workflow?: string;
     cron: string;
     timezone: string;
     method: HttpMethod;
@@ -748,6 +763,10 @@ export type SkipReason = 'overlap' | 'missed';
 export type Run = {
     id: string;
     schedule: string;
+    /**
+     * The workflow run this run started, for a schedule that starts a workflow.
+     */
+    workflow_run_id?: string;
     state: RunState;
     trigger: RunTrigger;
     /**

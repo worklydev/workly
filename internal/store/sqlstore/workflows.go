@@ -248,6 +248,12 @@ func (s *Store) StartWorkflowRun(ctx context.Context, ws workspace.ID, name stri
 		if r, err = s.getWorkflowRunRow(ctx, tx, ws, runID); err != nil {
 			return err
 		}
+		if nr.ScheduleRunID != "" {
+			if _, err := s.exec(ctx, tx, `UPDATE runs SET workflow_run_id = ? WHERE workspace_id = ? AND id = ?`,
+				runID, ws, nr.ScheduleRunID); err != nil {
+				return err
+			}
+		}
 		for i, sc := range r.Config.Steps {
 			deps, err := json.Marshal(nonNil(sc.DependsOn))
 			if err != nil {

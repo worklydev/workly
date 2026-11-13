@@ -48,11 +48,35 @@ func scheduleConfig(in ScheduleConfig, maxBody int64) (store.ScheduleConfig, cro
 	if err != nil {
 		return cfg, c, nil, err
 	}
-	r, err := validateRequest(request{in.Url, in.Method, in.Headers, in.Payload, in.Body, in.ContentType}, maxBody)
-	if err != nil {
-		return cfg, c, nil, err
+	if in.Workflow != nil {
+		// The payload is the workflow run's input; there is no request.
+		switch {
+		case in.Url != nil:
+			return cfg, c, nil, invalid("use either url or workflow, not both")
+		case in.Method != nil || in.Headers != nil || in.Body != nil || in.ContentType != nil:
+			return cfg, c, nil, invalid("a schedule that starts a workflow takes only a payload, as the run's input")
+		}
+		if err := validateName("workflow", *in.Workflow); err != nil {
+			return cfg, c, nil, err
+		}
+		cfg.Workflow, cfg.Headers = *in.Workflow, map[string]string{}
+		if in.Payload != nil && string(*in.Payload) != "null" {
+			if int64(len(*in.Payload)) > maxBody {
+				return cfg, c, nil, payloadTooLarge(maxBody)
+			}
+			cfg.Body = *in.Payload
+			cfg.Headers["Content-Type"] = "application/json"
+		}
+	} else {
+		if in.Url == nil {
+			return cfg, c, nil, invalid("a schedule needs a url, or a workflow to start")
+		}
+		r, err := validateRequest(request{*in.Url, in.Method, in.Headers, in.Payload, in.Body, in.ContentType}, maxBody)
+		if err != nil {
+			return cfg, c, nil, err
+		}
+		cfg.Method, cfg.URL, cfg.Headers, cfg.Body = r.method, r.url, r.headers, r.body
 	}
-	cfg.Method, cfg.URL, cfg.Headers, cfg.Body = r.method, r.url, r.headers, r.body
 
 	if in.TimeoutSeconds != nil {
 		cfg.Timeout = duration(*in.TimeoutSeconds)
@@ -104,6 +128,7 @@ func scheduleConfig(in ScheduleConfig, maxBody int64) (store.ScheduleConfig, cro
 func toSchedule(sc store.Schedule, now time.Time) Schedule {
 	out := Schedule{
 		Name:              sc.Name,
+		Workflow:          optional(sc.Workflow),
 		Cron:              sc.Cron,
 		Timezone:          sc.Timezone,
 		Method:            HTTPMethod(sc.Method),
@@ -185,6 +210,7 @@ func toRun(r store.Run) Run {
 		RetriedAt:     r.RetriedAt,
 	}
 	out.CallbackTaskId = optional(r.CallbackTaskID)
+	out.WorkflowRunId = optional(r.WorkflowRunID)
 	out.LastDurationMs = durationMillis(r.LastDuration)
 	out.Payload, out.Body = bodyFields(r.Headers, r.Body)
 	if r.SkipReason != "" {
@@ -259,6 +285,13 @@ func (h Handlers) PutSchedule(ctx context.Context, req PutScheduleRequestObject)
 			}
 		}
 		if err := h.Admission.AdmitSchedule(ctx, ws, adm); err != nil {
+			return nil, err
+		}
+	}
+	if cfg.Workflow != "" {
+		if _, err := h.Store.GetWorkflow(ctx, ws, cfg.Workflow); errors.Is(err, store.ErrNotFound) {
+			return nil, workflowNotFound(cfg.Workflow)
+		} else if err != nil {
 			return nil, err
 		}
 	}
