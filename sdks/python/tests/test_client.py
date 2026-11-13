@@ -387,7 +387,14 @@ def test_tasks_activity() -> None:
             json={
                 "range": "1h",
                 "bucket_seconds": 300,
-                "buckets": [{"start": "2026-09-20T10:00:00Z", "counts": {"emails": 3}}],
+                "buckets": [
+                    {
+                        "start": "2026-09-20T10:00:00Z",
+                        "counts": {"emails": 3},
+                        "succeeded": 2,
+                        "failed": 1,
+                    }
+                ],
             },
         )
     )
@@ -398,6 +405,7 @@ def test_tasks_activity() -> None:
         {"emails": 3},
         None,
     )
+    assert (a.buckets[0].succeeded, a.buckets[0].failed) == (2, 1)
 
 
 def test_preview_cron() -> None:

@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react';
 import { CircleCheck, Pause, RotateCcw, Search } from 'lucide-react';
-import { ChartAxis, ChartEmpty, ChartSkeleton, Sparkline } from '../components/Chart';
+import { ChartAxis, ChartEmpty, ChartSkeleton } from '../components/Chart';
 import { EmptyState } from '../components/EmptyState';
-import { HealthLine } from './home/HealthLine';
+import { Status } from './home/Status';
 import { CodePanel } from '../components/CodePanel';
 import { ConfirmButton } from '../components/ConfirmButton';
 import { OutcomeBadge, StatusCode, TaskStateBadge } from '../components/states';
@@ -15,6 +15,10 @@ import { Input } from '../primitives/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../primitives/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../primitives/table';
 import { Tabs, TabsList, TabsTab } from '../primitives/tabs';
+
+// Example times, fixed when the page loads.
+const LOADED = Date.now();
+const ago = (ms: number) => new Date(LOADED - ms).toISOString();
 
 const SURFACES = ['background', 'surface', 'card', 'muted', 'border', 'input'];
 const TEXT = ['foreground', 'muted-foreground', 'faint'];
@@ -180,7 +184,7 @@ export function DesignPage() {
           </Table>
         </Section>
 
-        <Section title="Charts: loading, empty, sparklines">
+        <Section title="Charts: loading and empty">
           <ChartSkeleton bars={24} />
           <ChartEmpty
             bars={24}
@@ -189,11 +193,6 @@ export function DesignPage() {
             action={{ label: 'Show the last 7 days', onClick: () => {} }}
           />
           <ChartAxis ticks={['Thu 10:00', 'Thu 22:00', 'now']} />
-          <div className="flex items-center gap-6">
-            <Sparkline values={[0, 2, 5, 3, 8, 13, 9, 4, 6, 11, 7, 3]} title="With data" />
-            <Sparkline values={[0, 0, 0, 0, 0, 0]} title="Empty" />
-            <Sparkline values={undefined} />
-          </div>
           <EmptyState
             icon={CircleCheck}
             tone="success"
@@ -202,24 +201,52 @@ export function DesignPage() {
           />
         </Section>
 
-        <Section title="Health line">
-          <HealthLine
-            health={{ tone: 'ok', running: 12, clauses: [['All quiet: 4 queues and 3 schedules, nothing failing']] }}
-          />
-          <HealthLine
-            health={{
-              tone: 'warning',
-              running: 0,
-              clauses: [[{ text: 'emails', to: '/queues/emails', mono: true }, ' is 4m 12s behind']],
+        <Section title="Status (Home)">
+          <Status
+            status={{
+              tone: 'ok',
+              title: 'All quiet: 4 queues and 3 schedules, nothing failing',
+              issues: [],
+              running: 12,
             }}
           />
-          <HealthLine
-            health={{
+          <Status
+            status={{ tone: 'idle', title: 'Quiet: nothing enqueued in the last 24h', issues: [], running: 0 }}
+            lastTaskAt={ago(3 * 86_400_000)}
+          />
+          <Status
+            status={{
               tone: 'danger',
+              title: '3 things need attention',
               running: 3,
-              clauses: [
-                [{ text: '23 failed tasks', to: '/failures' }, ' in 2 queues'],
-                [{ text: 'nightly-report', to: '/schedules/nightly-report', mono: true }, ' failed its last run'],
+              issues: [
+                {
+                  key: '1',
+                  tone: 'danger',
+                  name: 'webhooks',
+                  what: '23 failed',
+                  detail: 'HTTP 503 Service Unavailable',
+                  more: '+2 other errors',
+                  at: ago(120_000),
+                  to: '/queues/webhooks?state=failed',
+                },
+                {
+                  key: '2',
+                  tone: 'danger',
+                  name: 'nightly-report',
+                  what: 'last run failed',
+                  detail: 'timeout after 30s',
+                  to: '/schedules/nightly-report?state=failed',
+                },
+                {
+                  key: '3',
+                  tone: 'warning',
+                  name: 'emails',
+                  what: '4m 12s behind',
+                  detail: '1,204 due now',
+                  to: '/queues/emails',
+                },
+                { key: '4', tone: 'neutral', name: 'reports', what: '1 queue paused', to: '/queues/reports' },
               ],
             }}
           />

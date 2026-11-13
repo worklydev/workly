@@ -147,6 +147,14 @@ export type ActivityBucket = {
     counts: {
         [key: string]: number;
     };
+    /**
+     * Tasks of every queue that finished in the bucket and succeeded.
+     */
+    succeeded: number;
+    /**
+     * Tasks of every queue that finished in the bucket and failed.
+     */
+    failed: number;
 };
 
 export type CronPreview = {

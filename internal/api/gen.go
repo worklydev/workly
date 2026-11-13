@@ -428,7 +428,13 @@ type ActivityRange string
 type ActivityBucket struct {
 	// Counts Tasks created in the bucket, by queue; queues with none are left out.
 	Counts map[string]int `json:"counts"`
-	Start  time.Time      `json:"start"`
+
+	// Failed Tasks of every queue that finished in the bucket and failed.
+	Failed int       `json:"failed"`
+	Start  time.Time `json:"start"`
+
+	// Succeeded Tasks of every queue that finished in the bucket and succeeded.
+	Succeeded int `json:"succeeded"`
 }
 
 // AlertChannel defines model for AlertChannel.
@@ -1438,7 +1444,7 @@ type ServerInterface interface {
 	// GetReadyz Readiness probe
 	// (GET /readyz)
 	GetReadyz(w http.ResponseWriter, r *http.Request)
-	// GetActivity Count created tasks over time, by queue
+	// GetActivity Count tasks created and finished over time
 	// (GET /v1/activity)
 	GetActivity(w http.ResponseWriter, r *http.Request, params GetActivityParams)
 	// ListAlertChannels List alert channels
@@ -4979,7 +4985,7 @@ type StrictServerInterface interface {
 	// GetReadyz Readiness probe
 	// (GET /readyz)
 	GetReadyz(ctx context.Context, request GetReadyzRequestObject) (GetReadyzResponseObject, error)
-	// GetActivity Count created tasks over time, by queue
+	// GetActivity Count tasks created and finished over time
 	// (GET /v1/activity)
 	GetActivity(ctx context.Context, request GetActivityRequestObject) (GetActivityResponseObject, error)
 	// ListAlertChannels List alert channels

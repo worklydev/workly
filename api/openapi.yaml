@@ -268,10 +268,11 @@ paths:
   /v1/activity:
     get:
       operationId: getActivity
-      summary: Count created tasks over time, by queue
+      summary: Count tasks created and finished over time
       description: |
         Counts the workspace's tasks created in each bucket of the range, per
-        queue, oldest bucket first; every bucket is listed, empty ones too.
+        queue, and the tasks that finished in it, by final state; oldest
+        bucket first, and every bucket is listed, empty ones too.
         Buckets are 5 minutes for `1h`, 1 hour for `24h` and 6 hours for `7d`,
         aligned to UTC. Finished tasks are deleted after the server's
         retention period, so buckets further back than `retention_seconds`
@@ -1306,7 +1307,7 @@ components:
             Absent if it keeps them forever.
     ActivityBucket:
       type: object
-      required: [start, counts]
+      required: [start, counts, succeeded, failed]
       properties:
         start:
           type: string
@@ -1316,6 +1317,12 @@ components:
           description: Tasks created in the bucket, by queue; queues with none are left out.
           additionalProperties:
             type: integer
+        succeeded:
+          type: integer
+          description: Tasks of every queue that finished in the bucket and succeeded.
+        failed:
+          type: integer
+          description: Tasks of every queue that finished in the bucket and failed.
     CronPreview:
       type: object
       required: [next_runs, interval_seconds]

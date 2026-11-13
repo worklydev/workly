@@ -598,6 +598,28 @@ func (s *Store) TaskActivity(ctx context.Context, ws workspace.ID, since time.Ti
 	return out, rows.Err()
 }
 
+func (s *Store) FinishedActivity(ctx context.Context, ws workspace.ID, since time.Time, bucket time.Duration) ([]store.FinishedCount, error) {
+	ms := bucket.Milliseconds()
+	rows, err := s.query(ctx, s.db, `SELECT state, (`+s.epochMillis("finished_at")+` / ?) * ? AS bucket, count(*)
+		FROM tasks WHERE workspace_id = ? AND finished_at >= ? AND state IN ('succeeded', 'failed')
+		GROUP BY state, bucket ORDER BY bucket, state`, ms, ms, ws, s.ts(since))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []store.FinishedCount
+	for rows.Next() {
+		var c store.FinishedCount
+		var start int64
+		if err := rows.Scan(&c.State, &start, &c.Count); err != nil {
+			return nil, err
+		}
+		c.Start = time.UnixMilli(start).UTC()
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
 // maxGroupedBody is how much of a response body a failure group carries.
 const maxGroupedBody = 500
 

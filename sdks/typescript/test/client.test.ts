@@ -430,14 +430,14 @@ describe('task activity', () => {
     const activity = {
       range: '1h',
       bucket_seconds: 300,
-      buckets: [{ start: '2030-01-01T00:00:00Z', counts: { q: 2 } }],
+      buckets: [{ start: '2030-01-01T00:00:00Z', counts: { q: 2 }, succeeded: 1, failed: 0 }],
     };
     const { fetch, sent } = fakeFetch(json(activity), json(activity));
     const workly = new Workly({ fetch });
     assert.deepEqual(await workly.tasks.activity({ range: '1h' }), {
       range: '1h',
       bucketSeconds: 300,
-      buckets: [{ start: '2030-01-01T00:00:00Z', counts: { q: 2 } }],
+      buckets: [{ start: '2030-01-01T00:00:00Z', counts: { q: 2 }, succeeded: 1, failed: 0 }],
     });
     await workly.tasks.activity();
     assert.equal(`${sent[0]?.url.pathname}${sent[0]?.url.search}`, '/v1/activity?range=1h');

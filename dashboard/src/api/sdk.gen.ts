@@ -163,10 +163,11 @@ export const getQueueActivity = <ThrowOnError extends boolean = false>(options: 
 });
 
 /**
- * Count created tasks over time, by queue
+ * Count tasks created and finished over time
  *
  * Counts the workspace's tasks created in each bucket of the range, per
- * queue, oldest bucket first; every bucket is listed, empty ones too.
+ * queue, and the tasks that finished in it, by final state; oldest
+ * bucket first, and every bucket is listed, empty ones too.
  * Buckets are 5 minutes for `1h`, 1 hour for `24h` and 6 hours for `7d`,
  * aligned to UTC. Finished tasks are deleted after the server's
  * retention period, so buckets further back than `retention_seconds`

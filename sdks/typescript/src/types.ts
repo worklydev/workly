@@ -95,11 +95,21 @@ export interface CronPreview {
 
 export type ActivityRange = '1h' | '24h' | '7d';
 
-/** The workspace's tasks created over time: every bucket of the range, oldest first. */
+export interface ActivityBucket {
+  start: string;
+  /** Tasks created, by queue; queues with none are left out. */
+  counts: Record<string, number>;
+  /** Tasks of every queue that finished in the bucket and succeeded. */
+  succeeded: number;
+  /** Tasks of every queue that finished in the bucket and failed. */
+  failed: number;
+}
+
+/** The workspace's tasks created and finished over time: every bucket of the range, oldest first. */
 export interface Activity {
   range: ActivityRange;
   bucketSeconds: number;
-  buckets: { start: string; /** By queue; queues with none are left out. */ counts: Record<string, number> }[];
+  buckets: ActivityBucket[];
   /** How long the server keeps finished tasks; absent if forever. Older ones aren't counted. */
   retentionSeconds?: number;
 }

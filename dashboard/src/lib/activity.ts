@@ -1,4 +1,6 @@
-import type { ActivityBucket } from '../api';
+import type { Activity, ActivityBucket } from '../api';
+
+type Range = Activity['range'];
 
 /** The busiest queues get a color each; the rest share one. */
 const COLORS = ['bg-chart-1', 'bg-chart-2', 'bg-chart-3', 'bg-chart-4', 'bg-chart-5'];
@@ -42,4 +44,31 @@ export function niceCeil(n: number): number {
   if (n <= 0) return 1;
   const p = 10 ** Math.floor(Math.log10(n));
   return ([1, 2, 5, 10].find((m) => m * p >= n) ?? 10) * p;
+}
+
+/** Buckets per range (see /v1/activity), for placeholders before the data arrives. */
+export const BARS: Record<Range, number> = { '1h': 12, '24h': 24, '7d': 28 };
+
+export const RANGE_SECONDS: Record<Range, number> = { '1h': 3600, '24h': 86_400, '7d': 7 * 86_400 };
+
+const time = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' });
+const dayTime = new Intl.DateTimeFormat(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+
+// Beyond an hour the axis spans two days or more, so its times need the day.
+export function tick(iso: string, range: Range) {
+  return (range === '1h' ? time : dayTime).format(new Date(iso));
+}
+
+export function span(start: Date, end: Date, range: Range) {
+  const f = range === '1h' ? time : dayTime;
+  return `${f.format(start)}–${time.format(end)}`;
+}
+
+/** The times under a chart of the range: its first bucket, its middle one, and now. */
+export function axisTicks(data: Activity): string[] {
+  return [
+    tick(data.buckets[0].start, data.range),
+    tick(data.buckets[Math.floor(data.buckets.length / 2)].start, data.range),
+    'now',
+  ];
 }

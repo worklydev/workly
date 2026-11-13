@@ -1,82 +1,173 @@
 import type { Queue, Schedule } from '../api';
+import type { QueueFailureGroup, RunFailureGroup } from '../hooks/useFailureGroups';
+import { lastFailed } from '../hooks/useFailureGroups';
 import { COUNT_LIMIT, formatCount, formatDuration } from './format';
 
-/** A piece of the health sentence: words, or words that link to what they name. */
-export type Part = string | { text: string; to: string; mono?: boolean };
+/** Something about one queue or schedule that someone should look at. */
+export type Issue = {
+  key: string;
+  tone: 'danger' | 'warning' | 'neutral';
+  /** The queue or schedule; for paused ones, what's paused. */
+  name: string;
+  /** What's wrong, in a few words: "6 failed", "4m behind". */
+  what: string;
+  /** Why, when known: the error it failed with. */
+  detail?: string;
+  /** More of the same: "+2 other errors". */
+  more?: string;
+  /** When it last happened. */
+  at?: string;
+  to: string;
+};
 
-export type Health = {
-  /** `new`: nothing in the workspace yet. */
-  tone: 'ok' | 'warning' | 'danger' | 'new';
-  /** At most two clauses: it's a headline, not a report. */
-  clauses: Part[][];
-  /** Tasks with a delivery in flight, for the live dot. */
+export type Status = {
+  tone: 'danger' | 'warning' | 'ok' | 'idle';
+  title: string;
+  issues: Issue[];
+  /** Tasks with a delivery in flight. */
   running: number;
 };
 
-/** A due task waiting longer than this means the queue is behind (as on the Queues page). */
-const BEHIND_MS = 60_000;
+/** A due task waiting longer than this means its queue is behind, as on the Queues page. */
+export const BEHIND_MS = 60_000;
 
 const plural = (n: number, one: string, many = one + 's') => `${formatCount(n)} ${n === 1 ? one : many}`;
-const queueLink = (name: string): Part => ({ text: name, to: `/queues/${encodeURIComponent(name)}`, mono: true });
-const scheduleLink = (name: string): Part => ({ text: name, to: `/schedules/${encodeURIComponent(name)}`, mono: true });
+const queuePath = (name: string) => `/queues/${encodeURIComponent(name)}`;
+const schedulePath = (name: string) => `/schedules/${encodeURIComponent(name)}`;
+
+/** How long a queue's oldest due task has waited, if it's behind. */
+export function behindBy(q: Queue, now: number): number | undefined {
+  const since = q.stats?.oldest_due_at;
+  if (q.paused || !since) return undefined;
+  const ms = now - Date.parse(since);
+  return ms > BEHIND_MS ? ms : undefined;
+}
 
 /**
- * One sentence on how the workspace is doing, worst news first: failures,
- * then queues falling behind or paused work, else that all is quiet.
+ * The workspace's status: one issue per queue or schedule, worst first
+ * (failures, then queues falling behind, then paused work, which is usually
+ * on purpose and never raises the tone), and a sentence that sums them up.
  */
-export function workspaceHealth(queues: Queue[], schedules: Schedule[], now: number): Health {
-  const running = Math.min(
-    COUNT_LIMIT,
-    queues.reduce((n, q) => n + (q.stats?.running ?? 0), 0),
-  );
-  if (queues.length === 0 && schedules.length === 0) return { tone: 'new', clauses: [], running };
+export function workspaceStatus({
+  queues,
+  schedules,
+  queueFailures,
+  runFailures,
+  created,
+  range,
+  now,
+}: {
+  queues: Queue[];
+  schedules: Schedule[];
+  queueFailures: QueueFailureGroup[];
+  runFailures: RunFailureGroup[];
+  /** Tasks created in the range; undefined while loading. */
+  created?: number;
+  range: string;
+  now: number;
+}): Status {
+  const stat = (key: 'due' | 'scheduled' | 'running') =>
+    Math.min(
+      COUNT_LIMIT,
+      queues.reduce((n, q) => n + (q.stats?.[key] ?? 0), 0),
+    );
+  const running = stat('running');
+  const issues: Issue[] = [];
 
-  const danger: Part[][] = [];
-  const failingQueues = queues.filter((q) => (q.stats?.failed ?? 0) > 0);
-  const failed = Math.min(
-    COUNT_LIMIT,
-    failingQueues.reduce((n, q) => n + (q.stats?.failed ?? 0), 0),
-  );
-  if (failed > 0) {
-    danger.push([
-      { text: plural(failed, 'failed task'), to: '/failures' },
-      ...(failingQueues.length === 1
-        ? [' in ', queueLink(failingQueues[0].name)]
-        : [` in ${failingQueues.length} queues`]),
-    ]);
+  for (const q of [...queues].sort((a, b) => (b.stats?.failed ?? 0) - (a.stats?.failed ?? 0))) {
+    const failed = q.stats?.failed ?? 0;
+    if (failed === 0) continue;
+    const groups = queueFailures.filter((g) => g.queue === q.name);
+    issues.push({
+      key: `failed\n${q.name}`,
+      tone: 'danger',
+      name: q.name,
+      what: `${formatCount(failed)} failed`,
+      detail: groups[0]?.error || undefined,
+      more: groups.length > 1 ? `+${plural(groups.length - 1, 'other error')}` : undefined,
+      at: groups
+        .map((g) => g.last_failed_at)
+        .sort()
+        .at(-1),
+      to: `${queuePath(q.name)}?state=failed`,
+    });
   }
-  const failingSchedules = schedules.filter((s) => s.last_run?.state === 'failed');
-  if (failingSchedules.length === 1) danger.push([scheduleLink(failingSchedules[0].name), ' failed its last run']);
-  else if (failingSchedules.length > 1)
-    danger.push([{ text: plural(failingSchedules.length, 'schedule'), to: '/failures' }, ' failed their last run']);
 
-  const warning: Part[][] = [];
+  for (const s of schedules) {
+    if (s.last_run?.state !== 'failed') continue;
+    const latest = runFailures.filter((g) => g.schedule === s.name).sort((a, b) => lastFailed(b) - lastFailed(a))[0];
+    issues.push({
+      key: `run\n${s.name}`,
+      tone: 'danger',
+      name: s.name,
+      what: 'last run failed',
+      detail: latest?.error || undefined,
+      at: latest ? new Date(lastFailed(latest)).toISOString() : s.last_run.scheduled_for,
+      to: `${schedulePath(s.name)}?state=failed`,
+    });
+  }
+
   const behind = queues
-    .filter((q) => !q.paused && q.stats?.oldest_due_at)
-    .map((q) => ({ q, ms: now - Date.parse(q.stats!.oldest_due_at!) }))
-    .filter((b) => b.ms > BEHIND_MS)
+    .map((q) => ({ q, ms: behindBy(q, now) }))
+    .filter((b): b is { q: Queue; ms: number } => b.ms !== undefined)
     .sort((a, b) => b.ms - a.ms);
-  if (behind.length === 1) warning.push([queueLink(behind[0].q.name), ` is ${formatDuration(behind[0].ms)} behind`]);
-  else if (behind.length > 1)
-    warning.push([
-      `${behind.length} queues are behind, `,
-      queueLink(behind[0].q.name),
-      ` by ${formatDuration(behind[0].ms)}`,
-    ]);
-  const pausedQueues = queues.filter((q) => q.paused).length;
-  const pausedSchedules = schedules.filter((s) => s.paused).length;
-  const paused = [
-    pausedQueues && plural(pausedQueues, 'queue'),
-    pausedSchedules && plural(pausedSchedules, 'schedule'),
-  ].filter(Boolean);
-  if (paused.length > 0) warning.push([`${paused.join(' and ')} paused`]);
+  for (const { q, ms } of behind) {
+    issues.push({
+      key: `behind\n${q.name}`,
+      tone: 'warning',
+      name: q.name,
+      what: `${formatDuration(ms)} behind`,
+      detail: `${formatCount(q.stats?.due ?? 0)} due now`,
+      to: `${queuePath(q.name)}?state=pending`,
+    });
+  }
 
-  const clauses = [...danger, ...warning].slice(0, 2);
-  if (clauses.length > 0) return { tone: danger.length > 0 ? 'danger' : 'warning', clauses, running };
+  const pausedQueues = queues.filter((q) => q.paused);
+  const pausedSchedules = schedules.filter((s) => s.paused);
+  const paused = [...pausedQueues.map((q) => q.name), ...pausedSchedules.map((s) => s.name)];
+  if (paused.length > 0) {
+    issues.push({
+      key: 'paused',
+      tone: 'neutral',
+      name: paused.length === 1 ? paused[0] : `${paused.length} paused`,
+      // One is named in the row already; several are counted, and named in the detail.
+      what:
+        paused.length === 1
+          ? `${pausedQueues.length === 1 ? 'queue' : 'schedule'} paused`
+          : [
+              pausedQueues.length > 0 && plural(pausedQueues.length, 'queue'),
+              pausedSchedules.length > 0 && plural(pausedSchedules.length, 'schedule'),
+            ]
+              .filter(Boolean)
+              .join(' and ')
+              .concat(' paused'),
+      detail: paused.length > 1 ? paused.join(', ') : undefined,
+      to:
+        paused.length === 1
+          ? pausedQueues.length === 1
+            ? queuePath(pausedQueues[0].name)
+            : schedulePath(pausedSchedules[0].name)
+          : pausedQueues.length > 0
+            ? '/queues'
+            : '/schedules',
+    });
+  }
 
+  const urgent = issues.filter((i) => i.tone !== 'neutral');
+  if (urgent.length > 0) {
+    return {
+      tone: urgent.some((i) => i.tone === 'danger') ? 'danger' : 'warning',
+      title: `${urgent.length} ${urgent.length === 1 ? 'thing needs' : 'things need'} attention`,
+      issues,
+      running,
+    };
+  }
+  if (created === 0 && stat('due') + stat('scheduled') + running === 0) {
+    return { tone: 'idle', title: `Quiet: nothing enqueued in the last ${range}`, issues, running };
+  }
   const things = [
     queues.length > 0 && plural(queues.length, 'queue'),
     schedules.length > 0 && plural(schedules.length, 'schedule'),
   ].filter(Boolean);
-  return { tone: 'ok', clauses: [[`All quiet: ${things.join(' and ')}, nothing failing`]], running };
+  return { tone: 'ok', title: `All quiet: ${things.join(' and ')}, nothing failing`, issues, running };
 }

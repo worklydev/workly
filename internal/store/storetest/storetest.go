@@ -50,6 +50,7 @@ func Run(t *testing.T, factory Factory) {
 		{"QueueStatsCap", testQueueStatsCap},
 		{"QueueActivity", testQueueActivity},
 		{"TaskActivity", testTaskActivity},
+		{"FinishedActivity", testFinishedActivity},
 		{"QueueFailures", testQueueFailures},
 		{"RetryFailedByError", testRetryFailedByError},
 		{"SearchTasks", testSearchTasks},

@@ -1,7 +1,11 @@
 package server_test
 
 import (
+	"context"
+	"fmt"
+	"net"
 	"testing"
+	"time"
 
 	"github.com/worklydev/workly/server"
 )
@@ -42,6 +46,51 @@ func TestActivity(t *testing.T) {
 	}
 	if r := do(t, h, "GET", "/v1/activity?range=1y", ""); r.status != 400 {
 		t.Fatalf("range=1y = %d %s", r.status, r.body)
+	}
+}
+
+// Finished tasks count in the bucket they finished in, by final state.
+func TestActivityFinished(t *testing.T) {
+	ready := make(chan net.Addr, 1)
+	srv := newServer(t, server.Options{
+		Addr:         "127.0.0.1:0",
+		DevEndpoints: true,
+		OnReady:      func(addr net.Addr) { ready <- addr },
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx) }()
+	defer func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Errorf("Run: %v", err)
+		}
+	}()
+	base := "http://" + (<-ready).String()
+	h := srv.Handler()
+
+	for _, status := range []int{200, 200, 500} {
+		body := fmt.Sprintf(`{"url": "%s/_dev/echo?status=%d", "max_attempts": 1}`, base, status)
+		if r := doBody(t, h, "POST", "/v1/queues/emails/tasks", "", body); r.status != 201 {
+			t.Fatalf("enqueue = %d %s", r.status, r.body)
+		}
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		buckets, _ := do(t, h, "GET", "/v1/activity?range=1h", "").json["buckets"].([]any)
+		last := buckets[len(buckets)-1].(map[string]any)
+		if last["succeeded"] == float64(2) && last["failed"] == float64(1) {
+			for _, b := range buckets[:len(buckets)-1] {
+				if b := b.(map[string]any); b["succeeded"] != float64(0) || b["failed"] != float64(0) {
+					t.Fatalf("an earlier bucket = %v", b)
+				}
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("last bucket = %v, want 2 succeeded and 1 failed", last)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 

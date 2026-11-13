@@ -428,7 +428,13 @@ type ActivityRange string
 type ActivityBucket struct {
 	// Counts Tasks created in the bucket, by queue; queues with none are left out.
 	Counts map[string]int `json:"counts"`
-	Start  time.Time      `json:"start"`
+
+	// Failed Tasks of every queue that finished in the bucket and failed.
+	Failed int       `json:"failed"`
+	Start  time.Time `json:"start"`
+
+	// Succeeded Tasks of every queue that finished in the bucket and succeeded.
+	Succeeded int `json:"succeeded"`
 }
 
 // AlertChannel defines model for AlertChannel.
@@ -1581,10 +1587,11 @@ type ClientInterface interface {
 	// Corresponds with GET /readyz (the `GetReadyz` operationId).
 	GetReadyz(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// GetActivity Count created tasks over time, by queue
+	// GetActivity Count tasks created and finished over time
 	//
 	// Counts the workspace's tasks created in each bucket of the range, per
-	// queue, oldest bucket first; every bucket is listed, empty ones too.
+	// queue, and the tasks that finished in it, by final state; oldest
+	// bucket first, and every bucket is listed, empty ones too.
 	// Buckets are 5 minutes for `1h`, 1 hour for `24h` and 6 hours for `7d`,
 	// aligned to UTC. Finished tasks are deleted after the server's
 	// retention period, so buckets further back than `retention_seconds`
@@ -2064,10 +2071,11 @@ func (c *Client) GetReadyz(ctx context.Context, reqEditors ...RequestEditorFn) (
 	return c.Client.Do(req)
 }
 
-// GetActivity Count created tasks over time, by queue
+// GetActivity Count tasks created and finished over time
 //
 // Counts the workspace's tasks created in each bucket of the range, per
-// queue, oldest bucket first; every bucket is listed, empty ones too.
+// queue, and the tasks that finished in it, by final state; oldest
+// bucket first, and every bucket is listed, empty ones too.
 // Buckets are 5 minutes for `1h`, 1 hour for `24h` and 6 hours for `7d`,
 // aligned to UTC. Finished tasks are deleted after the server's
 // retention period, so buckets further back than `retention_seconds`
@@ -5077,10 +5085,11 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /readyz (the `GetReadyz` operationId).
 	GetReadyzWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetReadyzResponse, error)
 
-	// GetActivityWithResponse Count created tasks over time, by queue
+	// GetActivityWithResponse Count tasks created and finished over time
 	//
 	// Counts the workspace's tasks created in each bucket of the range, per
-	// queue, oldest bucket first; every bucket is listed, empty ones too.
+	// queue, and the tasks that finished in it, by final state; oldest
+	// bucket first, and every bucket is listed, empty ones too.
 	// Buckets are 5 minutes for `1h`, 1 hour for `24h` and 6 hours for `7d`,
 	// aligned to UTC. Finished tasks are deleted after the server's
 	// retention period, so buckets further back than `retention_seconds`
@@ -7733,10 +7742,11 @@ func (c *ClientWithResponses) GetReadyzWithResponse(ctx context.Context, reqEdit
 	return ParseGetReadyzResponse(rsp)
 }
 
-// GetActivityWithResponse Count created tasks over time, by queue
+// GetActivityWithResponse Count tasks created and finished over time
 //
 // Counts the workspace's tasks created in each bucket of the range, per
-// queue, oldest bucket first; every bucket is listed, empty ones too.
+// queue, and the tasks that finished in it, by final state; oldest
+// bucket first, and every bucket is listed, empty ones too.
 // Buckets are 5 minutes for `1h`, 1 hour for `24h` and 6 hours for `7d`,
 // aligned to UTC. Finished tasks are deleted after the server's
 // retention period, so buckets further back than `retention_seconds`

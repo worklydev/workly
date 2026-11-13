@@ -107,16 +107,20 @@ ActivityRange = Literal["1h", "24h", "7d"]
 
 @dataclass(frozen=True, slots=True)
 class ActivityBucket:
-    """Tasks created from `start` until the next bucket, by queue."""
+    """Tasks created from `start` until the next bucket, by queue, and tasks that finished in it."""
 
     start: datetime
     counts: dict[str, int]
-    """Queues with none are left out."""
+    """Tasks created, by queue. Queues with none are left out."""
+    succeeded: int = 0
+    """Tasks of every queue that finished in the bucket and succeeded."""
+    failed: int = 0
+    """Tasks of every queue that finished in the bucket and failed."""
 
 
 @dataclass(frozen=True, slots=True)
 class Activity:
-    """The workspace's tasks created over time: every bucket of the range, oldest first."""
+    """Tasks created and finished over time: every bucket of the range, oldest first."""
 
     range: ActivityRange
     bucket_seconds: int
@@ -130,7 +134,12 @@ class Activity:
             range=d["range"],
             bucket_seconds=d["bucket_seconds"],
             buckets=[
-                ActivityBucket(start=_time(b["start"]), counts=dict(b["counts"]))
+                ActivityBucket(
+                    start=_time(b["start"]),
+                    counts=dict(b["counts"]),
+                    succeeded=b.get("succeeded", 0),
+                    failed=b.get("failed", 0),
+                )
                 for b in d["buckets"]
             ],
             retention_seconds=d.get("retention_seconds"),

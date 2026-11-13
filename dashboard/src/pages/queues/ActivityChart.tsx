@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { Activity } from '../../api';
 import { ChartAxis, ChartEmpty, ChartFrame, ChartSkeleton } from '../../components/Chart';
 import { useActivity } from '../../hooks/useActivity';
-import { countFor, OTHER, sum, type Series } from '../../lib/activity';
+import { axisTicks, BARS, countFor, OTHER, RANGE_SECONDS, span, sum, type Series } from '../../lib/activity';
 import { ErrorText } from '../../components/QueryState';
 import { RangeTabs } from '../../components/RangeTabs';
 import { useSetting } from '../../context';
@@ -10,25 +10,15 @@ import { useRange } from '../../hooks/useRange';
 import { formatCount } from '../../lib/format';
 import { cn } from 'cn';
 
-type Range = Activity['range'];
-
-/**
- * Tasks created over time, stacked by queue: which queues drive the load, and
- * when. Without `tabs`, the range is picked elsewhere on the page; `fresh`
- * says nothing has been enqueued ever, so a longer range won't help.
- */
-export function ActivityChart({ tabs = true, fresh = false }: { tabs?: boolean; fresh?: boolean }) {
+/** Tasks created over time, stacked by queue: which queues drive the load, and when. */
+export function ActivityChart() {
   const { value: range, per, setRange } = useRange();
   const { data, error, series } = useActivity();
   const [hovered, setHovered] = useState<number>();
   const [focus, setFocus] = useState<string>();
   const setting = useSetting();
   const deleted = data?.retention_seconds !== undefined && data.retention_seconds < RANGE_SECONDS[range];
-  const ticks = data && [
-    tick(data.buckets[0].start, range),
-    tick(data.buckets[Math.floor(data.buckets.length / 2)].start, range),
-    'now',
-  ];
+  const ticks = data && axisTicks(data);
 
   return (
     <section className="flex flex-col gap-3">
@@ -42,7 +32,7 @@ export function ActivityChart({ tabs = true, fresh = false }: { tabs?: boolean; 
             </span>
           )}
         </h3>
-        {tabs && <RangeTabs />}
+        <RangeTabs />
       </div>
       {error ? (
         <ErrorText error={error} />
@@ -58,17 +48,13 @@ export function ActivityChart({ tabs = true, fresh = false }: { tabs?: boolean; 
           <div className="h-5" />
           <ChartEmpty
             bars={data.buckets.length}
-            title={fresh ? 'No tasks yet' : `No tasks created in the last ${range}`}
+            title={`No tasks created in the last ${range}`}
             hint={
               deleted
                 ? `Finished tasks are deleted after ${Math.round(data.retention_seconds! / 3600)}h${setting('WORKLY_RETENTION')}, so older ones aren't counted.`
-                : fresh
-                  ? 'As tasks are enqueued they show up here, stacked by queue.'
-                  : 'Tasks you enqueue show up here, stacked by queue.'
+                : 'Tasks you enqueue show up here, stacked by queue.'
             }
-            action={
-              fresh || range === '7d' ? undefined : { label: 'Show the last 7 days', onClick: () => setRange('7d') }
-            }
+            action={range === '7d' ? undefined : { label: 'Show the last 7 days', onClick: () => setRange('7d') }}
           />
           <ChartAxis ticks={ticks} />
           <div className="h-4" />
@@ -142,11 +128,6 @@ export function ActivityChart({ tabs = true, fresh = false }: { tabs?: boolean; 
   );
 }
 
-/** Buckets per range (see /v1/activity), for placeholders before the data arrives. */
-const BARS: Record<Range, number> = { '1h': 12, '24h': 24, '7d': 28 };
-
-const RANGE_SECONDS: Record<Range, number> = { '1h': 3600, '24h': 86_400, '7d': 7 * 86_400 };
-
 /** The hovered bar's time and counts, or the scale, labelling the dashed line at the chart's top. */
 function Detail({ data, series, index, per }: { data: Activity; series: Series; index?: number; per: string }) {
   if (index === undefined) {
@@ -177,17 +158,4 @@ function Detail({ data, series, index, per }: { data: Activity; series: Series; 
       })}
     </div>
   );
-}
-
-const time = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' });
-const dayTime = new Intl.DateTimeFormat(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' });
-
-// Beyond an hour the axis spans two days or more, so its times need the day.
-function tick(iso: string, range: Range) {
-  return (range === '1h' ? time : dayTime).format(new Date(iso));
-}
-
-function span(start: Date, end: Date, range: Range) {
-  const f = range === '1h' ? time : dayTime;
-  return `${f.format(start)}–${time.format(end)}`;
 }

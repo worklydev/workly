@@ -4,7 +4,7 @@ import { getActivityOptions } from '../api/@tanstack/react-query.gen';
 import { toSeries } from '../lib/activity';
 import { useRange } from './useRange';
 
-/** The workspace's tasks created over the page's range, shared by the chart and the queue sparklines. */
+/** The workspace's tasks created and finished over the page's range, shared by the charts and stats that count over it. */
 export function useActivity() {
   const { value: range } = useRange();
   const query = useQuery({ ...getActivityOptions({ query: { range } }), refetchInterval: 15_000 });

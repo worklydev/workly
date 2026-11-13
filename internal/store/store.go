@@ -87,6 +87,10 @@ type Store interface {
 	// per queue and per bucket of the given size, aligned to the Unix epoch
 	// (so to UTC hours and days). Empty buckets are left out.
 	TaskActivity(ctx context.Context, ws workspace.ID, since time.Time, bucket time.Duration) ([]ActivityCount, error)
+	// FinishedActivity counts the workspace's tasks that succeeded or
+	// failed at or after since, per final state and per bucket, aligned like
+	// TaskActivity's. Empty buckets are left out.
+	FinishedActivity(ctx context.Context, ws workspace.ID, since time.Time, bucket time.Duration) ([]FinishedCount, error)
 	// QueueFailures groups the queue's failed tasks by how their latest
 	// attempt ended, most common first, and returns up to limit groups. Only
 	// the StatsCountLimit most recently failed tasks are grouped.
@@ -375,6 +379,14 @@ type QueueStats struct {
 // starting at Start.
 type ActivityCount struct {
 	Queue string
+	Start time.Time
+	Count int
+}
+
+// FinishedCount is how many tasks finished in State (succeeded or failed) in
+// the bucket starting at Start.
+type FinishedCount struct {
+	State TaskState
 	Start time.Time
 	Count int
 }
