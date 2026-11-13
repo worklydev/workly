@@ -247,7 +247,7 @@ func allTools() []*tool {
 // Read tools.
 
 var listQueues = newTool("list_queues", "List queues",
-	"All queues, each with whether it is paused, its limits (rate_per_second, max_concurrency), its current work (stats: due now, scheduled for later including retries, running and failed task counts, and oldest_due_at, how far behind the queue is) and the last 24 hours (last_24h: tasks succeeded, failed and cancelled, and the median and 95th percentile duration of their latest attempt, p50_duration_ms and p95_duration_ms). Use get_queue for the rest of the delivery policy and failures.",
+	"All queues, each with whether it is paused, its limits (rate_per_second, max_concurrency), its current work (stats: due now, scheduled for later including retries, running and failed task counts, and oldest_due_at, how far behind the queue is) and the last 24 hours (last_24h: tasks succeeded, failed and cancelled, and the median and 95th percentile duration of their latest attempt, p50_duration_ms and p95_duration_ms, taken over duration_samples attempts; with few samples they say little, and with none they are null). Use get_queue for the rest of the delivery policy and failures.",
 	object(map[string]any{}), readOnly,
 	func(ctx context.Context, api apiClient, _ struct{}) (any, error) {
 		var out struct {
@@ -288,10 +288,8 @@ func lastDay(ctx context.Context, api apiClient, queue string) (map[string]any, 
 		return nil, err
 	}
 	out := map[string]any{}
-	for _, k := range []string{"succeeded", "failed", "cancelled", "p50_duration_ms", "p95_duration_ms"} {
-		if v, ok := a[k]; ok {
-			out[k] = v
-		}
+	for _, k := range []string{"succeeded", "failed", "cancelled", "duration_samples", "p50_duration_ms", "p95_duration_ms"} {
+		out[k] = a[k]
 	}
 	// Retention shorter than a day leaves fewer finished tasks to count.
 	if r, ok := a["retention_seconds"].(float64); ok && r < 24*60*60 {
@@ -301,7 +299,7 @@ func lastDay(ctx context.Context, api apiClient, queue string) (map[string]any, 
 }
 
 var getQueue = newTool("get_queue", "Get queue",
-	"A queue's delivery policy, current work (due, scheduled, running, failed), the last 24 hours (last_24h, as in list_queues), activity (how many tasks succeeded, failed and were cancelled since `since`, default the last 7 days, limited by the server's retention, with p50_duration_ms and p95_duration_ms of their latest attempt) and failures: its failed tasks grouped by error, most common first, each with a count, the latest task and the start of its response body. Start here to find out why a queue's tasks fail.",
+	"A queue's delivery policy, current work (due, scheduled, running, failed), the last 24 hours (last_24h, as in list_queues), activity (how many tasks succeeded, failed and were cancelled since `since`, default the last 7 days, limited by the server's retention, with p50_duration_ms and p95_duration_ms of their latest attempt over duration_samples attempts, null when there are none) and failures: its failed tasks grouped by error, most common first, each with a count, the latest task and the start of its response body. Start here to find out why a queue's tasks fail.",
 	object(map[string]any{
 		"queue": queueProp,
 		"since": timeProp("Start of the activity period."),
@@ -332,7 +330,7 @@ var getQueue = newTool("get_queue", "Get queue",
 	})
 
 var listTasks = newTool("list_tasks", "List tasks",
-	`Tasks, newest first unless sorted otherwise, filtered by any of queue, state, group, idempotency key, last error and creation time. To see what runs next, list pending tasks sorted by run_at. Returns summaries (state, URL, attempts, last status and error); use get_task for payloads and attempt details. started_at is when the first attempt started, so started_at minus created_at is time spent waiting in the queue; last_duration_ms is how long the latest attempt took in the handler. Pass next_cursor as cursor for the next page. A "pending" task whose run_at is in the future is scheduled or waiting to retry.`,
+	`Tasks, newest first unless sorted otherwise, filtered by any of queue, state, group, idempotency key, last error and creation time. To see what runs next, list pending tasks sorted by run_at. Returns summaries (state, URL, attempts, last status and error), each with the same fields, null where there is no value; use get_task for payloads and attempt details. started_at is when the first attempt started, so started_at minus created_at is time spent waiting in the queue; last_duration_ms is how long the latest attempt took in the handler. Both are null before the first attempt. Pass next_cursor as cursor for the next page. A "pending" task whose run_at is in the future is scheduled or waiting to retry.`,
 	object(map[string]any{
 		"queue":           queueProp,
 		"state":           prop("string", "Only tasks in this state.", "enum", taskStates),
@@ -400,7 +398,7 @@ var getTask = newTool("get_task", "Get task",
 			return nil, err
 		}
 		truncateBody(task)
-		out := map[string]any{"task": task}
+		out := map[string]any{"task": withNulls(task, taskSummaryKeys...)}
 		list := attempts.Attempts
 		if omitted := len(list) - maxAttempts; omitted > 0 {
 			list = list[omitted:]
@@ -535,7 +533,7 @@ var enqueueTask = newTool("enqueue_task", "Enqueue task",
 			return nil, err
 		}
 		truncateBody(task)
-		return task, nil
+		return withNulls(task, taskSummaryKeys...), nil
 	})
 
 type enqueueArgs struct {
@@ -725,18 +723,20 @@ const (
 	pollInterval    = 250 * time.Millisecond
 )
 
+// taskSummaryKeys are the fields of a task summary, and of every task a tool
+// returns.
+var taskSummaryKeys = []string{
+	"id", "queue", "state", "method", "url", "run_at", "attempt_count", "max_attempts", "last_status",
+	"last_outcome", "last_error", "idempotency_key", "group_id", "created_at", "started_at", "finished_at",
+	"last_attempt_at", "last_duration_ms", "retried_at", "callback_task_id",
+}
+
 // summary is a task without its payload, body and headers: what list views
 // need.
 func summary(t map[string]any) map[string]any {
 	out := map[string]any{}
-	for _, k := range []string{
-		"id", "queue", "state", "method", "url", "run_at", "attempt_count", "max_attempts", "last_status",
-		"last_outcome", "last_error", "idempotency_key", "group_id", "created_at", "started_at", "finished_at",
-		"last_attempt_at", "last_duration_ms", "retried_at", "callback_task_id",
-	} {
-		if v, ok := t[k]; ok {
-			out[k] = v
-		}
+	for _, k := range taskSummaryKeys {
+		out[k] = t[k]
 	}
 	if e, ok := out["last_error"].(string); ok {
 		out["last_error"] = truncate(e, maxErrorLength)
@@ -750,6 +750,18 @@ func finished(t map[string]any) bool {
 		return true
 	}
 	return false
+}
+
+// withNulls sets each of keys that m lacks to null. The API leaves out fields
+// with no value; tools return them as null, so every record of a kind has the
+// same keys and a missing value can't be mistaken for a missing field.
+func withNulls(m map[string]any, keys ...string) map[string]any {
+	for _, k := range keys {
+		if _, ok := m[k]; !ok {
+			m[k] = nil
+		}
+	}
+	return m
 }
 
 // truncateBody shortens a task's payload or body in place.

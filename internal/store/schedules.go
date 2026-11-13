@@ -80,8 +80,7 @@ type Schedule struct {
 	Name        string
 	ScheduleConfig
 	Paused bool
-	// PausedAt is when a paused schedule was paused; nil while it runs,
-	// and for schedules paused before it was recorded.
+	// PausedAt is when a paused schedule was paused; nil while it runs.
 	PausedAt *time.Time
 	// NextRunAt is the next slot to fire; nil while paused.
 	NextRunAt *time.Time

@@ -1253,7 +1253,7 @@ components:
     QueueActivity:
       type: object
       description: Counts stop at 10,000, so 10000 means "10,000 or more".
-      required: [since, succeeded, failed, cancelled]
+      required: [since, succeeded, failed, cancelled, duration_samples]
       properties:
         since:
           type: string
@@ -1265,6 +1265,11 @@ components:
           type: integer
         cancelled:
           type: integer
+        duration_samples:
+          type: integer
+          description: |
+            How many latest attempts with a recorded duration the percentiles
+            are taken over (at most 2,000). 0 when there are no percentiles.
         p50_duration_ms:
           type: integer
           description: |
@@ -1929,8 +1934,7 @@ components:
           type: string
           format: date-time
           description: |
-            When a paused schedule was paused. Absent while it runs, and for
-            schedules paused before Workly recorded it.
+            When a paused schedule was paused. Absent while it runs.
         next_run_at:
           type: string
           format: date-time

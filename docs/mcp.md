@@ -93,11 +93,13 @@ So pointing an agent at production can't enqueue, retry or cancel anything unles
 
 ## Tools
 
+Tools return a record's fields with no value as `null` rather than leaving them out, so every task, run or schedule has the same keys.
+
 Read tools (marked read-only, so clients can run them without asking):
 
 | Tool | What it does |
 |---|---|
-| `list_queues` | All queues in summary: paused or not, rate and concurrency limits, current work (due, scheduled, running, failed, how far behind) and the last 24 hours (succeeded, failed, p50 and p95 attempt duration) |
+| `list_queues` | All queues in summary: paused or not, rate and concurrency limits, current work (due, scheduled, running, failed, how far behind) and the last 24 hours (succeeded, failed, p50 and p95 attempt duration and how many attempts they're taken over) |
 | `get_queue` | One queue with its full policy, the last 24 hours, how many tasks succeeded, failed and were cancelled recently, and its failed tasks grouped by error |
 | `list_tasks` | Task summaries, newest first, by queue, state, group, idempotency key, last error and creation time. Each says when its first attempt started and how long the latest took, so queue wait and handler time can be told apart |
 | `get_task` | A task with its attempts: outcomes, status codes, errors, response bodies, durations |

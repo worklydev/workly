@@ -80,6 +80,8 @@ export interface QueueActivity {
   p50DurationMs?: number;
   /** 95th percentile of the same durations. */
   p95DurationMs?: number;
+  /** How many durations the percentiles are taken over; absent from older servers. */
+  durationSamples?: number;
   /** How long the server keeps finished tasks; absent if forever. Older ones aren't counted. */
   retentionSeconds?: number;
 }

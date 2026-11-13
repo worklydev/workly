@@ -57,6 +57,7 @@ def test_delivery(client: workly.Workly, server_url: str, queue: str) -> None:
     activity = client.queues.activity(queue)
     assert (activity.succeeded, activity.failed) == (1, 0)
     assert activity.p50_duration_ms == activity.p95_duration_ms == attempt.duration_ms
+    assert activity.duration_samples == 1
 
 
 def test_task_delivery(client: workly.Workly, queue: str) -> None:

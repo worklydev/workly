@@ -389,8 +389,16 @@ func TestMCPTools(t *testing.T) {
 		len(q["failures"].([]any)) != 0 || q["queue"].(map[string]any)["max_attempts"] == nil {
 		t.Errorf("get_queue = %v", q)
 	}
-	if day, _ := q["last_24h"].(map[string]any); day["succeeded"] != 0.0 || day["failed"] != 0.0 || day["p50_duration_ms"] != nil {
+	if day, _ := q["last_24h"].(map[string]any); day["succeeded"] != 0.0 || day["failed"] != 0.0 || day["duration_samples"] != 0.0 ||
+		!nullKeys(day, "p50_duration_ms", "p95_duration_ms") {
 		t.Errorf("get_queue last_24h = %v", q["last_24h"])
+	}
+	// A task not yet attempted has its timings as null, not left out.
+	if s := c.call("list_tasks", map[string]any{"queue": "emails"})["tasks"].([]any)[0].(map[string]any); !nullKeys(s, "started_at", "last_duration_ms", "finished_at") {
+		t.Errorf("list_tasks summary of a pending task = %v", s)
+	}
+	if s := c.call("get_task", map[string]any{"id": id})["task"].(map[string]any); !nullKeys(s, "started_at", "last_duration_ms", "finished_at") {
+		t.Errorf("get_task of a pending task = %v", s)
 	}
 	// list_queues is an overview: current work, the last day and the
 	// limits, but not the retry policy.
@@ -560,9 +568,27 @@ func TestMCPSchedules(t *testing.T) {
 	if !strings.HasPrefix(id, "run_") || run["trigger"] != "manual" || run["state"] != "pending" {
 		t.Fatalf("trigger_schedule = %v", run)
 	}
-	if got := c.call("resume_schedule", map[string]any{"schedule": "nightly"}); got["paused"] != false || got["paused_at"] != nil ||
-		len(got["next_runs"].([]any)) != 5 || got["next_runs_if_resumed"] != nil {
-		t.Errorf("resume_schedule = %v", got)
+	// A pending run has its timings as null, not left out.
+	if !nullKeys(run, "started_at", "last_duration_ms", "finished_at") {
+		t.Errorf("trigger_schedule of a pending run = %v", run)
+	}
+	if r := c.call("list_runs", nil)["runs"].([]any)[0].(map[string]any); !nullKeys(r, "started_at", "last_duration_ms") {
+		t.Errorf("list_runs summary of a pending run = %v", r)
+	}
+	if r := c.call("get_run", map[string]any{"id": id})["run"].(map[string]any); !nullKeys(r, "started_at", "last_duration_ms") {
+		t.Errorf("get_run of a pending run = %v", r)
+	}
+	// A running schedule still has paused_at, as null.
+	resumed := c.call("resume_schedule", map[string]any{"schedule": "nightly"})
+	if resumed["paused"] != false || !nullKeys(resumed, "paused_at") ||
+		len(resumed["next_runs"].([]any)) != 5 || resumed["next_runs_if_resumed"] != nil {
+		t.Errorf("resume_schedule = %v", resumed)
+	}
+	if got := c.call("get_schedule", map[string]any{"schedule": "nightly"})["schedule"].(map[string]any); !nullKeys(got, "paused_at") {
+		t.Errorf("get_schedule while running = %v", got)
+	}
+	if got := c.call("list_schedules", nil)["schedules"].([]any)[0].(map[string]any); !nullKeys(got, "paused_at") || got["next_run_at"] == nil {
+		t.Errorf("list_schedules while running = %v", got)
 	}
 
 	got := c.call("get_schedule", map[string]any{"schedule": "nightly"})
@@ -712,7 +738,18 @@ func TestMCPWaitForRun(t *testing.T) {
 	q := c.call("enqueue_task", map[string]any{"queue": "fast", "url": target.URL})
 	c.call("wait_for_task", map[string]any{"id": q["id"], "timeout_seconds": 10})
 	day := c.call("list_queues", nil)["queues"].([]any)[0].(map[string]any)["last_24h"].(map[string]any)
-	if day["succeeded"] != 1.0 || day["p50_duration_ms"] == nil || day["p95_duration_ms"] == nil {
+	if day["succeeded"] != 1.0 || day["duration_samples"] != 1.0 || day["p50_duration_ms"] == nil || day["p95_duration_ms"] == nil {
 		t.Errorf("list_queues last_24h = %v", day)
 	}
+}
+
+// nullKeys reports whether m has each of keys, as null: tools return fields
+// with no value as null rather than leaving them out.
+func nullKeys(m map[string]any, keys ...string) bool {
+	for _, k := range keys {
+		if v, ok := m[k]; !ok || v != nil {
+			return false
+		}
+	}
+	return true
 }

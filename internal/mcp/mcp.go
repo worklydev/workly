@@ -246,7 +246,7 @@ func (s *server) instructions(r *http.Request) string {
 
 Schedules are separate from queues: a schedule calls its URL on a cron timetable, and each call is a run, retried and recorded like a task. get_schedule shows a schedule with its recent runs; a skipped run says why it didn't go (overlap or missed); get_run shows a run's attempts. list_runs without a schedule lists runs of every schedule, e.g. with state "failed".
 
-To check health: list_queues shows each queue's current work and its last 24 hours (last_24h: succeeded, failed, and p50/p95 duration of the latest attempt). In task and run summaries, started_at minus created_at is time spent waiting to be delivered, and last_duration_ms is time spent in the handler.
+To check health: list_queues shows each queue's current work and its last 24 hours (last_24h: succeeded, failed, and p50/p95 duration of the latest attempt, over duration_samples attempts). In task and run summaries, started_at minus created_at is time spent waiting to be delivered, and last_duration_ms is time spent in the handler. Fields with no value are null, not left out.
 
 To debug failures: get_queue groups a queue's failed tasks by error, with the latest task of each group; get_task shows a task and its attempts (status codes, errors, response bodies). list_tasks with state "failed" (and last_error) lists the tasks behind a group. get_task_delivery returns the exact signed request, with a curl command to replay it against a local handler.`)
 	if s.mode(r) == Full {
