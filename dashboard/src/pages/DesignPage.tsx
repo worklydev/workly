@@ -1,5 +1,8 @@
 import type { ReactNode } from 'react';
-import { Pause, RotateCcw, Search } from 'lucide-react';
+import { CircleCheck, Pause, RotateCcw, Search } from 'lucide-react';
+import { ChartAxis, ChartEmpty, ChartSkeleton, Sparkline } from '../components/Chart';
+import { EmptyState } from '../components/EmptyState';
+import { HealthLine } from './home/HealthLine';
 import { CodePanel } from '../components/CodePanel';
 import { ConfirmButton } from '../components/ConfirmButton';
 import { OutcomeBadge, StatusCode, TaskStateBadge } from '../components/states';
@@ -175,6 +178,51 @@ export function DesignPage() {
               </TableRow>
             </TableBody>
           </Table>
+        </Section>
+
+        <Section title="Charts: loading, empty, sparklines">
+          <ChartSkeleton bars={24} />
+          <ChartEmpty
+            bars={24}
+            title="No tasks created in the last 24h"
+            hint="Tasks you enqueue show up here, stacked by queue."
+            action={{ label: 'Show the last 7 days', onClick: () => {} }}
+          />
+          <ChartAxis ticks={['Thu 10:00', 'Thu 22:00', 'now']} />
+          <div className="flex items-center gap-6">
+            <Sparkline values={[0, 2, 5, 3, 8, 13, 9, 4, 6, 11, 7, 3]} title="With data" />
+            <Sparkline values={[0, 0, 0, 0, 0, 0]} title="Empty" />
+            <Sparkline values={undefined} />
+          </div>
+          <EmptyState
+            icon={CircleCheck}
+            tone="success"
+            title="Nothing failing"
+            hint="Failed tasks and schedule runs show up here, grouped by the error they ended with."
+          />
+        </Section>
+
+        <Section title="Health line">
+          <HealthLine
+            health={{ tone: 'ok', running: 12, clauses: [['All quiet: 4 queues and 3 schedules, nothing failing']] }}
+          />
+          <HealthLine
+            health={{
+              tone: 'warning',
+              running: 0,
+              clauses: [[{ text: 'emails', to: '/queues/emails', mono: true }, ' is 4m 12s behind']],
+            }}
+          />
+          <HealthLine
+            health={{
+              tone: 'danger',
+              running: 3,
+              clauses: [
+                [{ text: '23 failed tasks', to: '/failures' }, ' in 2 queues'],
+                [{ text: 'nightly-report', to: '/schedules/nightly-report', mono: true }, ' failed its last run'],
+              ],
+            }}
+          />
         </Section>
 
         <Section title="Card & code">

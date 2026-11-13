@@ -28,13 +28,17 @@ export function RecentRuns({
   phoneSlots?: number;
 }) {
   if (runs === undefined) return <span className="text-xs text-faint">…</span>;
-  if (runs.length === 0) return <span className="text-xs text-faint">no runs yet</span>;
   const shown = runs.slice(0, slots);
   const empty = slots - shown.length;
   // Slot i counts from the oldest; the first slots - phoneSlots are wide-screen only.
   const wideOnly = (i: number) => i < slots - phoneSlots && 'max-sm:hidden';
   return (
-    <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+    // With no runs yet the strip is all stubs, so it lines up with the others and still reads as new.
+    <div
+      className="flex items-center gap-0.5"
+      title={runs.length === 0 ? 'No runs yet' : undefined}
+      onClick={(e) => e.stopPropagation()}
+    >
       {Array.from({ length: empty }, (_, i) => (
         <span key={i} aria-hidden className={cn('h-4 w-1.5 rounded-sm bg-muted', wideOnly(i))} />
       ))}

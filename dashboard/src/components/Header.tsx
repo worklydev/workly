@@ -11,6 +11,7 @@ import { MobileNav } from './Sidebar';
 import { ThemeToggle } from './ThemeToggle';
 
 const LABELS: Record<string, string> = {
+  home: 'Home',
   queues: 'Queues',
   tasks: 'Tasks',
   groups: 'Groups',

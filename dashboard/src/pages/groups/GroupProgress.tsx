@@ -16,9 +16,13 @@ export function GroupProgress({ group: g, className }: { group: Group; className
           <div className="bg-destructive" style={{ width: `${pct(g.failed)}%` }} />
           <div className="bg-muted-foreground/40" style={{ width: `${pct(g.cancelled)}%` }} />
         </div>
-        <span className="font-mono text-xs text-muted-foreground tabular-nums">
-          {finishedCount(g)}/{g.total}
-        </span>
+        {g.total === 0 ? (
+          <span className="text-xs text-faint">no tasks yet</span>
+        ) : (
+          <span className="font-mono text-xs text-muted-foreground tabular-nums">
+            {finishedCount(g)}/{g.total}
+          </span>
+        )}
       </div>
     </div>
   );

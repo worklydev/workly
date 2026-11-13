@@ -1,29 +1,27 @@
 import { useState } from 'react';
-import { useQueries, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import { Link, useNavigate } from 'react-router';
-import { getQueueActivityOptions, listQueuesOptions } from '../../api/@tanstack/react-query.gen';
+import { listQueuesOptions } from '../../api/@tanstack/react-query.gen';
 import type { Queue, QueueActivity } from '../../api';
-import { CodePanel } from '../../components/CodePanel';
-import { useSetting, useSlots } from '../../context';
+import { useSetting } from '../../context';
 import { ListPager, ListSearch } from '../../components/ListControls';
 import { PageHeader } from '../../components/PageHeader';
 import { ErrorText, Muted } from '../../components/QueryState';
-import { StatCard, StatStrip } from '../../components/StatCard';
 import { LIVE } from '../../lib/api';
-import { COUNT_LIMIT, formatCount, formatDuration } from '../../lib/format';
 import { Badge } from '../../primitives/badge';
 import { Button } from '../../primitives/button';
 import { ActivityChart } from './ActivityChart';
-import { useRange, useRangeSince } from '../../hooks/useRange';
+import { QueuesGettingStarted } from './GettingStarted';
+import { Totals } from './Totals';
+import { useQueueActivity } from '../../hooks/useQueueActivity';
+import { useRange } from '../../hooks/useRange';
 import { EditPolicy } from './EditPolicy';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../primitives/table';
 import { LONGEST_WAIT_TITLE, LongestWait } from './LongestWait';
-import { PendingCard } from './PendingCard';
 import { limits, LOW_SUCCESS } from '../../lib/queues';
 import { Count } from '../../components/Count';
 import { RowHint } from '../../components/RowHint';
-import { useNow } from '../../hooks/useNow';
 import { useListPage } from '../../hooks/useListPage';
 import { formatRate } from '../../lib/format';
 import { cn } from 'cn';
@@ -62,57 +60,6 @@ export function QueuesPage() {
   );
 }
 
-function Totals({ queues }: { queues: Queue[] }) {
-  const sum = (key: 'due' | 'scheduled' | 'running' | 'failed') =>
-    Math.min(
-      COUNT_LIMIT,
-      queues.reduce((n, q) => n + (q.stats?.[key] ?? 0), 0),
-    );
-  const oldest = queues
-    .map((q) => q.stats?.oldest_due_at)
-    .filter((t): t is string => t !== undefined)
-    .sort()[0];
-  const now = useNow();
-  const setting = useSetting();
-  const behind = oldest ? Math.max(0, now - new Date(oldest).getTime()) : 0;
-
-  const failed = sum('failed');
-
-  return (
-    <StatStrip className="grid-cols-2 md:grid-cols-4">
-      <PendingCard due={sum('due')} scheduled={sum('scheduled')} to="/tasks?state=pending" />
-      <StatCard label="Running" value={formatCount(sum('running'))} />
-      <StatCard
-        label="Longest wait"
-        value={oldest ? formatDuration(behind) : '—'}
-        detail={oldest ? 'oldest task past its run time' : 'nothing waiting'}
-        tone={behind > 60_000 ? 'warning' : undefined}
-        title={LONGEST_WAIT_TITLE}
-      />
-      <StatCard
-        label="Failed"
-        value={formatCount(failed)}
-        tone={failed > 0 ? 'danger' : undefined}
-        to={failed > 0 ? '/tasks?state=failed' : undefined}
-        title={`Failed tasks still kept${setting('WORKLY_RETENTION')}`}
-      />
-    </StatStrip>
-  );
-}
-
-/** Each queue's finished tasks over the page's range (useRange). */
-function useDayActivity(queues: Queue[]): Map<string, QueueActivity> {
-  const since = useRangeSince();
-  const results = useQueries({
-    queries: queues.map((q) => ({
-      ...getQueueActivityOptions({ path: { queue: q.name }, query: { since } }),
-      refetchInterval: 15_000,
-      placeholderData: (previous: QueueActivity | undefined) => previous,
-    })),
-  });
-  return new Map(queues.flatMap((q, i) => (results[i].data ? [[q.name, results[i].data]] : [])));
-}
-
 function QueueList({ queues }: { queues: Queue[] }) {
   const list = useListPage(queues, (q) => [q.name]);
   return (
@@ -127,7 +74,7 @@ function QueueList({ queues }: { queues: Queue[] }) {
 /** Only the queues shown get their activity fetched. */
 function QueueTable({ queues }: { queues: Queue[] }) {
   const navigate = useNavigate();
-  const day = useDayActivity(queues);
+  const day = useQueueActivity(queues);
   const { value: range, query } = useRange();
   const setting = useSetting();
   return (
@@ -207,28 +154,5 @@ function DayActivity({ activity: a }: { activity?: QueueActivity }) {
         {rate === undefined ? <span className="text-faint">—</span> : formatRate(rate)}
       </TableCell>
     </>
-  );
-}
-
-/** A wrapping app's own first steps, or the `workly dev` example. */
-function QueuesGettingStarted() {
-  const custom = useSlots().gettingStarted?.queues;
-  return custom ?? <GettingStarted />;
-}
-
-function GettingStarted() {
-  const origin = window.location.origin;
-  return (
-    <div className="flex max-w-2xl flex-col gap-3">
-      <p className="text-muted-foreground">
-        No queues yet. Enqueue a task and its queue is created. With{' '}
-        <span className="font-mono text-xs">workly dev</span>, the built-in echo endpoint makes a handy target:
-      </p>
-      <CodePanel title="Terminal">
-        {`curl -X POST ${origin}/v1/queues/hello/tasks \\
-  -H 'Content-Type: application/json' \\
-  -d '{"url": "${origin}/_dev/echo", "payload": {"hello": "world"}}'`}
-      </CodePanel>
-    </div>
   );
 }

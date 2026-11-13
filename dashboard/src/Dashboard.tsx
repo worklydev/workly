@@ -10,6 +10,7 @@ import { AppShell } from './components/AppShell';
 import { DesignPage } from './pages/DesignPage';
 import { AlertsPage } from './pages/AlertsPage';
 import { FailuresPage } from './pages/FailuresPage';
+import { HomePage } from './pages/home/HomePage';
 import { GroupPage } from './pages/groups/GroupPage';
 import { GroupsPage } from './pages/groups/GroupsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
@@ -102,7 +103,8 @@ export function Dashboard({
           <Routes>
             <Route path="design" element={<DesignPage />} />
             <Route element={<AppShell />}>
-              <Route index element={<Navigate to="queues" replace />} />
+              <Route index element={<Navigate to="home" replace />} />
+              <Route path="home" element={<HomePage />} />
               <Route path="queues" element={<QueuesPage />} />
               <Route path="queues/:queue" element={<QueuePage />} />
               <Route path="tasks" element={<TasksPage />} />
