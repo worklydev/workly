@@ -66,6 +66,34 @@ type WorkflowStepConfig struct {
 	Timeout     *time.Duration `json:"timeout,omitempty"`
 }
 
+// Headers on a step's task, set when the task is created: they tell the
+// endpoint which step it is serving, and the task which step it delivers.
+const (
+	HeaderWorkflow       = "Workly-Workflow"
+	HeaderWorkflowRunID  = "Workly-Workflow-Run-Id"
+	HeaderWorkflowStep   = "Workly-Workflow-Step"
+	HeaderWorkflowStepID = "Workly-Workflow-Step-Id"
+)
+
+// TaskWorkflowStep is the workflow step a task delivers.
+type TaskWorkflowStep struct {
+	ID, Name, Workflow, RunID string
+}
+
+// WorkflowStep is the step the task delivers, read from the headers it was
+// created with; ok is false for a task that isn't a step.
+func (t Task) WorkflowStep() (step TaskWorkflowStep, ok bool) {
+	if t.WorkflowStepID == "" {
+		return TaskWorkflowStep{}, false
+	}
+	return TaskWorkflowStep{
+		ID:       t.WorkflowStepID,
+		Name:     t.Headers[HeaderWorkflowStep],
+		Workflow: t.Headers[HeaderWorkflow],
+		RunID:    t.Headers[HeaderWorkflowRunID],
+	}, true
+}
+
 // WorkflowStepBody is the body of a step that has none of its own.
 type WorkflowStepBody struct {
 	WorkflowRunID string          `json:"workflow_run_id"`

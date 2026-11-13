@@ -283,10 +283,13 @@ class Task:
     """Called each time the task finishes."""
     callback_task_id: str | None = None
     """The callback task enqueued when the task last finished, if it has `on_complete`."""
+    workflow_step: TaskWorkflowStep | None = None
+    """The workflow step the task delivers, if it is one."""
 
     @classmethod
     def _from_json(cls, d: dict[str, Any]) -> Task:
         cb = d.get("on_complete")
+        step = d.get("workflow_step")
         return cls(
             id=d["id"],
             queue=d["queue"],
@@ -314,7 +317,24 @@ class Task:
             last_duration_ms=d.get("last_duration_ms"),
             on_complete=None if cb is None else Callback._from_json(cb),
             callback_task_id=d.get("callback_task_id"),
+            workflow_step=None if step is None else TaskWorkflowStep._from_json(step),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class TaskWorkflowStep:
+    """The workflow step a task delivers. Its task can't be retried alone: start a new run."""
+
+    id: str
+    """The step, `wfs_…`."""
+    name: str
+    workflow: str
+    run_id: str
+    """The workflow run, `wfr_…`."""
+
+    @classmethod
+    def _from_json(cls, d: dict[str, Any]) -> TaskWorkflowStep:
+        return cls(id=d["id"], name=d["name"], workflow=d["workflow"], run_id=d["run_id"])
 
 
 @dataclass(frozen=True, slots=True)

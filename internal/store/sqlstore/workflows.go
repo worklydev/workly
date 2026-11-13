@@ -555,10 +555,10 @@ func (s *Store) startStep(ctx context.Context, tx *sql.Tx, r *store.WorkflowRun,
 	}
 	// Workly-* headers can't be set by users, so these can't be spoofed by
 	// a step's own configuration.
-	headers["Workly-Workflow"] = r.Workflow
-	headers["Workly-Workflow-Run-Id"] = r.ID
-	headers["Workly-Workflow-Step"] = st.Name
-	headers["Workly-Workflow-Step-Id"] = st.ID
+	headers[store.HeaderWorkflow] = r.Workflow
+	headers[store.HeaderWorkflowRunID] = r.ID
+	headers[store.HeaderWorkflowStep] = st.Name
+	headers[store.HeaderWorkflowStepID] = st.ID
 	body := sc.Body
 	if body == nil {
 		body, err = json.Marshal(store.WorkflowStepBody{

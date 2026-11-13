@@ -375,6 +375,7 @@ describe('integration', { skip: server ? false : 'set WORKLY_BIN or install Go' 
     const task = await workly.tasks.get(run.steps[2]!.taskId!);
     assert.equal((task.payload as { workflow_run_id: string }).workflow_run_id, run.id);
     assert.equal(task.headers['Workly-Workflow-Step-Id'], run.steps[2]!.id);
+    assert.deepEqual(task.workflowStep, { id: run.steps[2]!.id, name: 'analytics', workflow: name, runId: run.id });
     assert.equal((await workly.workflows.get(name)).lastRun?.id, run.id);
     await workly.workflows.delete(name);
     await assert.rejects(workly.workflows.get(name), NotFoundError);

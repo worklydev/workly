@@ -1342,6 +1342,10 @@ type Task struct {
 	TimeoutSeconds *float64  `json:"timeout_seconds,omitempty"`
 	UpdatedAt      time.Time `json:"updated_at"`
 	Url            string    `json:"url"`
+
+	// WorkflowStep The workflow step a task delivers, if it is one. A step's task can't be
+	// retried on its own: start a new run of the workflow instead.
+	WorkflowStep *TaskWorkflowStep `json:"workflow_step,omitempty"`
 }
 
 // TaskList defines model for TaskList.
@@ -1354,6 +1358,24 @@ type TaskList struct {
 // TaskState A `pending` task with `run_at` in the future is scheduled. A `failed`
 // task has exhausted its attempts or got a non-retryable response.
 type TaskState string
+
+// TaskWorkflowStep The workflow step a task delivers, if it is one. A step's task can't be
+// retried on its own: start a new run of the workflow instead.
+type TaskWorkflowStep struct {
+	// Id The step, `wfs_…`.
+	//
+	// Example: wfs_01M7AH8EPATE4EPK37FWTA5TBQ
+	Id string `json:"id"`
+
+	// Name The step's name in its workflow.
+	Name string `json:"name"`
+
+	// RunId The workflow run, `wfr_…`.
+	//
+	// Example: wfr_01M7AH8EP90ZQ4E9228337GGVR
+	RunId    string `json:"run_id"`
+	Workflow string `json:"workflow"`
+}
 
 // WaitFor The resource a step handed its completion to.
 type WaitFor struct {

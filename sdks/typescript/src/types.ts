@@ -180,6 +180,18 @@ export interface Task {
   onComplete?: Callback;
   /** The callback task enqueued when the task last finished, if it has `onComplete`. */
   callbackTaskId?: string;
+  /** The workflow step the task delivers, if it is one. */
+  workflowStep?: TaskWorkflowStep;
+}
+
+/** The workflow step a task delivers. Its task can't be retried alone: start a new run instead. */
+export interface TaskWorkflowStep {
+  /** The step, `wfs_…`. */
+  id: string;
+  name: string;
+  workflow: string;
+  /** The workflow run, `wfr_…`. */
+  runId: string;
 }
 
 export interface Attempt {

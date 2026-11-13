@@ -402,6 +402,9 @@ def test_workflows(client: workly.Workly, server_url: str) -> None:
     task = client.tasks.get(run.steps[2].task_id or "")
     assert task.payload["workflow_run_id"] == run.id and task.payload["step"] == "analytics"
     assert task.headers["Workly-Workflow-Step-Id"] == run.steps[2].id
+    assert task.workflow_step == workly.TaskWorkflowStep(
+        id=run.steps[2].id, name="analytics", workflow=name, run_id=run.id
+    )
     assert client.workflows.get(name).last_run is not None
     assert any(r.id == run.id for r in client.workflow_runs.list(workflow=name))
     client.workflows.delete(name)

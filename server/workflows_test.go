@@ -96,6 +96,10 @@ func TestWorkflowsAPI(t *testing.T) {
 		res.json["headers"].(map[string]any)["Workly-Workflow-Step"] != "prices" {
 		t.Fatalf("step task = %s", res.body)
 	}
+	if step := res.json["workflow_step"].(map[string]any); step["id"] != prices["id"] || step["name"] != "prices" ||
+		step["workflow"] != "refresh" || step["run_id"] != runID {
+		t.Fatalf("step task's workflow_step = %v", step)
+	}
 	if res := do(t, h, "POST", "/v1/tasks/"+task["id"].(string)+"/cancel", ""); res.status != 200 {
 		t.Fatalf("cancel step task = %d %s", res.status, res.body)
 	}

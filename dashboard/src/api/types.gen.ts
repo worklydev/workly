@@ -394,6 +394,28 @@ export type Task = {
      * The callback task enqueued when the task last finished, if it has `on_complete`.
      */
     callback_task_id?: string;
+    workflow_step?: TaskWorkflowStep;
+};
+
+/**
+ * The workflow step a task delivers, if it is one. A step's task can't be
+ * retried on its own: start a new run of the workflow instead.
+ *
+ */
+export type TaskWorkflowStep = {
+    /**
+     * The step, `wfs_…`.
+     */
+    id: string;
+    /**
+     * The step's name in its workflow.
+     */
+    name: string;
+    workflow: string;
+    /**
+     * The workflow run, `wfr_…`.
+     */
+    run_id: string;
 };
 
 /**
