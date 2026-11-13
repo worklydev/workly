@@ -103,6 +103,12 @@ export type QueueActivity = {
     failed: number;
     cancelled: number;
     /**
+     * How many latest attempts with a recorded duration the percentiles
+     * are taken over (at most 2,000). 0 when there are no percentiles.
+     *
+     */
+    duration_samples: number;
+    /**
      * Median duration of the latest attempt of the succeeded and failed
      * tasks counted (at most the last 1,000 of each). Absent if none
      * has one.
@@ -651,8 +657,7 @@ export type Schedule = {
     missed: MissedPolicy;
     paused: boolean;
     /**
-     * When a paused schedule was paused. Absent while it runs, and for
-     * schedules paused before Workly recorded it.
+     * When a paused schedule was paused. Absent while it runs.
      *
      */
     paused_at?: string;

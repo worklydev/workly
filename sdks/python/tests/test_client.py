@@ -369,6 +369,7 @@ def test_queue_activity() -> None:
                 "cancelled": 0,
                 "p50_duration_ms": 80,
                 "p95_duration_ms": 950,
+                "duration_samples": 6,
             },
         )
     )
@@ -376,7 +377,7 @@ def test_queue_activity() -> None:
     assert requests[0].url.path == "/v1/queues/emails/activity"
     assert requests[0].url.params["since"].startswith("2026-09-20T10:00:00")
     assert (a.succeeded, a.failed, a.cancelled, a.retention_seconds) == (5, 1, 0, None)
-    assert (a.p50_duration_ms, a.p95_duration_ms) == (80, 950)
+    assert (a.p50_duration_ms, a.p95_duration_ms, a.duration_samples) == (80, 950, 6)
 
 
 def test_tasks_activity() -> None:

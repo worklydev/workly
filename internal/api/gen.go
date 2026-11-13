@@ -821,7 +821,11 @@ type Queue struct {
 // QueueActivity Counts stop at 10,000, so 10000 means "10,000 or more".
 type QueueActivity struct {
 	Cancelled int `json:"cancelled"`
-	Failed    int `json:"failed"`
+
+	// DurationSamples How many latest attempts with a recorded duration the percentiles
+	// are taken over (at most 2,000). 0 when there are no percentiles.
+	DurationSamples int `json:"duration_samples"`
+	Failed          int `json:"failed"`
 
 	// P50DurationMs Median duration of the latest attempt of the succeeded and failed
 	// tasks counted (at most the last 1,000 of each). Absent if none
@@ -1037,8 +1041,7 @@ type Schedule struct {
 	Overlap OverlapPolicy `json:"overlap"`
 	Paused  bool          `json:"paused"`
 
-	// PausedAt When a paused schedule was paused. Absent while it runs, and for
-	// schedules paused before Workly recorded it.
+	// PausedAt When a paused schedule was paused. Absent while it runs.
 	PausedAt *time.Time `json:"paused_at,omitempty"`
 
 	// Payload The body, when it is JSON.

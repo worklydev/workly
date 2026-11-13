@@ -156,8 +156,8 @@ func testQueueActivity(t *testing.T, open func() store.Store) {
 		t.Fatalf("QueueActivity = %+v, %v; want 2 succeeded, 1 failed, 1 cancelled", got, err)
 	}
 	// Every attempt above took 0ms.
-	if got.P50Duration == nil || *got.P50Duration != 0 || got.P95Duration == nil || *got.P95Duration != 0 {
-		t.Fatalf("QueueActivity durations = %v, %v; want 0, 0", got.P50Duration, got.P95Duration)
+	if got.P50Duration == nil || *got.P50Duration != 0 || got.P95Duration == nil || *got.P95Duration != 0 || got.DurationSamples != 3 {
+		t.Fatalf("QueueActivity durations = %v, %v over %d; want 0, 0 over 3", got.P50Duration, got.P95Duration, got.DurationSamples)
 	}
 	if got, err := s.QueueActivity(ctx, workspace.Default, "emails", now().Add(time.Minute)); err != nil || got != (store.QueueActivity{}) {
 		t.Fatalf("QueueActivity since the future = %+v, %v; want zero", got, err)
@@ -175,10 +175,10 @@ func testQueueActivity(t *testing.T, open func() store.Store) {
 	}
 	got, err = s.QueueActivity(ctx, workspace.Default, "reports", start)
 	if err != nil || got.P50Duration == nil || *got.P50Duration != 100*time.Millisecond ||
-		got.P95Duration == nil || *got.P95Duration != 190*time.Millisecond {
-		t.Fatalf("QueueActivity = %+v, %v; want p50 100ms, p95 190ms", got, err)
+		got.P95Duration == nil || *got.P95Duration != 190*time.Millisecond || got.DurationSamples != 20 {
+		t.Fatalf("QueueActivity = %+v, %v; want p50 100ms, p95 190ms over 20", got, err)
 	}
-	if got, err := s.QueueActivity(ctx, workspace.Default, "reports", now().Add(time.Minute)); err != nil || got.P50Duration != nil {
+	if got, err := s.QueueActivity(ctx, workspace.Default, "reports", now().Add(time.Minute)); err != nil || got.P50Duration != nil || got.DurationSamples != 0 {
 		t.Fatalf("QueueActivity durations since the future = %v, %v; want nil", got.P50Duration, err)
 	}
 }

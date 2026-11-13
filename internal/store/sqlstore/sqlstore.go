@@ -550,6 +550,7 @@ func (s *Store) QueueActivity(ctx context.Context, ws workspace.ID, queue string
 		return a, err
 	}
 	a.P50Duration, a.P95Duration = percentile(ms, 50), percentile(ms, 95)
+	a.DurationSamples = len(ms)
 	return a, nil
 }
 

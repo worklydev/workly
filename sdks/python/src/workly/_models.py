@@ -70,6 +70,8 @@ class QueueActivity:
     """Median duration of the latest attempt of the succeeded and failed tasks counted."""
     p95_duration_ms: int | None = None
     """95th percentile of the same durations."""
+    duration_samples: int | None = None
+    """How many durations the percentiles are taken over; None from older servers."""
 
     @classmethod
     def _from_json(cls, d: dict[str, Any]) -> QueueActivity:
@@ -81,6 +83,7 @@ class QueueActivity:
             retention_seconds=d.get("retention_seconds"),
             p50_duration_ms=d.get("p50_duration_ms"),
             p95_duration_ms=d.get("p95_duration_ms"),
+            duration_samples=d.get("duration_samples"),
         )
 
 

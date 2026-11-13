@@ -390,6 +390,8 @@ type QueueActivity struct {
 	// one.
 	P50Duration *time.Duration
 	P95Duration *time.Duration
+	// DurationSamples is how many durations the percentiles are taken over.
+	DurationSamples int
 }
 
 // DurationSampleLimit is how many of the latest succeeded, and of the latest

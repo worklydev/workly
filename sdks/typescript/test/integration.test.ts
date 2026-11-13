@@ -64,6 +64,7 @@ describe('integration', { skip: server ? false : 'set WORKLY_BIN or install Go' 
     const activity = await workly.queues.activity(queue);
     assert.deepEqual([activity.succeeded, activity.failed], [1, 0]);
     assert.deepEqual([activity.p50DurationMs, activity.p95DurationMs], [attempt?.durationMs, attempt?.durationMs]);
+    assert.equal(activity.durationSamples, 1);
   });
 
   test('task delivery', async () => {

@@ -26,7 +26,7 @@ var (
 const recentRuns = 10
 
 var listSchedules = newTool("list_schedules", "List schedules",
-	"All schedules, in summary: cron expression and timezone, the URL each calls, whether it is paused (and since when, paused_at), when it next runs (next_run_at, absent while paused) and how its latest run went (last_run). Use get_schedule for a schedule's request, retry policy and recent runs. Schedules are separate from queues; their calls are runs, not tasks.",
+	"All schedules, in summary: cron expression and timezone, the URL each calls, whether it is paused (and since when, paused_at, null while it runs), when it next runs (next_run_at, null while paused) and how its latest run went (last_run, null before the first). Use get_schedule for a schedule's request, retry policy and recent runs. Schedules are separate from queues; their calls are runs, not tasks.",
 	object(map[string]any{}), readOnly,
 	func(ctx context.Context, api apiClient, _ struct{}) (any, error) {
 		var out struct {
@@ -45,9 +45,7 @@ var listSchedules = newTool("list_schedules", "List schedules",
 func scheduleOverview(s map[string]any) map[string]any {
 	out := map[string]any{}
 	for _, k := range []string{"name", "cron", "timezone", "url", "paused", "paused_at", "next_run_at", "last_run"} {
-		if v, ok := s[k]; ok {
-			out[k] = v
-		}
+		out[k] = s[k]
 	}
 	return out
 }
@@ -55,11 +53,11 @@ func scheduleOverview(s map[string]any) map[string]any {
 // scheduleDetail is a schedule as the tools that return one show it.
 func scheduleDetail(s map[string]any) map[string]any {
 	truncateBody(s)
-	return s
+	return withNulls(s, "paused_at", "next_run_at", "last_run")
 }
 
 var getSchedule = newTool("get_schedule", "Get schedule",
-	`A schedule's settings, its next five slots (next_runs) and its most recent runs, newest first. A paused schedule has paused_at (when it was paused), no next_run_at and empty next_runs; next_runs_if_resumed are the slots it would run at if resumed now. A "skipped" run was not delivered: skip_reason "overlap" means the previous run was still going, "missed" that the server was down at that time. Start here to find out why a scheduled job didn't run or failed.`,
+	`A schedule's settings, its next five slots (next_runs) and its most recent runs, newest first. A paused schedule has paused_at (when it was paused; null while it runs), next_run_at null and empty next_runs; next_runs_if_resumed are the slots it would run at if resumed now. A "skipped" run was not delivered: skip_reason "overlap" means the previous run was still going, "missed" that the server was down at that time. Start here to find out why a scheduled job didn't run or failed.`,
 	object(map[string]any{"schedule": scheduleProp}, "schedule"), readOnly,
 	func(ctx context.Context, api apiClient, args struct {
 		Schedule string `json:"schedule"`
@@ -83,7 +81,7 @@ var getSchedule = newTool("get_schedule", "Get schedule",
 	})
 
 var listRuns = newTool("list_runs", "List runs",
-	`Runs, newest first: one schedule's, or every schedule's if schedule is left out (e.g. state "failed" for failed runs anywhere), optionally only those in one state. Returns summaries, each with its schedule; use get_run for attempts. started_at is when the first attempt started and last_duration_ms how long the latest took. Pass next_cursor as cursor for the next page.`,
+	`Runs, newest first: one schedule's, or every schedule's if schedule is left out (e.g. state "failed" for failed runs anywhere), optionally only those in one state. Returns summaries, each with its schedule and the same fields, null where there is no value; use get_run for attempts. started_at is when the first attempt started and last_duration_ms how long the latest took; both are null before the first attempt, and last_duration_ms while it is still running. Pass next_cursor as cursor for the next page.`,
 	object(map[string]any{
 		"schedule": prop("string", "Only this schedule's runs. Leave out for every schedule's."),
 		"state":    prop("string", "Only runs in this state.", "enum", runStates),
@@ -136,7 +134,7 @@ var getRun = newTool("get_run", "Get run",
 			return nil, err
 		}
 		truncateBody(run)
-		out := map[string]any{"run": run}
+		out := map[string]any{"run": withNulls(run, runSummaryKeys...)}
 		list := attempts.Attempts
 		if omitted := len(list) - maxAttempts; omitted > 0 {
 			list = list[omitted:]
@@ -378,17 +376,19 @@ func runAction(ctx context.Context, api apiClient, id, action string) (any, erro
 	return runSummary(run), nil
 }
 
+// runSummaryKeys are the fields of a run summary, and of every run a tool
+// returns.
+var runSummaryKeys = []string{
+	"id", "schedule", "state", "trigger", "scheduled_for", "skip_reason", "run_at", "attempt_count",
+	"last_status", "last_outcome", "last_error", "created_at", "started_at", "finished_at", "last_attempt_at",
+	"last_duration_ms", "retried_at", "callback_task_id",
+}
+
 // runSummary is a run without its request: what list views need.
 func runSummary(r map[string]any) map[string]any {
 	out := map[string]any{}
-	for _, k := range []string{
-		"id", "schedule", "state", "trigger", "scheduled_for", "skip_reason", "run_at", "attempt_count",
-		"last_status", "last_outcome", "last_error", "created_at", "started_at", "finished_at", "last_attempt_at",
-		"last_duration_ms", "retried_at", "callback_task_id",
-	} {
-		if v, ok := r[k]; ok {
-			out[k] = v
-		}
+	for _, k := range runSummaryKeys {
+		out[k] = r[k]
 	}
 	if e, ok := out["last_error"].(string); ok {
 		out["last_error"] = truncate(e, maxErrorLength)
