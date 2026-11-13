@@ -77,7 +77,7 @@ Deployed workly.yaml: 2 created, 2 updated.
 | Command | |
 |---|---|
 | `workly validate` | Checks the file without contacting the server: field names and types, cron expressions, timezones, URLs, headers, and that every `${NAME}` is set. It runs the server's own validation, so a file that passes is one the server accepts. |
-| `workly plan` | Shows what `deploy` would create and update, setting by setting. Changes nothing. |
+| `workly plan` | Shows what `deploy` would create and update, setting by setting, and which `${NAME:-default}` values took their default. Changes nothing. |
 | `workly deploy` | Shows the plan, asks, and applies it. `--yes` (`-y`) skips the question, as CI needs; without a terminal to ask on, it's required. |
 
 All three read `workly.yaml` in the current directory, or the file given with `--file` (`-f`). `plan` and `deploy` connect like the other commands: `--url` or `WORKLY_URL`, and `--api-key` or `WORKLY_API_KEY`. They exit with a non-zero status on an invalid file or a failed change; a deploy that fails partway reports what it had applied, and running it again finishes the job.
@@ -90,6 +90,7 @@ All three read `workly.yaml` in the current directory, or the file given with `-
 | `queues` | Queue names to their settings. |
 | `workflows` | Workflow names to their `steps` (a list) and `max_duration_seconds`. |
 | `schedules` | Schedule names to their settings. |
+| `x-…` | Ignored, so a key such as `x-defaults` can hold [anchors](#sharing-settings) for the rest of the file. |
 
 A queue or schedule's settings are the fields of its `PUT` request in the [API](../api/openapi.yaml), with the same names, defaults and limits: for queues `max_attempts`, `min_backoff_seconds`, `max_backoff_seconds`, `backoff_multiplier`, `timeout_seconds`, `retry_on_4xx`, `rate_per_second` and `max_concurrency`; for workflows `steps`, each with the settings in [Workflows](workflows.md#define-a-workflow), and `max_duration_seconds`; for schedules `cron` and `url` or `workflow` (required), `timezone`, `method`, `headers`, `payload` or `body` and `content_type`, the retry settings, `overlap` and `missed` (see [Schedules](schedules.md)). A `payload` can be any YAML, and is sent as JSON.
 
@@ -99,7 +100,44 @@ Settings work as `PUT` does: **a setting left out of the file gets its default**
 
 `${NAME}` in a value is replaced with the environment variable `NAME`, so one file can serve several environments and keep secrets out of the repository. A variable that isn't set is an error, not an empty string. An unquoted value is read again after the replacement, so `max_concurrency: ${CONCURRENCY}` is a number.
 
+`${NAME:-default}` uses `default` when `NAME` is unset or empty, as in the shell, so one file can work locally without exporting anything:
+
+```yaml
+url: ${API_URL:-http://localhost:8000}/jobs/nightly
+```
+
+`validate`, `plan` and `deploy` list every default they used, so a variable CI forgot to set shows up in the plan instead of quietly sending production schedules to `localhost`:
+
+```console
+Not set, so their defaults were used:
+  API_URL: "http://localhost:8000" (schedules.daily-stock-prices.url, schedules.refresh-financial-data.url)
+```
+
+Keep secrets as plain `${NAME}`, without a default, so a missing one stops the deploy.
+
 The plan never shows header values or bodies, only that they changed, since they often carry secrets.
+
+### Sharing settings
+
+YAML anchors (`&name`), aliases (`*name`) and merge keys (`<<`) work, so queues and schedules can share settings. A key starting with `x-` at the top of the file is ignored, which makes it a place to keep them:
+
+```yaml
+version: 1
+
+x-price-api: &price-api
+  max_concurrency: 2
+  rate_per_second: 1        # one API key, shared by these queues
+
+queues:
+  stock-prices: *price-api
+  earnings-dates:
+    <<: *price-api
+    max_attempts: 10        # keys given here win over merged ones
+```
+
+## Locally
+
+`workly dev --config workly.yaml` applies the file each time the dev server starts, as `deploy` would, so a fresh database starts with your queues' limits instead of the defaults, and there's no separate deploy step. Restart it to apply changes to the file. With `${NAME:-default}` for the URLs, the same file serves both.
 
 ## What deploying changes, and what it doesn't
 
@@ -115,14 +153,17 @@ Deploy the file with your app. With GitHub Actions:
 ```yaml
 - name: Deploy Workly configuration
   run: |
-    curl -fsSL https://raw.githubusercontent.com/worklydev/workly/main/install.sh | sh
+    curl -fsSL "https://raw.githubusercontent.com/worklydev/workly/$WORKLY_VERSION/install.sh" | sh
     workly deploy --yes
   env:
+    WORKLY_VERSION: v0.4.0   # pin the CLI, and bump it like any other dependency
     WORKLY_URL: https://api.workly.run
     WORKLY_API_KEY: ${{ secrets.WORKLY_API_KEY }}
     API_URL: https://api.example.com
     JOBS_TOKEN: ${{ secrets.JOBS_TOKEN }}
 ```
+
+In a Python project, `workly-cli==0.4.0` in your dev or CI requirements installs the same pinned binary with `pip` (it's what `workly[cli]` pulls in).
 
 Run `workly validate` in pull requests to catch mistakes before they merge; it needs no server or API key, only the environment variables the file uses.
 

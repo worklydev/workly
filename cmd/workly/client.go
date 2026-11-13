@@ -52,7 +52,11 @@ func newClient(cmd *cobra.Command) (*client.ClientWithResponses, error) {
 	if key == "" {
 		key = os.Getenv("WORKLY_API_KEY")
 	}
-	return client.NewClientWithResponses(serverURL(cmd),
+	return clientFor(serverURL(cmd), key)
+}
+
+func clientFor(url, key string) (*client.ClientWithResponses, error) {
+	return client.NewClientWithResponses(url,
 		client.WithHTTPClient(&http.Client{Timeout: 30 * time.Second}),
 		client.WithRequestEditorFn(func(_ context.Context, req *http.Request) error {
 			req.Header.Set("User-Agent", "workly-cli/"+version)

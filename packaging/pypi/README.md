@@ -21,6 +21,9 @@ workly serve                                # production server (Postgres)
 workly queues ls                            # queues and their backlog
 workly tasks enqueue emails https://api.example.com/send -d '{"user_id": 123}'
 workly tasks get task_01J9...               # a task and its delivery attempts
+workly deploy --yes                         # apply workly.yaml: queues, workflows, schedules
 ```
+
+In CI, pin it (`workly-cli==X.Y.Z`) to validate and deploy a [`workly.yaml`](https://workly.run/docs/deploy/) with the same version every time.
 
 To start a server from Python, for example in a test fixture, `workly_cli.find_workly_bin()` returns the binary's path.

@@ -4,3 +4,4 @@ dist/
 # Generated from ../docs and ../api by scripts/sync.mjs
 src/content/docs/
 public/api/openapi.yaml
+public/*.md

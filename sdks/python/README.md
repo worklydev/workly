@@ -7,7 +7,7 @@ pip install workly          # the SDK
 pip install "workly[cli]"   # the SDK plus the workly binary, for `workly dev`
 ```
 
-Requires Python 3.11+. The only dependency is [httpx](https://www.python-httpx.org). The `cli` extra adds [`workly-cli`](https://pypi.org/project/workly-cli/), the server binary (about 7 MB), which you usually want on dev machines and not in production images.
+Requires Python 3.11+. The only dependency is [httpx](https://www.python-httpx.org). The `cli` extra adds [`workly-cli`](https://pypi.org/project/workly-cli/), the `workly` binary (about 7 MB): the dev server (`workly dev`) and the CLI, including `workly validate`, `plan` and `deploy` for [configuration as code](https://workly.run/docs/deploy/). Install it on dev machines and in CI; production images that only enqueue tasks don't need it.
 
 ## Quickstart
 

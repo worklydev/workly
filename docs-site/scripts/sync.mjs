@@ -5,7 +5,10 @@
 //   - its description, for search results, comes from `descriptions` below,
 //   - links between docs (quickstart.md#install) become site links,
 //   - links to other repo files (../deploy/...) point at GitHub, at DOCS_REF,
-//   - api/openapi.yaml is published next to the API reference page.
+//   - api/openapi.yaml is published next to the API reference page,
+//   - each page is also published as Markdown (/docs/quickstart.md), and
+//     its <head> links to it, so agents get the page with its code examples
+//     rather than a summary of the HTML.
 import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, posix, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,7 +19,8 @@ export const docsDir = join(repo, 'docs');
 const outDir = join(site, 'src/content/docs');
 
 // The tag being published (vX.Y.Z), so links to repo files match the docs.
-const ref = process.env.DOCS_REF || 'main';
+// The header shows it too (src/components/SiteTitle.astro).
+export const ref = process.env.DOCS_REF || 'main';
 const github = `https://github.com/worklydev/workly`;
 
 // Where the site is served (astro.config.mjs `base`): Astro doesn't prefix
@@ -82,6 +86,11 @@ function rewriteLink(target) {
   return `${github}/${kind}/${ref}/${fromRoot}${anchor}`;
 }
 
+/** Where a page's Markdown copy is served, under base. */
+function markdownPath(file) {
+  return file === 'README.md' ? 'index.md' : file;
+}
+
 function convert(file, text) {
   const heading = text.match(/^# (.+)\n+/);
   if (!heading) throw new Error(`docs/${file}: the first line must be a "# Title" heading`);
@@ -91,16 +100,21 @@ function convert(file, text) {
     .replace(/(\]\()([^)\s]+)(\))/g, (_, open, target, close) => open + rewriteLink(target) + close);
   const description = descriptions[file];
   if (!description) throw new Error(`docs/${file}: add a description to docs-site/scripts/sync.mjs`);
-  // JSON strings are valid YAML double-quoted strings.
-  return `---\ntitle: ${JSON.stringify(heading[1])}\ndescription: ${JSON.stringify(description)}\neditUrl: ${github}/edit/main/docs/${file}\n---\n\n${body}`;
+  const alternate = { tag: 'link', attrs: { rel: 'alternate', type: 'text/markdown', href: `${base}/${markdownPath(file)}` } };
+  // JSON is valid YAML, for the strings and the head entry alike.
+  const page = `---\ntitle: ${JSON.stringify(heading[1])}\ndescription: ${JSON.stringify(description)}\neditUrl: ${github}/edit/main/docs/${file}\nhead: [${JSON.stringify(alternate)}]\n---\n\n${body}`;
+  return { page, markdown: `# ${heading[1]}\n\n${body}` };
 }
 
 export function sync() {
   rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });
+  const publicDir = join(site, 'public');
+  for (const file of readdirSync(publicDir).filter((f) => f.endsWith('.md'))) rmSync(join(publicDir, file));
   for (const file of readdirSync(docsDir).filter((f) => f.endsWith('.md'))) {
-    const name = file === 'README.md' ? 'index.md' : file;
-    writeFileSync(join(outDir, name), convert(file, readFileSync(join(docsDir, file), 'utf8')));
+    const { page, markdown } = convert(file, readFileSync(join(docsDir, file), 'utf8'));
+    writeFileSync(join(outDir, markdownPath(file)), page);
+    writeFileSync(join(publicDir, markdownPath(file)), markdown);
   }
   mkdirSync(join(site, 'public/api'), { recursive: true });
   cpSync(join(repo, 'api/openapi.yaml'), join(site, 'public/api/openapi.yaml'));

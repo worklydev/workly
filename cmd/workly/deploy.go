@@ -2,12 +2,15 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -23,6 +26,10 @@ func addFileFlag(cmd *cobra.Command) {
 
 func loadFile(cmd *cobra.Command) (*deploy.File, error) {
 	path, _ := cmd.Flags().GetString("file")
+	return loadPath(path)
+}
+
+func loadPath(path string) (*deploy.File, error) {
 	f, err := deploy.Load(path, os.LookupEnv)
 	var invalid *deploy.InvalidError
 	switch {
@@ -40,7 +47,8 @@ func validateCmd() *cobra.Command {
 		Short: "Check workly.yaml, without contacting the server",
 		Long: `Check workly.yaml, without contacting the server: its fields, cron
 expressions, timezones, URLs and headers, and that every ${NAME} it uses is
-set in the environment.`,
+set in the environment. It lists the ${NAME:-default} references that took
+their default.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			f, err := loadFile(cmd)
@@ -53,6 +61,7 @@ set in the environment.`,
 			}
 			counts = append(counts, fmt.Sprintf("%d %s", len(f.Schedules), plural(len(f.Schedules), "schedule")))
 			fmt.Fprintf(cmd.OutOrStdout(), "%s is valid: %s.\n", f.Path, strings.Join(counts, ", "))
+			printDefaults(cmd.OutOrStdout(), f)
 			return nil
 		},
 	}
@@ -109,7 +118,7 @@ Workflow runs already going keep the definition they started with.`,
 				if ch.Action == deploy.Unchanged {
 					continue
 				}
-				if err := apply(cmd, c, ch); err != nil {
+				if err := apply(cmd.Context(), c, ch); err != nil {
 					return fmt.Errorf("%s %s: %w\n%d of %d changes applied", ch.Kind, ch.Name, err, done, todo)
 				}
 				done++
@@ -139,39 +148,43 @@ func makePlan(cmd *cobra.Command) (*deploy.File, *client.ClientWithResponses, de
 	if err != nil {
 		return nil, nil, deploy.Plan{}, err
 	}
-	ctx := cmd.Context()
+	plan, err := planWith(cmd.Context(), c, f)
+	return f, c, plan, err
+}
+
+// planWith compares the file with the server c talks to.
+func planWith(ctx context.Context, c *client.ClientWithResponses, f *deploy.File) (deploy.Plan, error) {
 	var queues api.QueueList
 	var schedules api.ScheduleList
 	var workflows api.WorkflowList
 	if f.HasWorkflows {
 		res, err := c.ListWorkflowsWithResponse(ctx)
 		if err := check(res, err); err != nil {
-			return nil, nil, deploy.Plan{}, err
+			return deploy.Plan{}, err
 		}
 		if err := json.Unmarshal(res.Body, &workflows); err != nil {
-			return nil, nil, deploy.Plan{}, err
+			return deploy.Plan{}, err
 		}
 	}
 	if f.HasQueues {
 		res, err := c.ListQueuesWithResponse(ctx)
 		if err := check(res, err); err != nil {
-			return nil, nil, deploy.Plan{}, err
+			return deploy.Plan{}, err
 		}
 		if err := json.Unmarshal(res.Body, &queues); err != nil {
-			return nil, nil, deploy.Plan{}, err
+			return deploy.Plan{}, err
 		}
 	}
 	if f.HasSchedules {
 		res, err := c.ListSchedulesWithResponse(ctx)
 		if err := check(res, err); err != nil {
-			return nil, nil, deploy.Plan{}, err
+			return deploy.Plan{}, err
 		}
 		if err := json.Unmarshal(res.Body, &schedules); err != nil {
-			return nil, nil, deploy.Plan{}, err
+			return deploy.Plan{}, err
 		}
 	}
-	plan, err := f.Plan(queues.Queues, workflows.Workflows, schedules.Schedules)
-	return f, c, plan, err
+	return f.Plan(queues.Queues, workflows.Workflows, schedules.Schedules)
 }
 
 func printPlan(w io.Writer, cmd *cobra.Command, f *deploy.File, plan deploy.Plan) {
@@ -197,6 +210,7 @@ func printPlan(w io.Writer, cmd *cobra.Command, f *deploy.File, plan deploy.Plan
 		}
 		fmt.Fprintf(w, "\n%d to create, %d to update, %d unchanged.\n", creates, updates, same)
 	}
+	printDefaults(w, f)
 	if len(plan.UndeclaredWorkflows) > 0 {
 		fmt.Fprintf(w, "\nNot in %s, left as they are: %s %s.\n", f.Path,
 			plural(len(plan.UndeclaredWorkflows), "workflow"), strings.Join(plan.UndeclaredWorkflows, ", "))
@@ -207,19 +221,55 @@ func printPlan(w io.Writer, cmd *cobra.Command, f *deploy.File, plan deploy.Plan
 	}
 }
 
-func apply(cmd *cobra.Command, c *client.ClientWithResponses, ch deploy.Change) error {
+func apply(ctx context.Context, c *client.ClientWithResponses, ch deploy.Change) error {
 	body, err := json.Marshal(ch.Body)
 	if err != nil {
 		return err
 	}
 	switch ch.Kind {
 	case "queue":
-		res, err := c.PutQueueWithBodyWithResponse(cmd.Context(), ch.Name, "application/json", bytes.NewReader(body))
+		res, err := c.PutQueueWithBodyWithResponse(ctx, ch.Name, "application/json", bytes.NewReader(body))
 		return check(res, err)
 	case "workflow":
-		res, err := c.PutWorkflowWithBodyWithResponse(cmd.Context(), ch.Name, "application/json", bytes.NewReader(body))
+		res, err := c.PutWorkflowWithBodyWithResponse(ctx, ch.Name, "application/json", bytes.NewReader(body))
 		return check(res, err)
 	}
-	res, err := c.PutScheduleWithBodyWithResponse(cmd.Context(), ch.Name, "application/json", bytes.NewReader(body))
+	res, err := c.PutScheduleWithBodyWithResponse(ctx, ch.Name, "application/json", bytes.NewReader(body))
 	return check(res, err)
+}
+
+// printDefaults lists the variables that weren't set, so their defaults
+// were used, with the fields that used them: in CI, a missing variable
+// would otherwise deploy a local default unnoticed.
+func printDefaults(w io.Writer, f *deploy.File) {
+	if len(f.Defaults) == 0 {
+		return
+	}
+	var names []string
+	byName := map[string][]deploy.Default{}
+	for _, d := range f.Defaults {
+		if byName[d.Name] == nil {
+			names = append(names, d.Name)
+		}
+		byName[d.Name] = append(byName[d.Name], d)
+	}
+	fmt.Fprintf(w, "\nNot set, so their defaults were used:\n")
+	for _, name := range names {
+		var fields, values []string
+		for _, d := range byName[name] {
+			fields = append(fields, d.Field)
+			if !slices.Contains(values, d.Value) {
+				values = append(values, d.Value)
+			}
+		}
+		fmt.Fprintf(w, "  %s: %s (%s)\n", name, strings.Join(quoteAll(values), ", "), strings.Join(fields, ", "))
+	}
+}
+
+func quoteAll(ss []string) []string {
+	out := make([]string, len(ss))
+	for i, s := range ss {
+		out[i] = strconv.Quote(s)
+	}
+	return out
 }
