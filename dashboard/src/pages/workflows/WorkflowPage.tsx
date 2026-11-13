@@ -22,7 +22,8 @@ import { useCursorPages } from '../../hooks/useCursorPages';
 import { PAGE_SIZE } from '../../hooks/useListPage';
 import { errorMessage, LIVE } from '../../lib/api';
 import { formatDuration, formatSeconds, formatTarget, sharedHost, shortId } from '../../lib/format';
-import { WORKFLOW_QUEUE, workflowRunPaging } from '../../lib/workflows';
+import { stepAsWritten, WORKFLOW_QUEUE, workflowRunPaging } from '../../lib/workflows';
+import { toYAML } from '../../lib/yaml';
 import { Button } from '../../primitives/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../primitives/table';
 import { Tabs, TabsList, TabsTab } from '../../primitives/tabs';
@@ -101,7 +102,14 @@ function Steps({ workflow: w }: { workflow: Workflow }) {
       />
       <details className="group">
         <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">Definition</summary>
-        <CodePanel className="mt-2">{JSON.stringify({ steps: w.steps }, null, 2)}</CodePanel>
+        {/* As it would be written in workly.yaml, so it can be copied there. */}
+        <CodePanel className="mt-2">
+          {toYAML({
+            workflows: {
+              [w.name]: { max_duration_seconds: w.max_duration_seconds, steps: w.steps.map(stepAsWritten) },
+            },
+          })}
+        </CodePanel>
       </details>
     </Section>
   );

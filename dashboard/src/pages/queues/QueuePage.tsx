@@ -16,7 +16,8 @@ import {
 } from '../../api/@tanstack/react-query.gen';
 import type { FailureGroup, ListTasksData, Queue, TaskState } from '../../api';
 import { ConfirmItem, MoreActions } from '../../components/MoreActions';
-import { LOW_SUCCESS } from '../../lib/queues';
+import { isSystemQueue, LOW_SUCCESS, systemQueuePurpose } from '../../lib/queues';
+import { WORKFLOW_QUEUE } from '../../lib/workflows';
 import { useSetting } from '../../context';
 import { ListPager } from '../../components/ListControls';
 import { usePage } from '../../hooks/usePage';
@@ -58,7 +59,19 @@ export function QueuePage() {
     <>
       {/* The policy sits with the title: it's what the queue is, the rest is how it's doing. */}
       <div className="flex flex-col gap-3">
-        <PageHeader title={queue.name} badge={queue.paused && <Badge variant="warning">paused</Badge>}>
+        <PageHeader
+          title={queue.name}
+          description={
+            isSystemQueue(queue.name) &&
+            `${systemQueuePurpose(queue.name)} A system queue: Workly enqueues into it, you can change its settings.`
+          }
+          badge={
+            <>
+              {isSystemQueue(queue.name) && <Badge>system</Badge>}
+              {queue.paused && <Badge variant="warning">paused</Badge>}
+            </>
+          }
+        >
           <QueueActions queue={queue} />
         </PageHeader>
         <Policy queue={queue} />
@@ -208,18 +221,21 @@ function QueueActions({ queue }: { queue: Queue }) {
         Edit
       </Button>
       <EditPolicy queue={queue} open={editing} onClose={() => setEditing(false)} />
-      <DisabledReason reason={failed === 0 ? 'No failed tasks to retry.' : undefined}>
-        <Button
-          variant="ghost"
-          size="sm"
-          title="Retry every failed task in this queue with a fresh set of attempts"
-          onClick={() => retryFailed.mutate(path)}
-          disabled={failed === 0 || retryFailed.isPending}
-        >
-          <RotateCcw />
-          Retry failed
-        </Button>
-      </DisabledReason>
+      {/* Workflow steps are retried by starting a new run, never one task at a time. */}
+      {queue.name !== WORKFLOW_QUEUE && (
+        <DisabledReason reason={failed === 0 ? 'No failed tasks to retry.' : undefined}>
+          <Button
+            variant="ghost"
+            size="sm"
+            title="Retry every failed task in this queue with a fresh set of attempts"
+            onClick={() => retryFailed.mutate(path)}
+            disabled={failed === 0 || retryFailed.isPending}
+          >
+            <RotateCcw />
+            Retry failed
+          </Button>
+        </DisabledReason>
+      )}
       {queue.paused ? (
         <Button variant="ghost" size="sm" onClick={() => resume.mutate(path)} disabled={resume.isPending}>
           <Play />
@@ -231,11 +247,16 @@ function QueueActions({ queue }: { queue: Queue }) {
           Pause
         </Button>
       )}
-      <Button onClick={() => setEnqueueing(true)}>
-        <Send />
-        Enqueue task
-      </Button>
-      <EnqueueTask queue={queue.name} open={enqueueing} onClose={() => setEnqueueing(false)} />
+      {/* The API refuses tasks for system queues. */}
+      {!isSystemQueue(queue.name) && (
+        <>
+          <Button onClick={() => setEnqueueing(true)}>
+            <Send />
+            Enqueue task
+          </Button>
+          <EnqueueTask queue={queue.name} open={enqueueing} onClose={() => setEnqueueing(false)} />
+        </>
+      )}
       <MoreActions label="More queue actions">
         <ConfirmItem
           icon={<Ban />}
@@ -355,16 +376,18 @@ function FailureRow({ queue, group: g }: { queue: string; group: FailureGroup })
           {retry.data && (
             <span className="text-xs whitespace-nowrap text-muted-foreground">Retrying {retry.data.retried}</span>
           )}
-          <Button
-            variant="ghost"
-            size="sm"
-            title="Retry the failed tasks with this error, each with a fresh set of attempts"
-            onClick={() => retry.mutate({ path: { queue }, query: { last_error: g.error } })}
-            disabled={retry.isPending}
-          >
-            <RotateCcw />
-            Retry {formatCount(g.count)}
-          </Button>
+          {queue !== WORKFLOW_QUEUE && (
+            <Button
+              variant="ghost"
+              size="sm"
+              title="Retry the failed tasks with this error, each with a fresh set of attempts"
+              onClick={() => retry.mutate({ path: { queue }, query: { last_error: g.error } })}
+              disabled={retry.isPending}
+            >
+              <RotateCcw />
+              Retry {formatCount(g.count)}
+            </Button>
+          )}
         </div>
       </TableCell>
     </TableRow>

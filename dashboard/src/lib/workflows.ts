@@ -1,4 +1,4 @@
-import type { WorkflowRunList, WorkflowStep } from '../api';
+import type { WorkflowRunList, WorkflowStep, WorkflowStepConfig } from '../api';
 import { formatDuration, formatRelative, shortId } from './format';
 
 /** Paging options for the generated infinite workflow run queries; the page param is the cursor. */
@@ -72,4 +72,40 @@ export function stepDetail(s: WorkflowStep, now: number = Date.now()): string | 
 /** How long a step took, or has taken so far. */
 export function stepDuration(s: WorkflowStep): string | undefined {
   return s.duration_ms === undefined ? undefined : formatDuration(s.duration_ms);
+}
+
+const STEP_KEYS = [
+  'name',
+  'depends_on',
+  'url',
+  'method',
+  'headers',
+  'payload',
+  'body',
+  'content_type',
+  'queue',
+  'timeout_seconds',
+  'max_attempts',
+] as const;
+
+/**
+ * A step as it would be written in workly.yaml: name first, and without
+ * what the server fills in when it stores it (POST, the `_workflows` queue, a
+ * payload's JSON content type), so it reads like the file and can be copied
+ * back into one unchanged in meaning.
+ */
+export function stepAsWritten(s: WorkflowStepConfig): Partial<WorkflowStepConfig> {
+  const out: Record<string, unknown> = {};
+  for (const k of STEP_KEYS) if (s[k] !== undefined) out[k] = s[k];
+  if (s.method === 'POST') delete out.method;
+  if (s.queue === WORKFLOW_QUEUE) delete out.queue;
+  if (s.payload !== undefined && s.headers) {
+    const headers = Object.fromEntries(
+      Object.entries(s.headers).filter(([k, v]) => !(k.toLowerCase() === 'content-type' && v === 'application/json')),
+    );
+    if (Object.keys(headers).length > 0) out.headers = headers;
+    else delete out.headers;
+  }
+  if (s.depends_on?.length === 0) delete out.depends_on;
+  return out as Partial<WorkflowStepConfig>;
 }

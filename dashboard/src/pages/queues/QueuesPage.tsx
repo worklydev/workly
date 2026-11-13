@@ -7,6 +7,7 @@ import type { Queue, QueueActivity } from '../../api';
 import { useSetting } from '../../context';
 import { ListPager, ListSearch } from '../../components/ListControls';
 import { PageHeader } from '../../components/PageHeader';
+import { Section } from '../../components/Section';
 import { ErrorText, Muted } from '../../components/QueryState';
 import { LIVE } from '../../lib/api';
 import { Badge } from '../../primitives/badge';
@@ -19,7 +20,7 @@ import { useRange } from '../../hooks/useRange';
 import { EditPolicy } from './EditPolicy';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../primitives/table';
 import { LONGEST_WAIT_TITLE, LongestWait } from './LongestWait';
-import { limits, LOW_SUCCESS } from '../../lib/queues';
+import { isSystemQueue, limits, LOW_SUCCESS, systemQueuePurpose } from '../../lib/queues';
 import { Count } from '../../components/Count';
 import { RowHint } from '../../components/RowHint';
 import { useListPage } from '../../hooks/useListPage';
@@ -28,7 +29,9 @@ import { cn } from 'cn';
 
 export function QueuesPage() {
   const { data, error, isPending } = useQuery({ ...listQueuesOptions(), ...LIVE });
-  const queues = data?.queues ?? [];
+  const all = data?.queues ?? [];
+  const queues = all.filter((q) => !isSystemQueue(q.name));
+  const system = all.filter((q) => isSystemQueue(q.name));
   const [creating, setCreating] = useState(false);
 
   return (
@@ -44,13 +47,14 @@ export function QueuesPage() {
         <Muted>Loading…</Muted>
       ) : error ? (
         <ErrorText error={error} />
-      ) : queues.length === 0 ? (
+      ) : all.length === 0 ? (
         <QueuesGettingStarted />
       ) : (
         <>
-          <Totals queues={queues} />
+          <Totals queues={all} />
           <ActivityChart />
-          <QueueList queues={queues} />
+          {queues.length === 0 ? <QueuesGettingStarted /> : <QueueList queues={queues} />}
+          {system.length > 0 && <SystemQueues queues={system} />}
         </>
       )}
     </>
@@ -68,8 +72,23 @@ function QueueList({ queues }: { queues: Queue[] }) {
   );
 }
 
+/**
+ * Workly's own queues, apart from the application's: they fill on their own
+ * (callbacks, workflow steps), and only their settings are the user's.
+ */
+function SystemQueues({ queues }: { queues: Queue[] }) {
+  return (
+    <Section title="System queues">
+      <p className="-mt-1 text-sm text-muted-foreground">
+        Workly enqueues into these itself. You can change their settings, but not enqueue into them.
+      </p>
+      <QueueTable queues={queues} system />
+    </Section>
+  );
+}
+
 /** Only the queues shown get their activity fetched. */
-function QueueTable({ queues }: { queues: Queue[] }) {
+function QueueTable({ queues, system = false }: { queues: Queue[]; system?: boolean }) {
   const navigate = useNavigate();
   const day = useQueueActivity(queues);
   const { value: range, query } = useRange();
@@ -114,6 +133,11 @@ function QueueTable({ queues }: { queues: Queue[] }) {
                 {q.paused && <Badge variant="warning">paused</Badge>}
                 <RowHint />
               </div>
+              {system && (
+                <div className="truncate text-xs text-muted-foreground" title={systemQueuePurpose(q.name)}>
+                  {systemQueuePurpose(q.name)}
+                </div>
+              )}
             </TableCell>
             <TableCell className="text-right font-mono text-xs">
               <Count n={(q.stats?.due ?? 0) + (q.stats?.scheduled ?? 0)} />
