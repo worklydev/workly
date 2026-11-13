@@ -88,17 +88,39 @@ class QueueActivity:
 
 
 @dataclass(frozen=True, slots=True)
+class CronSpan:
+    """`count` runs, `every_seconds` apart, the first at `start`."""
+
+    start: datetime
+    every_seconds: int
+    """0 when `count` is 1."""
+    count: int
+
+
+@dataclass(frozen=True, slots=True)
 class CronPreview:
     """When a cron timetable would run, from now."""
 
     next_runs: list[datetime]
     interval_seconds: int
     """The shortest time between two of its runs."""
+    spans: list[CronSpan] | None = None
+    """With a window: every run in it, earliest first, as runs at a fixed interval."""
 
     @classmethod
     def _from_json(cls, d: dict[str, Any]) -> CronPreview:
+        spans = d.get("spans")
         return cls(
-            next_runs=[_time(t) for t in d["next_runs"]], interval_seconds=d["interval_seconds"]
+            next_runs=[_time(t) for t in d["next_runs"]],
+            interval_seconds=d["interval_seconds"],
+            spans=None
+            if spans is None
+            else [
+                CronSpan(
+                    start=_time(s["start"]), every_seconds=s["every_seconds"], count=s["count"]
+                )
+                for s in spans
+            ],
         )
 
 

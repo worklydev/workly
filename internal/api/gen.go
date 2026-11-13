@@ -546,6 +546,20 @@ type CronPreview struct {
 
 	// NextRuns The next 5 runs, from now.
 	NextRuns []time.Time `json:"next_runs"`
+
+	// Spans With `from` and `until`: every run in the window, earliest first,
+	// as runs at a fixed interval, so a schedule running every minute is
+	// one span rather than thousands of times.
+	Spans *[]CronSpan `json:"spans,omitempty"`
+}
+
+// CronSpan `count` runs, `every_seconds` apart, the first at `start`.
+type CronSpan struct {
+	Count int `json:"count"`
+
+	// EverySeconds 0 when `count` is 1.
+	EverySeconds int       `json:"every_seconds"`
+	Start        time.Time `json:"start"`
 }
 
 // Delivery defines model for Delivery.
@@ -1282,6 +1296,12 @@ type PreviewCronParams struct {
 
 	// Timezone IANA name. Defaults to UTC.
 	Timezone *string `form:"timezone,omitempty" json:"timezone,omitempty"`
+
+	// From The start of the window to list runs in. Requires `until`.
+	From *time.Time `form:"from,omitempty" json:"from,omitempty"`
+
+	// Until The end of the window, exclusive. Requires `from`.
+	Until *time.Time `form:"until,omitempty" json:"until,omitempty"`
 }
 
 // ListGroupsParams defines parameters for ListGroups.
@@ -1753,6 +1773,32 @@ func (siw *ServerInterfaceWrapper) PreviewCron(w http.ResponseWriter, r *http.Re
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "timezone"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "timezone", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "until" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "until", r.URL.Query(), &params.Until, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "until"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "until", Err: err})
 		}
 		return
 	}

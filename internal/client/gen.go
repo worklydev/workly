@@ -546,6 +546,20 @@ type CronPreview struct {
 
 	// NextRuns The next 5 runs, from now.
 	NextRuns []time.Time `json:"next_runs"`
+
+	// Spans With `from` and `until`: every run in the window, earliest first,
+	// as runs at a fixed interval, so a schedule running every minute is
+	// one span rather than thousands of times.
+	Spans *[]CronSpan `json:"spans,omitempty"`
+}
+
+// CronSpan `count` runs, `every_seconds` apart, the first at `start`.
+type CronSpan struct {
+	Count int `json:"count"`
+
+	// EverySeconds 0 when `count` is 1.
+	EverySeconds int       `json:"every_seconds"`
+	Start        time.Time `json:"start"`
 }
 
 // Delivery defines model for Delivery.
@@ -1345,6 +1359,12 @@ type PreviewCronParams struct {
 
 	// Timezone IANA name. Defaults to UTC.
 	Timezone *string `form:"timezone,omitempty" json:"timezone,omitempty"`
+
+	// From The start of the window to list runs in. Requires `until`.
+	From *time.Time `form:"from,omitempty" json:"from,omitempty"`
+
+	// Until The end of the window, exclusive. Requires `from`.
+	Until *time.Time `form:"until,omitempty" json:"until,omitempty"`
 }
 
 // ListGroupsParams defines parameters for ListGroups.
@@ -1652,6 +1672,9 @@ type ClientInterface interface {
 	// The next times a schedule with this cron expression and timezone
 	// would run, from now, without creating it. For forms that check a
 	// timetable as it's typed.
+	//
+	// With `from` and `until`, it also lists every run in that window
+	// (at most 35 days) as `spans`, for calendars of what runs when.
 	//
 	// Corresponds with GET /v1/cron/preview (the `PreviewCron` operationId).
 	PreviewCron(ctx context.Context, params *PreviewCronParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -2196,6 +2219,9 @@ func (c *Client) TestAlertChannel(ctx context.Context, id AlertChannelID, reqEdi
 // The next times a schedule with this cron expression and timezone
 // would run, from now, without creating it. For forms that check a
 // timetable as it's typed.
+//
+// With `from` and `until`, it also lists every run in that window
+// (at most 35 days) as `spans`, for calendars of what runs when.
 //
 // Corresponds with GET /v1/cron/preview (the `PreviewCron` operationId).
 func (c *Client) PreviewCron(ctx context.Context, params *PreviewCronParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -3282,6 +3308,30 @@ func NewPreviewCronRequest(server string, params *PreviewCronParams) (*http.Requ
 		if params.Timezone != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "timezone", *params.Timezone, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.From != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "from", *params.From, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Until != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "until", *params.Until, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
 				return nil, err
 			} else {
 				for _, qp := range strings.Split(queryFrag, "&") {
@@ -5158,6 +5208,9 @@ type ClientWithResponsesInterface interface {
 	// The next times a schedule with this cron expression and timezone
 	// would run, from now, without creating it. For forms that check a
 	// timetable as it's typed.
+	//
+	// With `from` and `until`, it also lists every run in that window
+	// (at most 35 days) as `spans`, for calendars of what runs when.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -7851,6 +7904,9 @@ func (c *ClientWithResponses) TestAlertChannelWithResponse(ctx context.Context, 
 // The next times a schedule with this cron expression and timezone
 // would run, from now, without creating it. For forms that check a
 // timetable as it's typed.
+//
+// With `from` and `until`, it also lists every run in that window
+// (at most 35 days) as `spans`, for calendars of what runs when.
 //
 // Returns a wrapper object for the known response body format(s).
 //

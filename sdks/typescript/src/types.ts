@@ -91,6 +91,16 @@ export interface CronPreview {
   nextRuns: string[];
   /** The shortest time between two of its runs. */
   intervalSeconds: number;
+  /** With `from` and `until`: every run in the window, earliest first, as runs at a fixed interval. */
+  spans?: CronSpan[];
+}
+
+/** `count` runs, `everySeconds` apart, the first at `start`. */
+export interface CronSpan {
+  start: string;
+  /** 0 when `count` is 1. */
+  everySeconds: number;
+  count: number;
 }
 
 export type ActivityRange = '1h' | '24h' | '7d';

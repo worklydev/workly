@@ -428,6 +428,9 @@ export const putSchedule = <ThrowOnError extends boolean = false>(options: Optio
  * would run, from now, without creating it. For forms that check a
  * timetable as it's typed.
  *
+ * With `from` and `until`, it also lists every run in that window
+ * (at most 35 days) as `spans`, for calendars of what runs when.
+ *
  */
 export const previewCron = <ThrowOnError extends boolean = false>(options: Options<PreviewCronData, ThrowOnError>): RequestResult<PreviewCronResponses, PreviewCronErrors, ThrowOnError> => (options.client ?? client).get<PreviewCronResponses, PreviewCronErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],

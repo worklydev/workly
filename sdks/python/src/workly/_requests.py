@@ -347,8 +347,16 @@ def resume_schedule(name: str) -> Request:
     return Request("POST", f"/v1/schedules/{_q(name)}/resume", idempotent=True)
 
 
-def preview_cron(cron: str, timezone: str | None) -> Request:
-    params = {"cron": cron} if timezone is None else {"cron": cron, "timezone": timezone}
+def preview_cron(
+    cron: str, timezone: str | None, from_: datetime | None, until: datetime | None
+) -> Request:
+    params = {"cron": cron}
+    if timezone is not None:
+        params["timezone"] = timezone
+    if from_ is not None:
+        params["from"] = _timestamp(from_, "from_")
+    if until is not None:
+        params["until"] = _timestamp(until, "until")
     return Request("GET", "/v1/cron/preview", params=params, idempotent=True)
 
 

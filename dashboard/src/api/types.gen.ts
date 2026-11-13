@@ -166,6 +166,25 @@ export type CronPreview = {
      * The shortest time between two of its runs.
      */
     interval_seconds: number;
+    /**
+     * With `from` and `until`: every run in the window, earliest first,
+     * as runs at a fixed interval, so a schedule running every minute is
+     * one span rather than thousands of times.
+     *
+     */
+    spans?: Array<CronSpan>;
+};
+
+/**
+ * `count` runs, `every_seconds` apart, the first at `start`.
+ */
+export type CronSpan = {
+    start: string;
+    /**
+     * 0 when `count` is 1.
+     */
+    every_seconds: number;
+    count: number;
 };
 
 export type QueueFailures = {
@@ -2130,6 +2149,14 @@ export type PreviewCronData = {
          * IANA name. Defaults to UTC.
          */
         timezone?: string;
+        /**
+         * The start of the window to list runs in. Requires `until`.
+         */
+        from?: string;
+        /**
+         * The end of the window, exclusive. Requires `from`.
+         */
+        until?: string;
     };
     url: '/v1/cron/preview';
 };

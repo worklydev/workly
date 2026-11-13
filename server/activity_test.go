@@ -101,7 +101,34 @@ func TestPreviewCron(t *testing.T) {
 	if r.status != 200 || len(runs) != 5 || r.json["interval_seconds"] != float64(900) {
 		t.Fatalf("preview = %d %s", r.status, r.body)
 	}
-	for _, bad := range []string{"cron=nope", "cron=*+*+*+*+*&timezone=Mars/Olympus"} {
+	// A window lists its runs as spans at a fixed interval.
+	week := "&from=2030-01-07T00:00:00Z&until=2030-01-14T00:00:00Z"
+	for _, tt := range []struct {
+		cron  string
+		spans string
+	}{
+		// Every minute of the week is one span.
+		{"*+*+*+*+*", `[map[count:10080 every_seconds:60 start:2030-01-07T00:00:00Z]]`},
+		// 09:00 and 17:00: 8h then 16h apart, so a span per pair.
+		{"0+9,17+*+*+1", `[map[count:2 every_seconds:28800 start:2030-01-07T09:00:00Z]]`},
+		{"30+2+*+*+*", `[map[count:7 every_seconds:86400 start:2030-01-07T02:30:00Z]]`},
+		{"0+0+1+1+*", `[]`},
+	} {
+		r := do(t, h, "GET", "/v1/cron/preview?cron="+tt.cron+week, "")
+		if r.status != 200 || fmt.Sprint(r.json["spans"]) != tt.spans {
+			t.Errorf("%s spans = %d %v, want %s", tt.cron, r.status, r.json["spans"], tt.spans)
+		}
+	}
+	if r := do(t, h, "GET", "/v1/cron/preview?cron=*+*+*+*+*", ""); r.json["spans"] != nil {
+		t.Errorf("spans without a window = %v", r.json["spans"])
+	}
+	for _, bad := range []string{
+		"cron=nope",
+		"cron=*+*+*+*+*&timezone=Mars/Olympus",
+		"cron=*+*+*+*+*&from=2030-01-07T00:00:00Z",
+		"cron=*+*+*+*+*&from=2030-01-07T00:00:00Z&until=2030-01-06T00:00:00Z",
+		"cron=*+*+*+*+*&from=2030-01-01T00:00:00Z&until=2030-03-01T00:00:00Z",
+	} {
 		if r := do(t, h, "GET", "/v1/cron/preview?"+bad, ""); r.status != 400 {
 			t.Errorf("%s = %d %s", bad, r.status, r.body)
 		}

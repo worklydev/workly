@@ -823,6 +823,9 @@ export const previewCronQueryKey = (options: Options<PreviewCronData>) => create
  * would run, from now, without creating it. For forms that check a
  * timetable as it's typed.
  *
+ * With `from` and `until`, it also lists every run in that window
+ * (at most 35 days) as `spans`, for calendars of what runs when.
+ *
  */
 export const previewCronOptions = (options: Options<PreviewCronData>) => queryOptions<PreviewCronResponse, PreviewCronError, PreviewCronResponse, ReturnType<typeof previewCronQueryKey>>({
     queryFn: async ({ queryKey, signal }) => {

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import { RowHint } from '../../components/RowHint';
-import { Link, useNavigate } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import { listSchedulesOptions } from '../../api/@tanstack/react-query.gen';
 import type { Schedule } from '../../api';
 import { ListPager, ListSearch } from '../../components/ListControls';
@@ -19,6 +19,8 @@ import { Button } from '../../primitives/button';
 import { EditSchedule } from './EditSchedule';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../primitives/table';
 import { RecentRuns } from './RecentRuns';
+import { WeekView } from './WeekView';
+import { Tabs, TabsList, TabsTab } from '../../primitives/tabs';
 import { SchedulesGettingStarted } from './GettingStarted';
 import { useRecentRuns } from './useRecentRuns';
 
@@ -55,13 +57,39 @@ export function SchedulesPage() {
   );
 }
 
+type View = 'week' | 'list';
+
 function ScheduleList({ schedules }: { schedules: Schedule[] }) {
   const list = useListPage(schedules, (s) => [s.name, s.cron, describeCron(s.cron) ?? '', s.timezone, s.method, s.url]);
+  // The week is the default: what runs when is the question a list of cron expressions can't answer.
+  const [params, setParams] = useSearchParams();
+  const view: View = params.get('view') === 'list' ? 'list' : 'week';
+  const setView = (v: View) =>
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (v === 'week') next.delete('view');
+        else next.set('view', v);
+        next.delete('week');
+        return next;
+      },
+      { replace: true },
+    );
   return (
     <div className="flex flex-col gap-3">
-      <ListSearch list={list} placeholder="Search name, timetable or URL" />
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <Tabs value={view} onValueChange={(v) => setView(v as View)}>
+          <TabsList>
+            <TabsTab value="week">Week</TabsTab>
+            <TabsTab value="list">List</TabsTab>
+          </TabsList>
+        </Tabs>
+        <ListSearch list={list} placeholder="Search name, timetable or URL" />
+      </div>
       {list.items.length === 0 ? (
         <Muted>No schedules match “{list.search}”.</Muted>
+      ) : view === 'week' ? (
+        <WeekView schedules={list.items} />
       ) : (
         <ScheduleTable schedules={list.items} />
       )}

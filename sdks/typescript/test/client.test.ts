@@ -458,6 +458,23 @@ describe('cron preview', () => {
     assert.equal(sent[0]?.url.searchParams.get('cron'), '0 3 * * *');
     assert.equal(sent[0]?.url.searchParams.get('timezone'), 'UTC');
   });
+
+  test('previewCron with a window', async () => {
+    const preview = {
+      next_runs: ['2030-01-07T03:00:00Z'],
+      interval_seconds: 86400,
+      spans: [{ start: '2030-01-07T03:00:00Z', every_seconds: 86400, count: 7 }],
+    };
+    const { fetch, sent } = fakeFetch(json(preview));
+    const workly = new Workly({ fetch });
+    const got = await workly.schedules.previewCron('0 3 * * *', {
+      from: new Date('2030-01-07T00:00:00Z'),
+      until: '2030-01-14T00:00:00Z',
+    });
+    assert.deepEqual(got.spans, [{ start: '2030-01-07T03:00:00Z', everySeconds: 86400, count: 7 }]);
+    assert.equal(sent[0]?.url.searchParams.get('from'), '2030-01-07T00:00:00.000Z');
+    assert.equal(sent[0]?.url.searchParams.get('until'), '2030-01-14T00:00:00Z');
+  });
 });
 
 describe('errors', () => {

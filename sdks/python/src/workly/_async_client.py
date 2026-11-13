@@ -504,12 +504,22 @@ class AsyncSchedules:
         """Fire again from the next slot. Slots that passed while paused aren't run."""
         return Schedule._from_json(await self._client._send(r.resume_schedule(name)))
 
-    async def preview_cron(self, cron: str, *, timezone: str | None = None) -> CronPreview:
+    async def preview_cron(
+        self,
+        cron: str,
+        *,
+        timezone: str | None = None,
+        from_: datetime | None = None,
+        until: datetime | None = None,
+    ) -> CronPreview:
         """The next 5 times a schedule with this cron would run, without creating it.
 
-        `timezone` is an IANA name; the default is UTC.
+        `timezone` is an IANA name; the default is UTC. With `from_` and `until` (at
+        most 35 days apart), `spans` lists every run in that window.
         """
-        return CronPreview._from_json(await self._client._send(r.preview_cron(cron, timezone)))
+        return CronPreview._from_json(
+            await self._client._send(r.preview_cron(cron, timezone, from_, until))
+        )
 
     async def trigger(self, name: str) -> Run:
         """Run the schedule now, even if paused. Doesn't change when it next fires."""
