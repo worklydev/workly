@@ -83,10 +83,11 @@ function ScheduleRow({
   last: boolean;
 }) {
   return (
-    <li>
+    // The strip's bars link to their runs, so they sit beside the row's link, not inside it.
+    <li className="group/row flex h-10 items-center gap-3 rounded-md px-1 transition-colors hover:bg-muted/60">
       <Link
         to={`/schedules/${encodeURIComponent(s.name)}`}
-        className="group/row flex h-10 items-center gap-3 rounded-md px-1 transition-colors hover:bg-muted/60"
+        className="flex h-full min-w-0 grow items-center gap-3 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
       >
         <span className="w-14 shrink-0 text-right font-mono text-xs tabular-nums">
           {s.next_run_at ? (
@@ -115,10 +116,10 @@ function ScheduleRow({
             · {describeCron(s.cron) ?? s.cron}
           </span>
         </span>
-        <span className="hidden shrink-0 sm:block">
-          <RecentRuns runs={runs} slots={8} />
-        </span>
       </Link>
+      <span className="hidden shrink-0 sm:block">
+        <RecentRuns runs={runs} slots={8} />
+      </span>
     </li>
   );
 }
