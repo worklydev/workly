@@ -113,7 +113,10 @@ A step that starts work Workly should track answers with `Workly-Wait-For: group
 ```python
 @app.post("/jobs/start-price-update")
 def start_price_update():
-    verify_signature(request.get_data(), request.headers)
+    try:
+        verify_signature(request.get_data(), request.headers)
+    except SignatureVerificationError:
+        abort(401)  # a 4xx isn't retried
     # The same on every delivery of this step in this run attempt: a redelivered
     # request reuses its group, and a retried run starts a fresh one.
     key = f'{request.headers["Workly-Workflow-Step-Id"]}-{request.headers["Workly-Workflow-Run-Attempt"]}'
