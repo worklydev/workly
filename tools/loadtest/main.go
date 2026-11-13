@@ -1,11 +1,16 @@
 // Command loadtest measures Workly's sustained throughput and latency.
 //
 // It runs a no-op delivery endpoint, enqueues tasks to a running Workly
-// server at a fixed rate, one request per task as a typical client would,
-// and reports enqueue latency, end-to-end latency (enqueue to delivery) and
-// throughput:
+// server at a fixed rate, one request per task as a typical client would
+// (or -batch tasks per request), and reports enqueue latency, end-to-end
+// latency (enqueue to delivery) and throughput:
 //
 //	go run ./tools/loadtest -rate 1000 -duration 60s
+//
+// With -paused the queue stays paused, so nothing is delivered and only
+// enqueues are measured; -rate 0 enqueues as fast as the workers can:
+//
+//	go run ./tools/loadtest -paused -rate 0 -batch 100 -duration 20s
 package main
 
 import (
@@ -29,13 +34,18 @@ func main() {
 	api := flag.String("api", "http://localhost:7337", "Workly API base URL")
 	apiKey := flag.String("api-key", os.Getenv("WORKLY_API_KEY"), "API key, if the server requires one")
 	queue := flag.String("queue", "loadtest", "queue to use; it is deleted and recreated")
-	rate := flag.Int("rate", 1000, "tasks enqueued per second")
+	rate := flag.Int("rate", 1000, "tasks enqueued per second; 0 for as fast as possible")
 	duration := flag.Duration("duration", 30*time.Second, "how long to enqueue for")
 	workers := flag.Int("workers", 64, "concurrent enqueue requests")
+	batch := flag.Int("batch", 1, "tasks per enqueue request (at most 100); above 1, the batch endpoint is used")
+	paused := flag.Bool("paused", false, "keep the queue paused and measure enqueues only")
 	drainTimeout := flag.Duration("drain-timeout", time.Minute, "how long to wait for deliveries after enqueueing stops")
 	flag.Parse()
 
-	lt := &loadTest{api: *api, apiKey: *apiKey, queue: *queue}
+	if *batch < 1 || *batch > 100 {
+		log.Fatal("-batch must be between 1 and 100")
+	}
+	lt := &loadTest{api: *api, apiKey: *apiKey, queue: *queue, batch: *batch, paused: *paused}
 	if err := lt.run(*rate, *duration, *workers, *drainTimeout); err != nil {
 		log.Fatal(err)
 	}
@@ -43,6 +53,8 @@ func main() {
 
 type loadTest struct {
 	api, apiKey, queue string
+	batch              int
+	paused             bool
 	client             *http.Client
 
 	mu         sync.Mutex
@@ -75,9 +87,13 @@ func (lt *loadTest) run(rate int, duration time.Duration, workers int, drainTime
 	if err := lt.call("PUT", "/v1/queues/"+lt.queue, map[string]any{"max_concurrency": 10000}, http.StatusCreated); err != nil {
 		return err
 	}
-
-	total := int(float64(rate) * duration.Seconds())
-	fmt.Printf("enqueueing %d tasks at %d/s for %v with %d workers\n", total, rate, duration, workers)
+	if lt.paused {
+		if err := lt.call("POST", "/v1/queues/"+lt.queue+"/pause", nil, http.StatusOK); err != nil {
+			return err
+		}
+		// Leave no paused backlog behind for the next run's dispatcher.
+		defer lt.call("DELETE", "/v1/queues/"+lt.queue, nil, http.StatusNoContent)
+	}
 
 	jobs := make(chan int, workers)
 	var wg sync.WaitGroup
@@ -89,22 +105,39 @@ func (lt *loadTest) run(rate int, duration time.Duration, workers int, drainTime
 		})
 	}
 	// Pace by schedule rather than a ticker, so a slow moment is caught up
-	// instead of lowering the rate.
+	// instead of lowering the rate. Unpaced, enqueue for the duration.
 	start := time.Now()
-	interval := time.Second / time.Duration(rate)
-	for n := range total {
-		if d := time.Until(start.Add(time.Duration(n) * interval)); d > 0 {
-			time.Sleep(d)
+	sent := 0
+	if rate > 0 {
+		total := int(float64(rate)*duration.Seconds()) / lt.batch * lt.batch
+		fmt.Printf("enqueueing %d tasks at %d/s for %v, %d per request, with %d workers\n", total, rate, duration, lt.batch, workers)
+		interval := time.Second * time.Duration(lt.batch) / time.Duration(rate)
+		for ; sent < total; sent += lt.batch {
+			if d := time.Until(start.Add(time.Duration(sent/lt.batch) * interval)); d > 0 {
+				time.Sleep(d)
+			}
+			jobs <- sent
 		}
-		jobs <- n
+	} else {
+		fmt.Printf("enqueueing as fast as possible for %v, %d per request, with %d workers\n", duration, lt.batch, workers)
+		for ; time.Since(start) < duration; sent += lt.batch {
+			jobs <- sent
+		}
 	}
 	close(jobs)
 	wg.Wait()
 	enqueueTime := time.Since(start)
 
 	lt.mu.Lock()
-	enqueued := total - lt.enqueueErr
+	enqueued := sent - lt.enqueueErr
+	errs := lt.enqueueErr
+	fmt.Printf("\nenqueue:  %d ok, %d errors in %v (%.0f/s)\n", enqueued, errs, enqueueTime.Round(time.Millisecond), float64(enqueued)/enqueueTime.Seconds())
+	fmt.Printf("          request latency %s\n", percentiles(lt.enqueueLat))
 	lt.mu.Unlock()
+	if lt.paused {
+		return nil
+	}
+
 	deadline := time.Now().Add(drainTimeout)
 	for lt.delivered.Load() < int64(enqueued) && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
@@ -114,8 +147,6 @@ func (lt *loadTest) run(rate int, duration time.Duration, workers int, drainTime
 	lt.mu.Lock()
 	defer lt.mu.Unlock()
 	delivered := len(lt.seen)
-	fmt.Printf("\nenqueue:  %d ok, %d errors in %v (%.0f/s)\n", enqueued, lt.enqueueErr, enqueueTime.Round(time.Millisecond), float64(enqueued)/enqueueTime.Seconds())
-	fmt.Printf("          latency %s\n", percentiles(lt.enqueueLat))
 	fmt.Printf("delivery: %d delivered, %d duplicates, %d missing; all done %v after start (%.0f/s)\n",
 		delivered, lt.duplicates, enqueued-delivered, totalTime.Round(time.Millisecond), float64(delivered)/totalTime.Seconds())
 	fmt.Printf("          enqueue-to-delivery latency %s\n", percentiles(lt.deliverLat))
@@ -132,12 +163,22 @@ type payload struct {
 	T int64 `json:"t"`
 }
 
+// enqueue enqueues tasks n to n+batch-1.
 func (lt *loadTest) enqueue(targetURL string, n int) {
 	start := time.Now()
-	err := lt.call("POST", "/v1/queues/"+lt.queue+"/tasks", map[string]any{
-		"url":     targetURL,
-		"payload": payload{N: n, T: start.UnixNano()},
-	}, http.StatusCreated)
+	task := func(n int) map[string]any {
+		return map[string]any{"url": targetURL, "payload": payload{N: n, T: start.UnixNano()}}
+	}
+	var err error
+	if lt.batch == 1 {
+		err = lt.call("POST", "/v1/queues/"+lt.queue+"/tasks", task(n), http.StatusCreated)
+	} else {
+		tasks := make([]map[string]any, lt.batch)
+		for i := range tasks {
+			tasks[i] = task(n + i)
+		}
+		err = lt.call("POST", "/v1/queues/"+lt.queue+"/tasks:batch", map[string]any{"tasks": tasks}, http.StatusOK)
+	}
 	lat := time.Since(start)
 
 	lt.mu.Lock()
@@ -146,7 +187,7 @@ func (lt *loadTest) enqueue(targetURL string, n int) {
 		if lt.enqueueErr == 0 {
 			log.Printf("enqueue failed: %v", err)
 		}
-		lt.enqueueErr++
+		lt.enqueueErr += lt.batch
 		return
 	}
 	lt.enqueueLat = append(lt.enqueueLat, lat)

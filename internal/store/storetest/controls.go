@@ -2,6 +2,7 @@ package storetest
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -111,6 +112,37 @@ func testCreateTasks(t *testing.T, open func() store.Store) {
 	all, _, err := s.ListTasks(ctx, workspace.Default, store.TaskFilter{Queue: "emails", Limit: 10})
 	if err != nil || len(all) != 3 {
 		t.Fatalf("ListTasks after failed batch = %d tasks, %v; want 3", len(all), err)
+	}
+
+	// A queue that doesn't exist yet is created, in the middle of a batch.
+	mixed := []store.NewTask{nt(""), {Queue: "fresh", Method: "POST", URL: "http://example.test", RunAt: now()}, nt("")}
+	tasks, created, err = s.CreateTasks(ctx, workspace.Default, mixed, true)
+	if err != nil {
+		t.Fatalf("CreateTasks into a new queue: %v", err)
+	}
+	for i, task := range tasks {
+		if !created[i] || task.Queue != mixed[i].Queue {
+			t.Fatalf("CreateTasks into a new queue: task %d = %q, created %v", i, task.Queue, created[i])
+		}
+	}
+
+	// A batch larger than one statement's worth returns its tasks in order.
+	large := make([]store.NewTask, 1200)
+	for i := range large {
+		large[i] = nt(fmt.Sprintf("large-%d", i))
+	}
+	large[1100] = nt("large-3")
+	tasks, created, err = s.CreateTasks(ctx, workspace.Default, large, true)
+	if err != nil {
+		t.Fatalf("CreateTasks(1200): %v", err)
+	}
+	for i, task := range tasks {
+		if task.IdempotencyKey != large[i].IdempotencyKey || created[i] != (i != 1100) {
+			t.Fatalf("CreateTasks(1200): task %d has key %q, created %v", i, task.IdempotencyKey, created[i])
+		}
+	}
+	if tasks[1100].ID != tasks[3].ID {
+		t.Fatalf("CreateTasks(1200): duplicate key across statements = %s, want %s", tasks[1100].ID, tasks[3].ID)
 	}
 }
 

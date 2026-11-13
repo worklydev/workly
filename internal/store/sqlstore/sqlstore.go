@@ -40,11 +40,13 @@ type Store struct {
 	opts Options
 	// insertTask is the enqueue statement, built once.
 	insertTask string
+	enqueues   enqueuer
 }
 
 func New(db *sql.DB, opts Options) *Store {
 	s := &Store{db: db, opts: opts}
-	s.insertTask = s.insertTaskQuery()
+	s.insertTask = s.insertTasksQuery(1)
+	s.enqueues.store = s
 	return s
 }
 
@@ -827,6 +829,9 @@ func scanTask(row interface{ Scan(...any) error }) (store.Task, error) {
 }
 
 func (s *Store) CreateTask(ctx context.Context, ws workspace.ID, nt store.NewTask, autoCreateQueue bool) (store.Task, bool, error) {
+	if nt.GroupID == "" {
+		return s.enqueues.create(ctx, ws, nt, autoCreateQueue)
+	}
 	tasks, created, err := s.CreateTasks(ctx, ws, []store.NewTask{nt}, autoCreateQueue)
 	if err != nil {
 		return store.Task{}, false, err
@@ -835,17 +840,23 @@ func (s *Store) CreateTask(ctx context.Context, ws workspace.ID, nt store.NewTas
 }
 
 func (s *Store) CreateTasks(ctx context.Context, ws workspace.ID, nts []store.NewTask, autoCreateQueue bool) ([]store.Task, []bool, error) {
-	tasks := make([]store.Task, len(nts))
-	created := make([]bool, len(nts))
-	anyCreated := false
+	var (
+		tasks   []store.Task
+		created []bool
+	)
 	create := func(q querier) error {
+		var err error
+		if len(nts) == 1 {
+			tasks, created = make([]store.Task, 1), make([]bool, 1)
+			tasks[0], created[0], err = s.createTask(ctx, q, ws, nts[0], autoCreateQueue)
+		} else {
+			tasks, created, err = s.insertTasks(ctx, q, ws, nts, autoCreateQueue)
+		}
+		if err != nil {
+			return err
+		}
 		joined := map[string]int{}
 		for i, nt := range nts {
-			var err error
-			if tasks[i], created[i], err = s.createTask(ctx, q, ws, nt, autoCreateQueue); err != nil {
-				return err
-			}
-			anyCreated = anyCreated || created[i]
 			if created[i] && nt.GroupID != "" {
 				joined[nt.GroupID]++
 			}
@@ -869,46 +880,144 @@ func (s *Store) CreateTasks(ctx context.Context, ws workspace.ID, nts []store.Ne
 	if err != nil {
 		return nil, nil, err
 	}
-	if anyCreated {
+	if slices.Contains(created, true) {
 		s.wake()
 	}
 	return tasks, created, nil
 }
 
-// insertTaskQuery inserts a task if its queue exists and its idempotency key is
-// free, and returns it. Otherwise it inserts and returns nothing.
-func (s *Store) insertTaskQuery() string {
+// insertChunk is how many tasks one statement inserts: 19 parameters each,
+// well under SQLite's and Postgres's limits on parameters.
+const insertChunk = 500
+
+// insertTasks inserts tasks with one statement per chunk, and the tasks
+// those don't insert one at a time (see bulkInsert). The first error stops it.
+func (s *Store) insertTasks(ctx context.Context, q querier, ws workspace.ID, nts []store.NewTask, autoCreateQueue bool) ([]store.Task, []bool, error) {
+	tasks, created, err := s.bulkInsert(ctx, q, ws, nts)
+	if err != nil {
+		return nil, nil, err
+	}
+	for i, nt := range nts {
+		if created[i] {
+			continue
+		}
+		if tasks[i], created[i], err = s.createTask(ctx, q, ws, nt, autoCreateQueue); err != nil {
+			return nil, nil, err
+		}
+	}
+	return tasks, created, nil
+}
+
+// bulkInsert inserts tasks with one statement per chunk and reports which it
+// inserted. A task it doesn't insert (its idempotency key is taken, perhaps
+// by an earlier task in the same batch, or its queue doesn't exist) is left
+// to createTask, which works out which and what to return.
+func (s *Store) bulkInsert(ctx context.Context, q querier, ws workspace.ID, nts []store.NewTask) ([]store.Task, []bool, error) {
+	tasks := make([]store.Task, len(nts))
+	created := make([]bool, len(nts))
+	ids := make([]string, len(nts))
+	inserted := map[string]store.Task{}
+	// A key used twice in the batch belongs to its first task. Which of two
+	// rows in one statement gets in first is up to the database's plan, so
+	// the later ones are left to createTask.
+	keys := map[[2]string]bool{}
+	for lo := 0; lo < len(nts); lo += insertChunk {
+		var args []any
+		n := 0
+		for i := lo; i < min(lo+insertChunk, len(nts)); i++ {
+			nt := nts[i]
+			if nt.IdempotencyKey != "" {
+				k := [2]string{nt.Queue, nt.IdempotencyKey}
+				if keys[k] {
+					continue
+				}
+				keys[k] = true
+			}
+			id, row, err := s.taskArgs(ws, nt)
+			if err != nil {
+				return nil, nil, err
+			}
+			ids[i] = id
+			args = append(args, row...)
+			n++
+		}
+		if n == 0 {
+			continue
+		}
+		rows, err := s.query(ctx, q, s.insertTasksQuery(n), args...)
+		if err != nil {
+			return nil, nil, err
+		}
+		for rows.Next() {
+			t, err := scanTask(rows)
+			if err != nil {
+				rows.Close()
+				return nil, nil, err
+			}
+			inserted[t.ID] = t
+		}
+		if err := rows.Close(); err != nil {
+			return nil, nil, err
+		}
+		if err := rows.Err(); err != nil {
+			return nil, nil, err
+		}
+	}
+	// RETURNING doesn't promise the order of the rows, so they're matched
+	// up by ID.
+	for i := range nts {
+		tasks[i], created[i] = inserted[ids[i]]
+	}
+	return tasks, created, nil
+}
+
+// insertTasksQuery inserts n tasks, each if its queue exists and its
+// idempotency key is free, and returns the ones it inserted.
+func (s *Store) insertTasksQuery(n int) string {
+	if n == 1 && s.insertTask != "" {
+		return s.insertTask
+	}
+	row := s.values("text", "text", "text", "text", "text", "text",
+		"json", "bytes", "ts", "int", "int", "text", "text", "ts", "ts", "text", "text", "json", "text")
 	return `INSERT INTO tasks (id, workspace_id, queue, state, method, url,
 			headers, body, run_at, max_attempts, timeout_ms, idempotency_key, trace_context,
 			created_at, updated_at, group_id, callback_url, callback_headers, workflow_step_id)
-		SELECT * FROM (VALUES ` + s.values("text", "text", "text", "text", "text", "text",
-		"json", "bytes", "ts", "int", "int", "text", "text", "ts", "ts", "text", "text", "json", "text") + `) AS v
-		WHERE EXISTS (SELECT 1 FROM queues q WHERE q.workspace_id = ? AND q.name = ?)
+		SELECT * FROM (VALUES ` + repeatRows(row, n) + `) AS v
+		WHERE EXISTS (SELECT 1 FROM queues q WHERE q.workspace_id = v.column2 AND q.name = v.column3)
 		ON CONFLICT (workspace_id, queue, idempotency_key) WHERE idempotency_key IS NOT NULL
 		DO NOTHING
 		RETURNING ` + taskColumns
 }
 
-// createTask inserts a task, or returns the task with the same idempotency
-// key. A missing queue is created if autoCreateQueue is set, and is
-// ErrNotFound otherwise.
-func (s *Store) createTask(ctx context.Context, q querier, ws workspace.ID, nt store.NewTask, autoCreateQueue bool) (store.Task, bool, error) {
+// taskArgs returns a new task's ID and its row for insertTasksQuery.
+func (s *Store) taskArgs(ws workspace.ID, nt store.NewTask) (string, []any, error) {
 	headers, err := marshalHeaders(nt.Headers)
 	if err != nil {
-		return store.Task{}, false, err
+		return "", nil, err
 	}
 	if nt.Body == nil {
 		nt.Body = []byte{}
 	}
 	cbURL, cbHeaders, err := callbackArgs(nt.OnComplete)
 	if err != nil {
-		return store.Task{}, false, err
+		return "", nil, err
 	}
 	now := s.ts(time.Now())
-	args := []any{id.New("task"), ws, nt.Queue, store.TaskPending, nt.Method, nt.URL, headers, nt.Body,
+	taskID := id.New("task")
+	return taskID, []any{taskID, ws, nt.Queue, store.TaskPending, nt.Method, nt.URL, headers, nt.Body,
 		s.ts(nt.RunAt), nullInt(nt.MaxAttempts), nullMillis(nt.Timeout),
 		nullString(nt.IdempotencyKey), nullString(nt.TraceContext), now, now, nullString(nt.GroupID),
-		cbURL, cbHeaders, nullString(nt.WorkflowStepID), ws, nt.Queue}
+		cbURL, cbHeaders, nullString(nt.WorkflowStepID)}, nil
+}
+
+// createTask inserts a task, or returns the task with the same idempotency
+// key. A missing queue is created if autoCreateQueue is set, and is
+// ErrNotFound otherwise.
+func (s *Store) createTask(ctx context.Context, q querier, ws workspace.ID, nt store.NewTask, autoCreateQueue bool) (store.Task, bool, error) {
+	_, args, err := s.taskArgs(ws, nt)
+	if err != nil {
+		return store.Task{}, false, err
+	}
 	for createdQueue := false; ; createdQueue = true {
 		t, err := scanTask(s.queryRow(ctx, q, s.insertTask, args...))
 		if err == nil {

@@ -56,7 +56,7 @@ const descriptions = {
   'metrics.md':
     "Workly's Prometheus metrics: queue depth, delivery latency, the age of the oldest due task and schedule health, with example alerting rules.",
   'performance.md':
-    "Workly's load test results on SQLite and Postgres: over 1,000 tasks a second on one server with millisecond delivery latency, and how to reproduce them.",
+    "Workly's load test results on SQLite and Postgres: enqueue and delivery rates and latencies on one server, batched enqueues, what limits them and how to reproduce them.",
 };
 
 function slug(file) {
