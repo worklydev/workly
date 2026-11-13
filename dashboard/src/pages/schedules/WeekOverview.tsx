@@ -9,10 +9,14 @@ import { useNow } from '../../hooks/useNow';
 import { describeCron } from '../../lib/cron';
 import { formatSeconds } from '../../lib/format';
 import { dayPlan, zonedWeek, type DayPlan } from '../../lib/week';
-import { Badge } from '../../primitives/badge';
+import { ScheduleDot } from './ScheduleDot';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../primitives/table';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+// Hairlines between columns, so it reads as a timetable; today's column a whisper of the accent.
+const GRID = 'border-l border-border';
+const TODAY = 'bg-primary/[0.035]';
 
 /**
  * Every schedule's week at a glance, Monday to Sunday: which days it runs and
@@ -47,11 +51,11 @@ export function WeekOverview({ schedules }: { schedules: Schedule[] }) {
       <TableHeader>
         <TableRow>
           <TableHead className="w-[17%]">Schedule</TableHead>
-          <TableHead className="w-[20%]" title="Times are in each schedule's own timezone">
+          <TableHead className={cn('w-[20%]', GRID)} title="Times are in each schedule's own timezone">
             When
           </TableHead>
           {DAYS.map((d, i) => (
-            <TableHead key={d} className={cn(i === today && 'text-foreground')}>
+            <TableHead key={d} className={cn(GRID, i === today && TODAY, i === today && 'text-foreground')}>
               <span className="flex items-center gap-1.5">
                 {d}
                 {i === today && <span className="size-1.5 rounded-full bg-primary" title="Today" />}
@@ -68,7 +72,8 @@ export function WeekOverview({ schedules }: { schedules: Schedule[] }) {
             onClick={() => navigate(`/schedules/${s.name}`)}
           >
             <TableCell className="py-2">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2.5">
+                <ScheduleDot schedule={s} />
                 <Link
                   to={`/schedules/${s.name}`}
                   title={s.name}
@@ -77,10 +82,10 @@ export function WeekOverview({ schedules }: { schedules: Schedule[] }) {
                 >
                   {s.name}
                 </Link>
-                {s.paused && <Badge variant="warning">paused</Badge>}
                 <RowHint />
               </div>
-              <div className="truncate text-xs text-faint">
+              {/* Under the name, not the dot, so the names line up. */}
+              <div className="truncate pl-[1.125rem] text-xs text-faint">
                 {s.next_run_at ? (
                   <>
                     next <RelativeTime iso={s.next_run_at} />
@@ -90,22 +95,22 @@ export function WeekOverview({ schedules }: { schedules: Schedule[] }) {
                 )}
               </div>
             </TableCell>
-            <TableCell className="py-2">
-              <div className="truncate" title={describeCron(s.cron) ?? s.cron}>
-                {describeCron(s.cron) ?? <span className="font-mono text-xs">{s.cron}</span>}
+            <TableCell className={cn('py-2', GRID)}>
+              <div className="truncate font-mono text-xs" title={s.cron}>
+                {s.cron}
               </div>
-              <div className="truncate font-mono text-xs text-faint" title={`${s.cron} · ${s.timezone}`}>
-                {s.cron} · {s.timezone}
+              <div className="truncate text-xs text-faint" title={`${describeCron(s.cron) ?? s.cron} · ${s.timezone}`}>
+                {describeCron(s.cron) ?? 'Custom timetable'} · <span className="font-mono">{s.timezone}</span>
               </div>
             </TableCell>
             {byDate(s.cron) ? (
-              <TableCell colSpan={7} className="text-xs text-muted-foreground">
+              <TableCell colSpan={7} className={cn('text-xs text-muted-foreground', GRID)}>
                 Runs by date, not weekday
                 {s.next_run_at && <span className="text-faint"> · next {zonedDate(s.next_run_at, s.timezone)}</span>}
               </TableCell>
             ) : (
               weeks[i].map((day, d) => (
-                <TableCell key={d} className="align-middle">
+                <TableCell key={d} className={cn('align-middle', GRID, d === today && TODAY)}>
                   <Day plan={dayFrom(previews[i].data?.spans, day)} zone={s.timezone} />
                 </TableCell>
               ))

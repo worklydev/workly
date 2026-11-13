@@ -83,7 +83,7 @@ function ScheduleList({ schedules }: { schedules: Schedule[] }) {
             <TabsTab value="list">List</TabsTab>
           </TabsList>
         </Tabs>
-        <ListSearch list={list} placeholder="Search name, timetable or URL" />
+        <ListSearch list={list} placeholder="Search" />
       </div>
       {list.items.length === 0 ? (
         <Muted>No schedules match “{list.search}”.</Muted>
