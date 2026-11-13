@@ -4,6 +4,7 @@ export { Groups, type GroupsOptions, type GroupsPageOptions } from './groups.ts'
 export { Queues } from './queues.ts';
 export { Schedules, Runs, type RunsOptions, type RunsPageOptions } from './schedules.ts';
 export { Tasks, type EnqueueOptions, type ListOptions, type ListPageOptions } from './tasks.ts';
+export { Workflows, WorkflowRuns, type WorkflowRunsOptions, type WorkflowRunsPageOptions } from './workflows.ts';
 export {
   APIConnectionError,
   APIError,

@@ -696,3 +696,123 @@ def test_group_create_is_retried_only_with_key() -> None:
     requests, handler = recorder(httpx.Response(503), httpx.Response(201, json=GROUP))
     client(handler).groups.create(idempotency_key="k")
     assert len(requests) == 2
+
+
+WORKFLOW: dict[str, Any] = {
+    "name": "refresh",
+    "steps": [
+        {"name": "prices", "url": "https://example.com/prices", "queue": "_workflows"},
+        {"name": "analytics", "url": "https://example.com/a", "depends_on": ["prices"]},
+    ],
+    "max_duration_seconds": 3600,
+    "version": 2,
+    "created_at": "2026-11-13T09:00:00Z",
+    "updated_at": "2026-11-13T09:00:00Z",
+}
+
+WORKFLOW_RUN: dict[str, Any] = {
+    "id": "wfr_1",
+    "workflow": "refresh",
+    "version": 2,
+    "status": "running",
+    "created_at": "2026-11-13T09:00:00Z",
+    "input": {"date": "2026-11-13"},
+    "steps": [
+        {
+            "id": "wfs_1",
+            "name": "prices",
+            "status": "waiting",
+            "depends_on": [],
+            "blocked_by": [],
+            "task_id": "task_1",
+            "task": {
+                "id": "task_1",
+                "queue": "_workflows",
+                "state": "succeeded",
+                "attempt_count": 1,
+            },
+            "wait_for": {"type": "group", "id": "grp_1"},
+        },
+        {
+            "id": "wfs_2",
+            "name": "analytics",
+            "status": "blocked",
+            "depends_on": ["prices"],
+            "blocked_by": ["prices"],
+            "some_future_field": 1,
+        },
+    ],
+}
+
+
+def test_workflows() -> None:
+    requests, handler = recorder(
+        httpx.Response(201, json=WORKFLOW),
+        httpx.Response(201, json=WORKFLOW_RUN),
+        httpx.Response(200, json=WORKFLOW_RUN),
+        httpx.Response(200, json={"workflow_runs": [WORKFLOW_RUN]}),
+    )
+    c = client(handler)
+    w = c.workflows.put(
+        "refresh",
+        steps=[
+            {"name": "prices", "url": "https://example.com/prices"},
+            {"name": "analytics", "url": "https://example.com/a", "depends_on": ["prices"]},
+        ],
+        max_duration_seconds=3600,
+    )
+    assert (requests[0].method, requests[0].url.path) == ("PUT", "/v1/workflows/refresh")
+    assert json.loads(requests[0].content) == {
+        "steps": [
+            {"name": "prices", "url": "https://example.com/prices"},
+            {"name": "analytics", "url": "https://example.com/a", "depends_on": ["prices"]},
+        ],
+        "max_duration_seconds": 3600,
+    }
+    assert (
+        w.version == 2 and w.steps[1].depends_on == ["prices"] and w.steps[1].queue == "_workflows"
+    )
+
+    run = c.workflows.trigger("refresh", input={"date": "2026-11-13"}, idempotency_key="d1")
+    assert (requests[1].method, requests[1].url.path) == ("POST", "/v1/workflows/refresh/runs")
+    assert json.loads(requests[1].content) == {
+        "input": {"date": "2026-11-13"},
+        "idempotency_key": "d1",
+    }
+    prices, analytics = run.steps
+    assert prices.wait_for == workly.WaitFor(type="group", id="grp_1")
+    assert prices.task is not None and prices.task.state == "succeeded"
+    assert analytics.blocked_by == ["prices"] and analytics.task is None
+
+    c.workflow_runs.cancel("wfr_1")
+    assert (requests[2].method, requests[2].url.path) == ("POST", "/v1/workflow-runs/wfr_1/cancel")
+    [summary] = list(c.workflow_runs.list(workflow="refresh", status="running"))
+    assert summary.id == "wfr_1"
+    assert dict(requests[3].url.params) == {"workflow": "refresh", "status": "running"}
+
+
+def test_workflow_trigger_retries_only_with_a_key() -> None:
+    requests, handler = recorder(
+        httpx.Response(503, json={}), httpx.Response(201, json=WORKFLOW_RUN)
+    )
+    with pytest.raises(workly.APIError):
+        client(handler).workflows.trigger("refresh")
+    assert len(requests) == 1
+    requests, handler = recorder(
+        httpx.Response(503, json={}), httpx.Response(201, json=WORKFLOW_RUN)
+    )
+    client(handler).workflows.trigger("refresh", idempotency_key="k")
+    assert len(requests) == 2
+
+
+def test_schedule_starting_a_workflow() -> None:
+    requests, handler = recorder(httpx.Response(200, json={}))
+    with pytest.raises(KeyError):  # the fake response isn't a schedule
+        client(handler).schedules.put(
+            "nightly", cron="0 3 * * *", workflow="refresh", payload={"a": 1}
+        )
+    assert json.loads(requests[0].content) == {
+        "cron": "0 3 * * *",
+        "workflow": "refresh",
+        "payload": {"a": 1},
+    }

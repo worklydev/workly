@@ -8,7 +8,7 @@ import pytest
 import workly
 from workly import _transport
 
-from .test_client import TASK
+from .test_client import TASK, WORKFLOW_RUN
 
 pytestmark = pytest.mark.anyio
 
@@ -141,3 +141,24 @@ async def test_groups() -> None:
     assert (await c.groups.create(name="x")).id == "grp_1"
     assert (await c.groups.close("grp_1")).status == "open"
     assert [g.id async for g in c.groups.list()] == ["grp_1", "grp_1"]
+
+
+async def test_workflows() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(req)
+        if req.url.path == "/v1/workflow-runs":
+            return httpx.Response(200, json={"workflow_runs": [WORKFLOW_RUN], "next_cursor": None})
+        return httpx.Response(201, json=WORKFLOW_RUN)
+
+    c = client(handler)
+    run = await c.workflows.trigger("refresh", input={"date": "2026-11-13"})
+    assert run.steps[0].wait_for is not None and run.steps[0].wait_for.id == "grp_1"
+    assert [r.id async for r in c.workflow_runs.list(workflow="refresh")] == ["wfr_1"]
+    assert (await c.workflow_runs.get("wfr_1")).id == "wfr_1"
+    assert [r.url.path for r in seen] == [
+        "/v1/workflows/refresh/runs",
+        "/v1/workflow-runs",
+        "/v1/workflow-runs/wfr_1",
+    ]

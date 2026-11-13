@@ -377,3 +377,33 @@ def test_groups(client: workly.Workly, server_url: str, queue: str) -> None:
     }
     assert next(g.id for g in client.groups.list(name="prices")) == group.id
     assert len(list(client.tasks.list(group_id=group.id))) == 3
+
+
+def test_workflows(client: workly.Workly, server_url: str) -> None:
+    name = f"wf-{uuid.uuid4().hex[:8]}"
+    echo = f"{server_url}/_dev/echo"
+    client.workflows.put(
+        name,
+        steps=[
+            {"name": "prices", "url": echo},
+            {"name": "fx", "url": echo},
+            {"name": "analytics", "url": echo, "depends_on": ["prices", "fx"]},
+        ],
+    )
+    run = client.workflows.trigger(name, input={"date": "2026-11-13"})
+    assert run.status == "running" and run.input == {"date": "2026-11-13"}
+    deadline = time.monotonic() + 10
+    while (run := client.workflow_runs.get(run.id)).status == "running":
+        if time.monotonic() > deadline:
+            pytest.fail(f"workflow run still running after 10s: {run.steps}")
+        time.sleep(0.05)
+    assert run.status == "succeeded"
+    assert [s.status for s in run.steps] == ["succeeded"] * 3
+    task = client.tasks.get(run.steps[2].task_id or "")
+    assert task.payload["workflow_run_id"] == run.id and task.payload["step"] == "analytics"
+    assert task.headers["Workly-Workflow-Step-Id"] == run.steps[2].id
+    assert client.workflows.get(name).last_run is not None
+    assert any(r.id == run.id for r in client.workflow_runs.list(workflow=name))
+    client.workflows.delete(name)
+    with pytest.raises(workly.NotFoundError):
+        client.workflows.get(name)

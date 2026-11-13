@@ -23,6 +23,7 @@ from ._models import (
     SortOrder,
     TaskSort,
     TaskState,
+    WorkflowRunStatus,
 )
 
 DEFAULT_URL = "http://localhost:7337"
@@ -86,6 +87,27 @@ class CallbackDict(TypedDict, total=False):
 
 GroupCallbackSpec = CallbackDict
 """Deprecated: use `Callback` or `CallbackDict`."""
+
+
+class WorkflowStepSpec(TypedDict, total=False):
+    """One step of a workflow for `workflows.put`.
+
+    An HTTP request, sent once the steps in `depends_on` have succeeded.
+    Without `payload` or `body`, the step is sent the run's context as JSON.
+    """
+
+    name: Required[str]
+    url: Required[str]
+    depends_on: list[str]
+    method: HTTPMethod
+    headers: Mapping[str, str]
+    payload: Any
+    body: str
+    content_type: str
+    queue: str
+    """The queue its task goes to; `_workflows` by default."""
+    timeout_seconds: float
+    max_attempts: int
 
 
 def callback_body(cb: Callback | CallbackDict) -> dict[str, Any]:
@@ -417,3 +439,88 @@ def delete_alert_channel(channel_id: str) -> Request:
 def test_alert_channel(channel_id: str) -> Request:
     # Not idempotent: a resend sends a second test message.
     return Request("POST", f"/v1/alert-channels/{_q(channel_id)}/test")
+
+
+# Workflows
+
+
+def list_workflows() -> Request:
+    return Request("GET", "/v1/workflows", idempotent=True)
+
+
+def get_workflow(name: str) -> Request:
+    return Request("GET", f"/v1/workflows/{_q(name)}", idempotent=True)
+
+
+def put_workflow(
+    name: str, steps: list[WorkflowStepSpec], max_duration_seconds: float | None
+) -> Request:
+    body: dict[str, Any] = {"steps": [_step_body(s) for s in steps]}
+    if max_duration_seconds is not None:
+        body["max_duration_seconds"] = max_duration_seconds
+    return Request("PUT", f"/v1/workflows/{_q(name)}", json=body, idempotent=True)
+
+
+def _step_body(step: WorkflowStepSpec) -> dict[str, Any]:
+    body: dict[str, Any] = {"name": step["name"], "url": step["url"]}
+    if "depends_on" in step:
+        body["depends_on"] = list(step["depends_on"])
+    if "headers" in step:
+        body["headers"] = dict(step["headers"])
+    for key in (
+        "method",
+        "payload",
+        "body",
+        "content_type",
+        "queue",
+        "timeout_seconds",
+        "max_attempts",
+    ):
+        if step.get(key) is not None:
+            body[key] = step.get(key)
+    if "payload" in body and "body" in body:
+        raise ValueError(f"step {step['name']!r}: pass payload or body, not both")
+    return body
+
+
+def delete_workflow(name: str) -> Request:
+    return Request("DELETE", f"/v1/workflows/{_q(name)}", idempotent=True)
+
+
+def start_workflow_run(name: str, input: Any, idempotency_key: str | None) -> Request:
+    body: dict[str, Any] = {}
+    if input is not None:
+        body["input"] = input
+    if idempotency_key is not None:
+        body["idempotency_key"] = idempotency_key
+    # Only safe to resend with a key: without one it could start a second run.
+    return Request(
+        "POST", f"/v1/workflows/{_q(name)}/runs", json=body, idempotent=idempotency_key is not None
+    )
+
+
+def list_workflow_runs(
+    *,
+    workflow: str | None,
+    status: WorkflowRunStatus | None,
+    cursor: str | None,
+    limit: int | None,
+) -> Request:
+    params: dict[str, str] = {}
+    if workflow is not None:
+        params["workflow"] = workflow
+    if status is not None:
+        params["status"] = status
+    if cursor is not None:
+        params["cursor"] = cursor
+    if limit is not None:
+        params["limit"] = str(limit)
+    return Request("GET", "/v1/workflow-runs", params=params, idempotent=True)
+
+
+def get_workflow_run(run_id: str) -> Request:
+    return Request("GET", f"/v1/workflow-runs/{_q(run_id)}", idempotent=True)
+
+
+def cancel_workflow_run(run_id: str) -> Request:
+    return Request("POST", f"/v1/workflow-runs/{_q(run_id)}/cancel", idempotent=True)

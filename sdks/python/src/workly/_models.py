@@ -23,10 +23,19 @@ OverlapPolicy = Literal["skip", "allow"]
 MissedPolicy = Literal["skip", "catch_up"]
 GroupStatus = Literal["open", "running", "succeeded", "failed"]
 """`open` accepts tasks; `running` is closed with tasks unfinished; the other two are final."""
+WorkflowRunStatus = Literal["running", "succeeded", "failed", "cancelled"]
+StepStatus = Literal["blocked", "pending", "running", "waiting", "succeeded", "failed", "skipped"]
+"""`blocked` waits for its dependencies; `pending` has its task queued or retrying; `running` is
+being delivered; `waiting` succeeded and waits for its `wait_for` group; `skipped` never ran
+because the run stopped."""
 
 
 def _time(value: str) -> datetime:
     return datetime.fromisoformat(value)
+
+
+def _list(value: Any) -> list[dict[str, Any]]:
+    return value or []
 
 
 def _opt_time(value: str | None) -> datetime | None:
@@ -439,6 +448,8 @@ class Schedule:
     """While paused, the five slots it would run at if resumed now; None while it runs."""
     on_complete: Callback | None = None
     """Called each time a run finishes, except skipped runs."""
+    workflow: str | None = None
+    """The workflow each run starts, for a schedule that starts one instead of calling `url`."""
 
     @classmethod
     def _from_json(cls, d: dict[str, Any]) -> Schedule:
@@ -475,6 +486,7 @@ class Schedule:
                 else [_time(t) for t in resumed]
             ),
             on_complete=None if cb is None else Callback._from_json(cb),
+            workflow=d.get("workflow"),
         )
 
 
@@ -511,6 +523,8 @@ class Run:
     """How long the latest finished attempt took."""
     callback_task_id: str | None = None
     """The callback task enqueued when the run last finished, if its schedule has `on_complete`."""
+    workflow_run_id: str | None = None
+    """The workflow run it started, for a schedule that starts a workflow."""
 
     @classmethod
     def _from_json(cls, d: dict[str, Any]) -> Run:
@@ -539,6 +553,7 @@ class Run:
             started_at=_opt_time(d.get("started_at")),
             last_duration_ms=d.get("last_duration_ms"),
             callback_task_id=d.get("callback_task_id"),
+            workflow_run_id=d.get("workflow_run_id"),
         )
 
 
@@ -666,5 +681,241 @@ class GroupPage:
     def _from_json(cls, d: dict[str, Any]) -> GroupPage:
         return cls(
             groups=[Group._from_json(g) for g in d["groups"]],
+            next_cursor=d.get("next_cursor"),
+        )
+
+
+WORKFLOW_QUEUE = "_workflows"
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowStepConfig:
+    """A step of a workflow's definition: the request its task sends."""
+
+    name: str
+    url: str
+    depends_on: list[str]
+    method: HTTPMethod
+    queue: str
+    headers: dict[str, str]
+    payload: Any
+    """The JSON body, decoded. None for a raw `body`, or none: then the run's context is sent."""
+    body: str | None
+    timeout_seconds: float | None
+    """Overrides the queue's timeout."""
+    max_attempts: int | None
+    """Overrides the queue's max attempts."""
+
+    @classmethod
+    def _from_json(cls, d: dict[str, Any]) -> WorkflowStepConfig:
+        return cls(
+            name=d["name"],
+            url=d["url"],
+            depends_on=d.get("depends_on") or [],
+            method=d.get("method") or "POST",
+            queue=d.get("queue") or WORKFLOW_QUEUE,
+            headers=d.get("headers") or {},
+            payload=d.get("payload"),
+            body=d.get("body"),
+            timeout_seconds=d.get("timeout_seconds"),
+            max_attempts=d.get("max_attempts"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowRunSummary:
+    """A workflow run without its steps, as lists show it."""
+
+    id: str
+    workflow: str
+    version: int
+    """The definition's version the run started with."""
+    status: WorkflowRunStatus
+    error: str | None
+    """Why the run failed or was cancelled."""
+    idempotency_key: str | None
+    schedule_run_id: str | None
+    """The schedule run that started it, if any."""
+    created_at: datetime
+    deadline_at: datetime | None
+    """When a run still going fails (`max_duration_seconds`)."""
+    finished_at: datetime | None
+    duration_ms: int | None
+    """From start to finish, or to now while running."""
+
+    @classmethod
+    def _from_json(cls, d: dict[str, Any]) -> WorkflowRunSummary:
+        return cls(**_run_summary_fields(d))
+
+
+def _run_summary_fields(d: dict[str, Any]) -> dict[str, Any]:
+    return dict(
+        id=d["id"],
+        workflow=d["workflow"],
+        version=d.get("version", 0),
+        status=d["status"],
+        error=d.get("error"),
+        idempotency_key=d.get("idempotency_key"),
+        schedule_run_id=d.get("schedule_run_id"),
+        created_at=_time(d["created_at"]),
+        deadline_at=_opt_time(d.get("deadline_at")),
+        finished_at=_opt_time(d.get("finished_at")),
+        duration_ms=d.get("duration_ms"),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class Workflow:
+    """A DAG of HTTP steps, each delivered as a task once its dependencies have succeeded."""
+
+    name: str
+    steps: list[WorkflowStepConfig]
+    max_duration_seconds: float
+    version: int
+    """Counts changes to the definition, from 1."""
+    last_run: WorkflowRunSummary | None
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def _from_json(cls, d: dict[str, Any]) -> Workflow:
+        last = d.get("last_run")
+        return cls(
+            name=d["name"],
+            steps=[WorkflowStepConfig._from_json(s) for s in d["steps"]],
+            max_duration_seconds=d["max_duration_seconds"],
+            version=d["version"],
+            last_run=None if last is None else WorkflowRunSummary._from_json(last),
+            created_at=_time(d["created_at"]),
+            updated_at=_time(d["updated_at"]),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class WaitFor:
+    """The resource a step handed its completion to with `Workly-Wait-For`."""
+
+    type: Literal["group"]
+    id: str
+
+    @classmethod
+    def _from_json(cls, d: dict[str, Any]) -> WaitFor:
+        return cls(type=d["type"], id=d["id"])
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowStepTask:
+    """A step's task, which records its delivery attempts (`tasks.attempts`)."""
+
+    id: str
+    queue: str
+    state: TaskState
+    attempt_count: int
+    last_status: int | None
+    last_outcome: AttemptOutcome | None
+    last_error: str | None
+    run_at: datetime | None
+    """When a pending task is next delivered."""
+
+    @classmethod
+    def _from_json(cls, d: dict[str, Any]) -> WorkflowStepTask:
+        return cls(
+            id=d["id"],
+            queue=d["queue"],
+            state=d["state"],
+            attempt_count=d["attempt_count"],
+            last_status=d.get("last_status"),
+            last_outcome=d.get("last_outcome"),
+            last_error=d.get("last_error"),
+            run_at=_opt_time(d.get("run_at")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowStep:
+    """A step of a run: where it is, and why."""
+
+    id: str
+    """Stable across retries of its request: use it as an idempotency key."""
+    name: str
+    status: StepStatus
+    depends_on: list[str]
+    blocked_by: list[str]
+    """Dependencies that haven't succeeded yet."""
+    task_id: str | None
+    task: WorkflowStepTask | None
+    wait_for: WaitFor | None
+    error: str | None
+    created_at: datetime | None
+    ready_at: datetime | None
+    """When its task was enqueued."""
+    http_done_at: datetime | None
+    """When its request succeeded."""
+    finished_at: datetime | None
+    blocked_ms: int | None
+    waiting_ms: int | None
+    duration_ms: int | None
+
+    @classmethod
+    def _from_json(cls, d: dict[str, Any]) -> WorkflowStep:
+        task, wait = d.get("task"), d.get("wait_for")
+        return cls(
+            id=d["id"],
+            name=d["name"],
+            status=d["status"],
+            depends_on=d.get("depends_on") or [],
+            blocked_by=d.get("blocked_by") or [],
+            task_id=d.get("task_id"),
+            task=None if task is None else WorkflowStepTask._from_json(task),
+            wait_for=None if wait is None else WaitFor._from_json(wait),
+            error=d.get("error"),
+            created_at=_opt_time(d.get("created_at")),
+            ready_at=_opt_time(d.get("ready_at")),
+            http_done_at=_opt_time(d.get("http_done_at")),
+            finished_at=_opt_time(d.get("finished_at")),
+            blocked_ms=d.get("blocked_ms"),
+            waiting_ms=d.get("waiting_ms"),
+            duration_ms=d.get("duration_ms"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowRun:
+    """One execution of a workflow, under the definition it started with."""
+
+    id: str
+    workflow: str
+    version: int
+    status: WorkflowRunStatus
+    error: str | None
+    idempotency_key: str | None
+    schedule_run_id: str | None
+    created_at: datetime
+    deadline_at: datetime | None
+    finished_at: datetime | None
+    duration_ms: int | None
+    input: Any
+    steps: list[WorkflowStep]
+    """In definition order."""
+
+    @classmethod
+    def _from_json(cls, d: dict[str, Any]) -> WorkflowRun:
+        return cls(
+            **_run_summary_fields(d),
+            input=d.get("input"),
+            steps=[WorkflowStep._from_json(s) for s in _list(d.get("steps"))],
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowRunPage:
+    workflow_runs: list[WorkflowRunSummary]
+    next_cursor: str | None
+    """Pass as `cursor` to get the next page. None on the last page."""
+
+    @classmethod
+    def _from_json(cls, d: dict[str, Any]) -> WorkflowRunPage:
+        return cls(
+            workflow_runs=[WorkflowRunSummary._from_json(r) for r in d["workflow_runs"]],
             next_cursor=d.get("next_cursor"),
         )

@@ -350,6 +350,36 @@ describe('integration', { skip: server ? false : 'set WORKLY_BIN or install Go' 
     assert.equal(members.length, 3);
   });
 
+  test('workflows', async () => {
+    const name = `wf-${randomUUID().slice(0, 8)}`;
+    const echo = `${url}/_dev/echo`;
+    await workly.workflows.put(name, {
+      steps: [
+        { name: 'prices', url: echo },
+        { name: 'fx', url: echo },
+        { name: 'analytics', url: echo, dependsOn: ['prices', 'fx'] },
+      ],
+    });
+    let run = await workly.workflows.trigger(name, { input: { as_of: '2026-11-13' } });
+    assert.deepEqual(run.input, { as_of: '2026-11-13' });
+    const deadline = Date.now() + 10_000;
+    while ((run = await workly.workflowRuns.get(run.id)).status === 'running') {
+      if (Date.now() > deadline) assert.fail(`workflow run still running after 10s`);
+      await delay(50);
+    }
+    assert.equal(run.status, 'succeeded');
+    assert.deepEqual(
+      run.steps.map((s) => s.status),
+      ['succeeded', 'succeeded', 'succeeded'],
+    );
+    const task = await workly.tasks.get(run.steps[2]!.taskId!);
+    assert.equal((task.payload as { workflow_run_id: string }).workflow_run_id, run.id);
+    assert.equal(task.headers['Workly-Workflow-Step-Id'], run.steps[2]!.id);
+    assert.equal((await workly.workflows.get(name)).lastRun?.id, run.id);
+    await workly.workflows.delete(name);
+    await assert.rejects(workly.workflows.get(name), NotFoundError);
+  });
+
   test('validation error', async () => {
     const err = await workly.tasks.enqueue(queue, { url: 'ftp://example.com' }).catch((e: unknown) => e);
     assert.ok(err instanceof BadRequestError);

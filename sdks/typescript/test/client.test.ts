@@ -689,3 +689,73 @@ describe('schedules', () => {
     );
   });
 });
+
+describe('workflows', () => {
+  const run = {
+    id: 'wfr_1',
+    workflow: 'refresh',
+    version: 1,
+    status: 'running',
+    created_at: '2026-11-13T09:00:00Z',
+    input: { as_of_date: '2026-11-13' },
+    steps: [
+      {
+        id: 'wfs_1',
+        name: 'prices',
+        status: 'waiting',
+        depends_on: [],
+        blocked_by: [],
+        task: { id: 'task_1', queue: '_workflows', state: 'succeeded', attempt_count: 1 },
+        wait_for: { type: 'group', id: 'grp_1' },
+      },
+      { id: 'wfs_2', name: 'analytics', status: 'blocked', depends_on: ['prices'], blocked_by: ['prices'] },
+    ],
+  };
+
+  test('put, trigger, list and cancel', async () => {
+    const { fetch, sent } = fakeFetch(
+      json({ name: 'refresh', steps: [], max_duration_seconds: 60, version: 1, created_at: 'x', updated_at: 'x' }, 201),
+      json(run, 201),
+      json({ workflow_runs: [run], next_cursor: 'c1' }),
+      json({ workflow_runs: [run] }),
+      json({ ...run, status: 'cancelled' }),
+    );
+    const workly = new Workly({ fetch });
+    await workly.workflows.put('refresh', {
+      steps: [
+        { name: 'prices', url: 'https://e.test/prices', maxAttempts: 3 },
+        { name: 'analytics', url: 'https://e.test/a', dependsOn: ['prices'], payload: { full_run: true } },
+      ],
+      maxDurationSeconds: 60,
+    });
+    assert.deepEqual(sent[0]?.body, {
+      steps: [
+        { name: 'prices', url: 'https://e.test/prices', max_attempts: 3 },
+        { name: 'analytics', url: 'https://e.test/a', depends_on: ['prices'], payload: { full_run: true } },
+      ],
+      max_duration_seconds: 60,
+    });
+
+    const r = await workly.workflows.trigger('refresh', { input: { as_of_date: '2026-11-13' }, idempotencyKey: 'd1' });
+    assert.equal(`${sent[1]?.method} ${sent[1]?.url.pathname}`, 'POST /v1/workflows/refresh/runs');
+    // The input is the caller's data: its keys are sent and returned as they are.
+    assert.deepEqual(sent[1]?.body, { input: { as_of_date: '2026-11-13' }, idempotency_key: 'd1' });
+    assert.deepEqual(r.input, { as_of_date: '2026-11-13' });
+    assert.deepEqual(r.steps[0]?.waitFor, { type: 'group', id: 'grp_1' });
+    assert.equal(r.steps[0]?.task?.attemptCount, 1);
+    assert.deepEqual(r.steps[1]?.blockedBy, ['prices']);
+
+    const ids = [];
+    for await (const s of workly.workflowRuns.list({ workflow: 'refresh', pageSize: 1 })) ids.push(s.id);
+    assert.deepEqual(ids, ['wfr_1', 'wfr_1']);
+    assert.equal(sent[3]?.url.search, '?workflow=refresh&cursor=c1&limit=1');
+    assert.equal((await workly.workflowRuns.cancel('wfr_1')).status, 'cancelled');
+    assert.equal(`${sent[4]?.method} ${sent[4]?.url.pathname}`, 'POST /v1/workflow-runs/wfr_1/cancel');
+  });
+
+  test('a schedule can start a workflow', async () => {
+    const { fetch, sent } = fakeFetch(json({}, 201));
+    await new Workly({ fetch }).schedules.put('nightly', { cron: '@daily', workflow: 'refresh', payload: { a: 1 } });
+    assert.deepEqual(sent[0]?.body, { cron: '@daily', workflow: 'refresh', payload: { a: 1 } });
+  });
+});
