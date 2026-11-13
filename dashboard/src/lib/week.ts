@@ -1,42 +1,70 @@
 import type { CronSpan } from '../api';
 
-const DAY = 86_400_000;
-
 /**
- * Monday 00:00 of the week `offset` weeks from this one, in the viewer's
- * timezone. Days are stepped with the calendar, not by 24 hours, so a week
- * with a daylight saving change still starts and ends at midnight.
+ * A week's timetable in a schedule's own timezone, from the runs the server
+ * lists (spans): which days it runs, and when.
  */
-export function weekStart(offset: number, now = new Date()): Date {
-  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  d.setDate(d.getDate() - ((d.getDay() + 6) % 7) + offset * 7);
-  return d;
+
+/** The wall-clock parts of instant `t` in `zone`. */
+function wallParts(t: number, zone: string) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: zone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+  }).formatToParts(t);
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  return {
+    year: get('year'),
+    month: get('month') - 1,
+    day: get('day'),
+    hour: get('hour'),
+    minute: get('minute'),
+    second: get('second'),
+  };
 }
 
-/** The week's seven days, Monday first, each from its midnight to the next. */
-export function weekDays(start: Date): { start: number; end: number; date: Date }[] {
-  return Array.from({ length: 7 }, (_, i) => {
-    const date = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
-    const next = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i + 1);
-    return { start: date.getTime(), end: next.getTime(), date };
-  });
+/** How far `zone` is ahead of UTC at instant `t`, in ms. */
+function offset(t: number, zone: string): number {
+  const p = wallParts(t, zone);
+  return Date.UTC(p.year, p.month, p.day, p.hour, p.minute, p.second) - Math.floor(t / 1000) * 1000;
 }
 
-/**
- * What a schedule does in one day: its runs at their times, or, past
- * MAX_TIMES, stretches of runs at an interval, which read better than a
- * wall of ticks.
- */
-export type DayRuns =
+/** The instant of a wall-clock midnight in `zone` (the date may overflow, e.g. day 32). */
+function zonedMidnight(year: number, month: number, day: number, zone: string): number {
+  const wall = Date.UTC(year, month, day);
+  // Twice, so a day whose midnight is on the other side of a DST change lands right.
+  const first = wall - offset(wall, zone);
+  return wall - offset(first, zone);
+}
+
+/** This week's days, Monday to Sunday, each from midnight to midnight in `zone`. */
+export function zonedWeek(zone: string, now = Date.now()): { start: number; end: number }[] {
+  const p = wallParts(now, zone);
+  const weekday = new Date(Date.UTC(p.year, p.month, p.day)).getUTCDay();
+  const monday = p.day - ((weekday + 6) % 7);
+  return Array.from({ length: 7 }, (_, i) => ({
+    start: zonedMidnight(p.year, p.month, monday + i, zone),
+    end: zonedMidnight(p.year, p.month, monday + i + 1, zone),
+  }));
+}
+
+/** What a schedule does in one day: no runs, a few at their times, or runs at an interval through a window. */
+export type DayPlan =
   | { kind: 'none' }
   | { kind: 'times'; times: number[] }
-  | { kind: 'bands'; count: number; bands: { from: number; to: number; every: number }[] };
+  | { kind: 'every'; every: number; from: number; to: number; allDay: boolean }
+  | { kind: 'many'; count: number };
 
-/** Up to this many runs in a day (every half hour) are ticks; more become bands. */
-export const MAX_TIMES = 48;
+/** Up to this many runs a day are listed by time. */
+const LISTED = 3;
 
-/** The runs of `spans` from `start` until `end` (ms). */
-export function dayRuns(spans: CronSpan[], start: number, end: number): DayRuns {
+/** The runs of `spans` from `start` until `end` (ms), summed up for a calendar cell. */
+export function dayPlan(spans: CronSpan[], start: number, end: number): DayPlan {
   const parts: { first: number; last: number; every: number; count: number }[] = [];
   for (const s of spans) {
     const t0 = Date.parse(s.start);
@@ -52,20 +80,21 @@ export function dayRuns(spans: CronSpan[], start: number, end: number): DayRuns 
   }
   const count = parts.reduce((n, p) => n + p.count, 0);
   if (count === 0) return { kind: 'none' };
-  if (count <= MAX_TIMES) {
+  if (count <= LISTED) {
     const times = parts.flatMap((p) => Array.from({ length: p.count }, (_, k) => p.first + k * p.every));
     return { kind: 'times', times: times.sort((a, b) => a - b) };
   }
-  return {
-    kind: 'bands',
-    count,
-    bands: parts.filter((p) => p.count > 1).map((p) => ({ from: p.first, to: p.last, every: p.every })),
-  };
+  // One steady interval through the day (or a window of it) reads as "every 15m".
+  const times =
+    parts.length === 1
+      ? undefined
+      : parts
+          .flatMap((p) => Array.from({ length: Math.min(p.count, 2000) }, (_, k) => p.first + k * p.every))
+          .sort((a, b) => a - b);
+  const gaps = times && new Set(times.slice(1).map((t, i) => t - times[i]));
+  const every = parts.length === 1 ? parts[0].every : gaps && gaps.size === 1 ? [...gaps][0] : undefined;
+  if (every === undefined) return { kind: 'many', count };
+  const from = Math.min(...parts.map((p) => p.first));
+  const to = Math.max(...parts.map((p) => p.last));
+  return { kind: 'every', every, from, to, allDay: from - start < every && end - to <= every };
 }
-
-/** Where in its day a time falls, from 0 (midnight) to 1 (the next). */
-export const dayFraction = (t: number, start: number, end: number) => (t - start) / (end - start);
-
-export const isToday = (start: number, end: number, now: number) => now >= start && now < end;
-
-export const WEEK_MS = 7 * DAY;

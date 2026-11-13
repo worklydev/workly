@@ -19,7 +19,7 @@ import { Button } from '../../primitives/button';
 import { EditSchedule } from './EditSchedule';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../primitives/table';
 import { RecentRuns } from './RecentRuns';
-import { WeekView } from './WeekView';
+import { WeekOverview } from './WeekOverview';
 import { Tabs, TabsList, TabsTab } from '../../primitives/tabs';
 import { SchedulesGettingStarted } from './GettingStarted';
 import { useRecentRuns } from './useRecentRuns';
@@ -57,20 +57,19 @@ export function SchedulesPage() {
   );
 }
 
-type View = 'week' | 'list';
+type View = 'overview' | 'list';
 
 function ScheduleList({ schedules }: { schedules: Schedule[] }) {
   const list = useListPage(schedules, (s) => [s.name, s.cron, describeCron(s.cron) ?? '', s.timezone, s.method, s.url]);
-  // The week is the default: what runs when is the question a list of cron expressions can't answer.
+  // The overview is the default: what runs when is the question a list of cron expressions can't answer.
   const [params, setParams] = useSearchParams();
-  const view: View = params.get('view') === 'list' ? 'list' : 'week';
+  const view: View = params.get('view') === 'list' ? 'list' : 'overview';
   const setView = (v: View) =>
     setParams(
       (prev) => {
         const next = new URLSearchParams(prev);
-        if (v === 'week') next.delete('view');
+        if (v === 'overview') next.delete('view');
         else next.set('view', v);
-        next.delete('week');
         return next;
       },
       { replace: true },
@@ -80,7 +79,7 @@ function ScheduleList({ schedules }: { schedules: Schedule[] }) {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <Tabs value={view} onValueChange={(v) => setView(v as View)}>
           <TabsList>
-            <TabsTab value="week">Week</TabsTab>
+            <TabsTab value="overview">Overview</TabsTab>
             <TabsTab value="list">List</TabsTab>
           </TabsList>
         </Tabs>
@@ -88,8 +87,8 @@ function ScheduleList({ schedules }: { schedules: Schedule[] }) {
       </div>
       {list.items.length === 0 ? (
         <Muted>No schedules match “{list.search}”.</Muted>
-      ) : view === 'week' ? (
-        <WeekView schedules={list.items} />
+      ) : view === 'overview' ? (
+        <WeekOverview schedules={list.items} />
       ) : (
         <ScheduleTable schedules={list.items} />
       )}
