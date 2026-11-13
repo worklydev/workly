@@ -26,8 +26,9 @@ const (
 	maxDrain = 64 << 10
 )
 
-// keptResponseHeaders are stored with each attempt.
-var keptResponseHeaders = []string{"Content-Type", "Retry-After", "Location"}
+// keptResponseHeaders are stored with each attempt. Workly-Wait-For is how
+// a workflow step hands its completion to a group (docs/workflows.md).
+var keptResponseHeaders = []string{"Content-Type", "Retry-After", "Location", store.WaitForHeader}
 
 // result is what happened on one delivery.
 type result struct {
@@ -241,7 +242,9 @@ func (d deliverer) send(ctx context.Context, method, url string, body []byte, ti
 	r.body = string(respBody)
 	r.headers = map[string]string{}
 	for _, h := range keptResponseHeaders {
-		if v := resp.Header.Get(h); v != "" {
+		// Repeated headers are kept joined, so that a step naming two
+		// resources in two headers is told it may name only one.
+		if v := strings.Join(resp.Header.Values(h), ", "); v != "" {
 			r.headers[h] = v
 		}
 	}

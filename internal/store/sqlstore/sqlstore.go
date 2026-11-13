@@ -383,23 +383,30 @@ func (s *Store) DeleteQueue(ctx context.Context, ws workspace.ID, name string) e
 		// them. Deleting them reports the state each one was in, even if an
 		// attempt finished or it was cancelled a moment ago; counting first
 		// and deleting after would not.
+		// Workflow steps whose task is unfinished fail with it.
 		rows, err := s.query(ctx, tx, `DELETE FROM tasks
-			WHERE workspace_id = ? AND queue = ? AND group_id IS NOT NULL
-			RETURNING group_id, state`, ws, name)
+			WHERE workspace_id = ? AND queue = ? AND (group_id IS NOT NULL OR workflow_step_id IS NOT NULL)
+			RETURNING COALESCE(group_id, ''), state, COALESCE(workflow_step_id, '')`, ws, name)
 		if err != nil {
 			return err
 		}
 		counts := groupCounts{}
+		var steps []string
 		for rows.Next() {
 			var (
-				groupID string
-				state   store.TaskState
+				groupID, stepID string
+				state           store.TaskState
 			)
-			if err := rows.Scan(&groupID, &state); err != nil {
+			if err := rows.Scan(&groupID, &state, &stepID); err != nil {
 				rows.Close()
 				return err
 			}
-			counts.remove(groupID, state, 1)
+			if groupID != "" {
+				counts.remove(groupID, state, 1)
+			}
+			if stepID != "" && !state.Finished() {
+				steps = append(steps, stepID)
+			}
 		}
 		if err := rows.Close(); err != nil {
 			return err
@@ -411,7 +418,11 @@ func (s *Store) DeleteQueue(ctx context.Context, ws workspace.ID, name string) e
 		if _, err := s.exec(ctx, tx, `DELETE FROM queues WHERE workspace_id = ? AND name = ?`, ws, name); err != nil {
 			return err
 		}
-		callbacks, err = s.applyGroupCounts(ctx, tx, counts)
+		if callbacks, err = s.applyGroupCounts(ctx, tx, counts); err != nil {
+			return err
+		}
+		en, err := s.advanceSteps(ctx, tx, taskEvents(steps, fmt.Sprintf("its queue %q was deleted", name)))
+		callbacks = callbacks || en
 		return err
 	})
 	if callbacks {
@@ -710,7 +721,11 @@ func (s *Store) CancelPendingTasks(ctx context.Context, ws workspace.ID, queue s
 			return err
 		}
 		cb, err := s.taskCallbacks(ctx, tx, u.callbacks)
-		callbacks = callbacks || cb
+		if err != nil {
+			return err
+		}
+		en, err := s.advanceSteps(ctx, tx, taskEvents(u.steps, "its task was cancelled"))
+		callbacks = callbacks || cb || en
 		return err
 	})
 	if callbacks {
@@ -720,25 +735,31 @@ func (s *Store) CancelPendingTasks(ctx context.Context, ws workspace.ID, queue s
 }
 
 // updatedTasks is what an UPDATE of tasks changed: how many rows, how
-// many of those belong to each group, and which have a callback.
+// many of those belong to each group, which have a callback and which are
+// workflow steps.
 type updatedTasks struct {
 	n         int
 	groups    map[string]int
 	callbacks []string
+	steps     []string
 }
 
 // updateTasks runs an UPDATE of tasks and reports what it changed.
 func (s *Store) updateTasks(ctx context.Context, tx *sql.Tx, query string, args ...any) (updatedTasks, error) {
 	u := updatedTasks{groups: map[string]int{}}
-	rows, err := s.query(ctx, tx, query+` RETURNING id, COALESCE(group_id, ''), COALESCE(callback_url, '')`, args...)
+	rows, err := s.query(ctx, tx, query+` RETURNING id, COALESCE(group_id, ''), COALESCE(callback_url, ''),
+		COALESCE(workflow_step_id, '')`, args...)
 	if err != nil {
 		return u, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var taskID, groupID, cbURL string
-		if err := rows.Scan(&taskID, &groupID, &cbURL); err != nil {
+		var taskID, groupID, cbURL, stepID string
+		if err := rows.Scan(&taskID, &groupID, &cbURL, &stepID); err != nil {
 			return u, err
+		}
+		if stepID != "" {
+			u.steps = append(u.steps, stepID)
 		}
 		u.n++
 		if groupID != "" {
@@ -756,7 +777,7 @@ func (s *Store) updateTasks(ctx context.Context, tx *sql.Tx, query string, args 
 const taskColumns = `id, workspace_id, queue, state, method, url, headers, body, run_at,
 	attempt_count, replayed_attempts, max_attempts, timeout_ms, idempotency_key, trace_context, lease_expires_at,
 	last_status, last_outcome, last_error, created_at, updated_at, finished_at, last_attempt_at, retried_at, group_id,
-	started_at, last_duration_ms, callback_url, callback_headers, callback_task_id`
+	started_at, last_duration_ms, callback_url, callback_headers, callback_task_id, workflow_step_id`
 
 func scanTask(row interface{ Scan(...any) error }) (store.Task, error) {
 	var (
@@ -764,21 +785,21 @@ func scanTask(row interface{ Scan(...any) error }) (store.Task, error) {
 		headers, cbHeaders                                 []byte
 		maxAttempts, timeoutMS, lastStatus, lastDuration   sql.NullInt64
 		idemKey, traceCtx, lastOutcome, lastError, groupID sql.NullString
-		cbURL, cbTask                                      sql.NullString
+		cbURL, cbTask, stepID                              sql.NullString
 		runAt, lease, created, updated, fin, last, retried dbTime
 		started                                            dbTime
 	)
 	err := row.Scan(&t.ID, &t.WorkspaceID, &t.Queue, &t.State, &t.Method, &t.URL, &headers, &t.Body,
 		&runAt, &t.AttemptCount, &t.ReplayedAttempts, &maxAttempts, &timeoutMS, &idemKey, &traceCtx, &lease,
 		&lastStatus, &lastOutcome, &lastError, &created, &updated, &fin, &last, &retried, &groupID,
-		&started, &lastDuration, &cbURL, &cbHeaders, &cbTask)
+		&started, &lastDuration, &cbURL, &cbHeaders, &cbTask, &stepID)
 	if err != nil {
 		return t, err
 	}
 	if t.OnComplete, err = scanCallback(cbURL, cbHeaders); err != nil {
 		return t, err
 	}
-	t.CallbackTaskID = cbTask.String
+	t.CallbackTaskID, t.WorkflowStepID = cbTask.String, stepID.String
 	if t.Headers, err = unmarshalHeaders(headers); err != nil {
 		return t, err
 	}
@@ -859,9 +880,9 @@ func (s *Store) CreateTasks(ctx context.Context, ws workspace.ID, nts []store.Ne
 func (s *Store) insertTaskQuery() string {
 	return `INSERT INTO tasks (id, workspace_id, queue, state, method, url,
 			headers, body, run_at, max_attempts, timeout_ms, idempotency_key, trace_context,
-			created_at, updated_at, group_id, callback_url, callback_headers)
+			created_at, updated_at, group_id, callback_url, callback_headers, workflow_step_id)
 		SELECT * FROM (VALUES ` + s.values("text", "text", "text", "text", "text", "text",
-		"json", "bytes", "ts", "int", "int", "text", "text", "ts", "ts", "text", "text", "json") + `) AS v
+		"json", "bytes", "ts", "int", "int", "text", "text", "ts", "ts", "text", "text", "json", "text") + `) AS v
 		WHERE EXISTS (SELECT 1 FROM queues q WHERE q.workspace_id = ? AND q.name = ?)
 		ON CONFLICT (workspace_id, queue, idempotency_key) WHERE idempotency_key IS NOT NULL
 		DO NOTHING
@@ -887,7 +908,7 @@ func (s *Store) createTask(ctx context.Context, q querier, ws workspace.ID, nt s
 	args := []any{id.New("task"), ws, nt.Queue, store.TaskPending, nt.Method, nt.URL, headers, nt.Body,
 		s.ts(nt.RunAt), nullInt(nt.MaxAttempts), nullMillis(nt.Timeout),
 		nullString(nt.IdempotencyKey), nullString(nt.TraceContext), now, now, nullString(nt.GroupID),
-		cbURL, cbHeaders, ws, nt.Queue}
+		cbURL, cbHeaders, nullString(nt.WorkflowStepID), ws, nt.Queue}
 	for createdQueue := false; ; createdQueue = true {
 		t, err := scanTask(s.queryRow(ctx, q, s.insertTask, args...))
 		if err == nil {
@@ -1076,7 +1097,11 @@ func (s *Store) CancelTask(ctx context.Context, ws workspace.ID, id string) (sto
 		if err != nil {
 			return err
 		}
-		callbacks = callbacks || cb
+		en, err := s.advanceSteps(ctx, tx, taskEvents(u.steps, "its task was cancelled"))
+		if err != nil {
+			return err
+		}
+		callbacks = callbacks || cb || en
 		if t, err = s.getTask(ctx, tx, ws, id); err != nil {
 			return err
 		}
@@ -1097,16 +1122,19 @@ func (s *Store) RetryTask(ctx context.Context, ws workspace.ID, id string) (stor
 		// The state it leaves, for its group's counts. Locked, so it is
 		// still the state when the update below runs.
 		var (
-			from    store.TaskState
-			groupID sql.NullString
+			from            store.TaskState
+			groupID, stepID sql.NullString
 		)
-		err := s.queryRow(ctx, tx, `SELECT state, group_id FROM tasks WHERE workspace_id = ? AND id = ?`+s.forUpdate(),
-			ws, id).Scan(&from, &groupID)
+		err := s.queryRow(ctx, tx, `SELECT state, group_id, workflow_step_id FROM tasks WHERE workspace_id = ? AND id = ?`+s.forUpdate(),
+			ws, id).Scan(&from, &groupID, &stepID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return store.ErrNotFound
 		}
 		if err != nil {
 			return err
+		}
+		if stepID.Valid {
+			return store.ErrWorkflowStepTask
 		}
 		now := s.ts(time.Now())
 		// A pending task just runs sooner; a finished one gets a fresh
@@ -1160,7 +1188,8 @@ func (s *Store) RetryFailedTasks(ctx context.Context, ws workspace.ID, queue, la
 		query := `UPDATE tasks SET
 				replayed_attempts = attempt_count, state = 'pending', run_at = ?,
 				finished_at = NULL, updated_at = ?, retried_at = ?
-			WHERE workspace_id = ? AND queue = ? AND state = 'failed' AND finished_at IS NOT NULL`
+			WHERE workspace_id = ? AND queue = ? AND state = 'failed' AND finished_at IS NOT NULL
+				AND workflow_step_id IS NULL`
 		args := []any{now, now, now, ws, queue}
 		if lastError != "" {
 			query += ` AND last_error = ?`
@@ -1287,6 +1316,7 @@ func (s *Store) FinishAttempts(ctx context.Context, rs []store.FinishedAttempt) 
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
 		counts := groupCounts{}
 		var withCallback []string
+		stepTasks := map[string]string{} // task ID → step ID
 		for lo := 0; lo < len(rows); lo += finishChunk {
 			chunk := rows[lo:min(lo+finishChunk, len(rows))]
 			var args []any
@@ -1305,15 +1335,16 @@ func (s *Store) FinishAttempts(ctx context.Context, rs []store.FinishedAttempt) 
 				FROM (VALUES `+repeatRows(updateCols, len(chunk))+`) AS v
 				WHERE tasks.workspace_id = v.column1 AND tasks.id = v.column2
 					AND tasks.lease_expires_at IS NOT NULL AND tasks.attempt_count = v.column3
-				RETURNING tasks.id, tasks.state, COALESCE(tasks.group_id, ''), COALESCE(tasks.callback_url, '')`, args...)
+				RETURNING tasks.id, tasks.state, COALESCE(tasks.group_id, ''), COALESCE(tasks.callback_url, ''),
+					COALESCE(tasks.workflow_step_id, '')`, args...)
 			if err != nil {
 				return err
 			}
 			states := map[string]store.TaskState{}
 			for res.Next() {
-				var taskID, groupID, cbURL string
+				var taskID, groupID, cbURL, stepID string
 				var state store.TaskState
-				if err := res.Scan(&taskID, &state, &groupID, &cbURL); err != nil {
+				if err := res.Scan(&taskID, &state, &groupID, &cbURL, &stepID); err != nil {
 					res.Close()
 					return err
 				}
@@ -1324,6 +1355,9 @@ func (s *Store) FinishAttempts(ctx context.Context, rs []store.FinishedAttempt) 
 					counts.move(groupID, store.TaskRunning, state, 1)
 					if cbURL != "" && state.Finished() {
 						withCallback = append(withCallback, taskID)
+					}
+					if stepID != "" && state.Finished() {
+						stepTasks[taskID] = stepID
 					}
 				}
 			}
@@ -1369,7 +1403,25 @@ func (s *Store) FinishAttempts(ctx context.Context, rs []store.FinishedAttempt) 
 			return err
 		}
 		cb, err := s.taskCallbacks(ctx, tx, withCallback)
-		callbacks = callbacks || cb
+		if err != nil {
+			return err
+		}
+		var events []stepEvent
+		for i, r := range rs {
+			stepID, ok := stepTasks[r.TaskID]
+			if !ok || out[i].Err != nil {
+				continue
+			}
+			e := stepEvent{stepID: stepID, state: out[i].State, reason: r.Error}
+			if e.state == store.TaskSucceeded {
+				e.waitFor = headerValue(r.ResponseHeaders, store.WaitForHeader)
+			} else if e.reason == "" {
+				e.reason = "its task failed"
+			}
+			events = append(events, e)
+		}
+		en, err := s.advanceSteps(ctx, tx, events)
+		callbacks = callbacks || cb || en
 		return err
 	})
 	if err != nil {
@@ -1379,6 +1431,16 @@ func (s *Store) FinishAttempts(ctx context.Context, rs []store.FinishedAttempt) 
 		s.wake()
 	}
 	return out, nil
+}
+
+// headerValue looks a header up in a map whatever its case.
+func headerValue(h map[string]string, name string) string {
+	for k, v := range h {
+		if strings.EqualFold(k, name) {
+			return v
+		}
+	}
+	return ""
 }
 
 // values returns one row of a VALUES list: a placeholder per column, cast

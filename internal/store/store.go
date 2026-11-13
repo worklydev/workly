@@ -173,6 +173,32 @@ type Store interface {
 	// attempt is in flight.
 	RetryRun(ctx context.Context, ws workspace.ID, id string) (Run, error)
 
+	// PutWorkflow creates the workflow or replaces its definition. Runs
+	// already started keep the definition they started with. created
+	// reports whether it was new.
+	PutWorkflow(ctx context.Context, ws workspace.ID, name string, cfg WorkflowConfig) (w Workflow, created bool, err error)
+	GetWorkflow(ctx context.Context, ws workspace.ID, name string) (Workflow, error)
+	ListWorkflows(ctx context.Context, ws workspace.ID) ([]Workflow, error)
+	// DeleteWorkflow deletes the definition. Its runs are kept, and those
+	// still running finish under the definition they started with.
+	DeleteWorkflow(ctx context.Context, ws workspace.ID, name string) error
+	// StartWorkflowRun starts a run of the workflow: it enqueues the tasks
+	// of the steps without dependencies. If r.IdempotencyKey matches an
+	// existing run of the workflow, that run is returned with created =
+	// false.
+	StartWorkflowRun(ctx context.Context, ws workspace.ID, name string, r NewWorkflowRun, now time.Time) (run WorkflowRun, created bool, err error)
+	// GetWorkflowRun returns a run with its steps and their tasks.
+	GetWorkflowRun(ctx context.Context, ws workspace.ID, id string) (WorkflowRun, error)
+	// ListWorkflowRuns returns runs matching the filter, newest first, paged
+	// like ListRuns. Steps are not set.
+	ListWorkflowRuns(ctx context.Context, ws workspace.ID, f WorkflowRunFilter) (runs []WorkflowRun, cursor string, err error)
+	// CancelWorkflowRun stops a running run: steps not yet started are
+	// skipped and their pending tasks cancelled. Steps being delivered
+	// finish, and are recorded, but nothing starts after them. Cancelling a
+	// cancelled run is a no-op; any other finished run returns
+	// ErrInvalidState.
+	CancelWorkflowRun(ctx context.Context, ws workspace.ID, id string) (WorkflowRun, error)
+
 	// CreateAlertChannel adds a channel. It returns ErrExists if the
 	// workspace has one of the same type and target.
 	CreateAlertChannel(ctx context.Context, ws workspace.ID, typ AlertChannelType, target string) (AlertChannel, error)
@@ -284,6 +310,15 @@ type Dispatch interface {
 	// AllAlertChannels returns every workspace's alert channels, oldest
 	// first, for the alerts loop.
 	AllAlertChannels(ctx context.Context) ([]AlertChannel, error)
+
+	// ExpireWorkflowRuns fails up to limit running workflow runs whose
+	// deadline passed before now, as a failed step would, and returns how
+	// many.
+	ExpireWorkflowRuns(ctx context.Context, now time.Time, limit int) (int, error)
+	// DeleteFinishedWorkflowRuns deletes up to limit workflow runs in the
+	// sweep's workspaces that finished before sw.Before, with their steps,
+	// except each workflow's latest run.
+	DeleteFinishedWorkflowRuns(ctx context.Context, sw Sweep, limit int) (int, error)
 }
 
 // Leader is held by the one dispatcher allowed to deliver tasks.
@@ -466,6 +501,8 @@ type NewTask struct {
 	GroupID      string
 	// OnComplete is enqueued each time the task finishes.
 	OnComplete *Callback
+	// WorkflowStepID is the workflow step the task delivers, if any.
+	WorkflowStepID string
 }
 
 type Task struct {
@@ -510,6 +547,8 @@ type Task struct {
 	// is the one enqueued when it last did.
 	OnComplete     *Callback
 	CallbackTaskID string
+	// WorkflowStepID is the workflow step the task delivers, if any.
+	WorkflowStepID string
 }
 
 // EffectiveMaxAttempts applies the queue default.

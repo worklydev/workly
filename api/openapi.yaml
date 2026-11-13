@@ -9,6 +9,9 @@ info:
     endpoint on a cron schedule, and each call is a run with its own
     attempts. Schedules never create tasks or use queues. Groups track a set
     of tasks and enqueue a callback task once they have all finished.
+    Workflows run a DAG of HTTP steps, each delivered as a task; a step can
+    hand its completion to a group with the `Workly-Wait-For` response
+    header.
 
     Requests under `/v1` are scoped to a workspace, resolved from the
     `Authorization: Bearer <key>` header. The workspace never appears in paths.
@@ -967,6 +970,183 @@ paths:
                 $ref: "#/components/schemas/Run"
         default:
           $ref: "#/components/responses/Error"
+  /v1/workflows:
+    get:
+      operationId: listWorkflows
+      summary: List workflows
+      tags: [workflows]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: All workflows in the workspace, by name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowList"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/workflows/{workflow}:
+    parameters:
+      - $ref: "#/components/parameters/WorkflowName"
+    get:
+      operationId: getWorkflow
+      summary: Get a workflow
+      tags: [workflows]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: The workflow
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workflow"
+        default:
+          $ref: "#/components/responses/Error"
+    put:
+      operationId: putWorkflow
+      summary: Create or update a workflow
+      description: |
+        Declarative and idempotent: the workflow ends up with exactly the
+        given steps and settings. A changed definition gets a new `version`.
+        Runs already started keep the definition they started with; new runs
+        use this one.
+      tags: [workflows]
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkflowConfig"
+      responses:
+        "200":
+          description: Workflow updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workflow"
+        "201":
+          description: Workflow created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workflow"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: deleteWorkflow
+      summary: Delete a workflow
+      description: |
+        Deletes the definition only. Its runs are kept (under retention), and
+        runs still going finish under the definition they started with.
+      tags: [workflows]
+      security: [{bearerAuth: []}]
+      responses:
+        "204":
+          description: Workflow deleted
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/workflows/{workflow}/runs:
+    parameters:
+      - $ref: "#/components/parameters/WorkflowName"
+    post:
+      operationId: startWorkflowRun
+      summary: Start a workflow run
+      description: |
+        Starts a run and enqueues the steps without dependencies. With an
+        `idempotency_key` already used for a run of this workflow, that run
+        is returned (200) and nothing starts.
+      tags: [workflows]
+      security: [{bearerAuth: []}]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartWorkflowRun"
+      responses:
+        "200":
+          description: The run with that idempotency key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowRun"
+        "201":
+          description: The new run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowRun"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/workflow-runs:
+    get:
+      operationId: listWorkflowRuns
+      summary: List workflow runs, newest first
+      description: |
+        Runs of every workflow, or of one with `workflow` (including a
+        deleted one's).
+      tags: [workflows]
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: workflow
+          in: query
+          description: Only this workflow's runs.
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/WorkflowRunStatus"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: A page of runs, without their steps
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowRunList"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/workflow-runs/{id}:
+    parameters:
+      - $ref: "#/components/parameters/WorkflowRunID"
+    get:
+      operationId: getWorkflowRun
+      summary: Get a workflow run with its steps
+      tags: [workflows]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: The run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowRun"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/workflow-runs/{id}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/WorkflowRunID"
+    post:
+      operationId: cancelWorkflowRun
+      summary: Cancel a workflow run
+      description: |
+        Steps that haven't started are skipped, and their pending tasks
+        cancelled. Requests already being delivered finish and are recorded,
+        but start nothing. Cancelling a cancelled run is a no-op; other
+        finished runs are `invalid_state`.
+      tags: [workflows]
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: The cancelled run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowRun"
+        default:
+          $ref: "#/components/responses/Error"
   /v1/alert-channels:
     get:
       operationId: listAlertChannels
@@ -1128,6 +1308,19 @@ components:
       required: true
       schema:
         type: string
+    WorkflowName:
+      name: workflow
+      in: path
+      required: true
+      description: Workflow name. Lowercase letters, digits, `-` and `_`; at most 64 characters.
+      schema:
+        type: string
+    WorkflowRunID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
     AlertChannelID:
       name: id
       in: path
@@ -1140,6 +1333,7 @@ components:
         An error. Codes include `invalid_request`, `unauthorized`,
         `queue_not_found`, `task_not_found`, `group_not_found`,
         `group_closed` (409), `schedule_not_found`, `run_not_found`,
+        `workflow_not_found`, `workflow_run_not_found`,
         `alert_channel_not_found`,
         `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
         `invalid_state` (409), `payload_too_large` and
@@ -2163,6 +2357,279 @@ components:
         next_cursor:
           type: string
           description: Pass as `cursor` to get the next page. Absent on the last page.
+    WorkflowStepConfig:
+      type: object
+      description: |
+        A step: an HTTP request, sent as a task once every step in
+        `depends_on` has succeeded. The request fields (`url` to
+        `content_type`) work as in `EnqueueRequest`. A step without `payload`
+        or `body` is sent the run's context as JSON (`workflow_run_id`,
+        `workflow`, `step`, `step_id`, `input`); every step gets the
+        `Workly-Workflow`, `Workly-Workflow-Run-Id`, `Workly-Workflow-Step`
+        and `Workly-Workflow-Step-Id` headers. The step ID is the same on
+        every retry, so it can serve as an idempotency key.
+      required: [name, url]
+      properties:
+        name:
+          type: string
+          description: Unique within the workflow. Lowercase letters, digits, `-` and `_`; at most 64 characters.
+          example: prices
+        depends_on:
+          type: array
+          items:
+            type: string
+          description: Steps that must succeed before this one starts.
+        url:
+          type: string
+          example: https://api.example.com/jobs/prices
+        method:
+          $ref: "#/components/schemas/HTTPMethod"
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+          description: "`Workly-*` headers are reserved."
+        payload:
+          description: "A JSON body, sent with `Content-Type: application/json`. Use this or `body`."
+          x-go-type: json.RawMessage
+        body:
+          type: string
+          description: A raw text body. Use this or `payload`.
+        content_type:
+          type: string
+          description: Content type of `body`. Defaults to `text/plain; charset=utf-8`.
+        queue:
+          type: string
+          default: _workflows
+          description: |
+            The queue the step's task goes to, for its retry policy, timeout
+            and rate and concurrency limits. `_workflows` is created on
+            demand; another queue must exist when the step starts.
+        timeout_seconds:
+          type: number
+          format: double
+          minimum: 1
+          maximum: 1800
+          description: Overrides the queue's timeout.
+        max_attempts:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          description: Overrides the queue's max attempts.
+    WorkflowConfig:
+      type: object
+      required: [steps]
+      properties:
+        steps:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/WorkflowStepConfig"
+          description: The steps, which must form a DAG.
+        max_duration_seconds:
+          type: number
+          format: double
+          minimum: 1
+          default: 86400
+          description: |
+            How long a run may take. A run still going after it fails, and a
+            step still waiting fails with it.
+    Workflow:
+      type: object
+      required: [name, steps, max_duration_seconds, version, created_at, updated_at]
+      properties:
+        name:
+          type: string
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowStepConfig"
+        max_duration_seconds:
+          type: number
+          format: double
+        version:
+          type: integer
+          description: Counts changes to the definition, from 1.
+        last_run:
+          $ref: "#/components/schemas/WorkflowRunSummary"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    WorkflowList:
+      type: object
+      required: [workflows]
+      properties:
+        workflows:
+          type: array
+          items:
+            $ref: "#/components/schemas/Workflow"
+    StartWorkflowRun:
+      type: object
+      properties:
+        input:
+          description: JSON passed to every step that has no body of its own.
+          x-go-type: json.RawMessage
+        idempotency_key:
+          type: string
+          maxLength: 256
+          description: Deduplicates runs of the workflow.
+    WorkflowRunStatus:
+      type: string
+      enum: [running, succeeded, failed, cancelled]
+    StepStatus:
+      type: string
+      description: |
+        `blocked` waits for its dependencies; `pending` has its task
+        enqueued (or retrying); `running` is being delivered; `waiting`
+        succeeded and waits for the resource its response named in
+        `Workly-Wait-For`; `skipped` never ran because the run stopped.
+      enum: [blocked, pending, running, waiting, succeeded, failed, skipped]
+    WorkflowRunSummary:
+      type: object
+      required: [id, workflow, version, status, created_at]
+      properties:
+        id:
+          type: string
+          example: wfr_01J9ZK3M5Q8R2T4V6W8X0Y2Z4A
+        workflow:
+          type: string
+        version:
+          type: integer
+        status:
+          $ref: "#/components/schemas/WorkflowRunStatus"
+        error:
+          type: string
+          description: Why the run failed or was cancelled.
+        idempotency_key:
+          type: string
+        schedule_run_id:
+          type: string
+          description: The schedule run that started it, if any.
+        created_at:
+          type: string
+          format: date-time
+        deadline_at:
+          type: string
+          format: date-time
+          description: When a run still going fails (`max_duration_seconds`).
+        finished_at:
+          type: string
+          format: date-time
+        duration_ms:
+          type: integer
+          description: From start to finish, or to now while running.
+    WorkflowRun:
+      allOf:
+        - $ref: "#/components/schemas/WorkflowRunSummary"
+        - type: object
+          required: [steps]
+          properties:
+            input:
+              x-go-type: json.RawMessage
+            steps:
+              type: array
+              items:
+                $ref: "#/components/schemas/WorkflowStep"
+              description: In definition order.
+    WorkflowRunList:
+      type: object
+      required: [workflow_runs]
+      properties:
+        workflow_runs:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowRunSummary"
+        next_cursor:
+          type: string
+          description: Pass as `cursor` to get the next page. Absent on the last page.
+    WaitFor:
+      type: object
+      description: The resource a step handed its completion to.
+      required: [type, id]
+      properties:
+        type:
+          type: string
+          enum: [group]
+        id:
+          type: string
+    WorkflowStepTask:
+      type: object
+      description: The step's task, which records its attempts.
+      required: [id, queue, state, attempt_count]
+      properties:
+        id:
+          type: string
+        queue:
+          type: string
+        state:
+          $ref: "#/components/schemas/TaskState"
+        attempt_count:
+          type: integer
+        last_status:
+          type: integer
+        last_outcome:
+          $ref: "#/components/schemas/Outcome"
+        last_error:
+          type: string
+        run_at:
+          type: string
+          format: date-time
+          description: When a pending task is next delivered.
+    WorkflowStep:
+      type: object
+      required: [id, name, status, depends_on, blocked_by]
+      properties:
+        id:
+          type: string
+          example: wfs_01J9ZK3M5Q8R2T4V6W8X0Y2Z4A
+        name:
+          type: string
+        status:
+          $ref: "#/components/schemas/StepStatus"
+        depends_on:
+          type: array
+          items:
+            type: string
+        blocked_by:
+          type: array
+          items:
+            type: string
+          description: Dependencies that haven't succeeded yet.
+        task_id:
+          type: string
+        task:
+          $ref: "#/components/schemas/WorkflowStepTask"
+        wait_for:
+          $ref: "#/components/schemas/WaitFor"
+        error:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        ready_at:
+          type: string
+          format: date-time
+          description: When its task was enqueued.
+        http_done_at:
+          type: string
+          format: date-time
+          description: When its request succeeded.
+        finished_at:
+          type: string
+          format: date-time
+        blocked_ms:
+          type: integer
+          description: Time spent waiting for dependencies.
+        waiting_ms:
+          type: integer
+          description: Time spent waiting for the `wait_for` resource.
+        duration_ms:
+          type: integer
+          description: From its task being enqueued to the step finishing (or now).
     AlertChannelType:
       type: string
       enum: [email, slack]

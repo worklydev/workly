@@ -244,6 +244,12 @@ func (d *Dispatcher) lead(ctx context.Context, leader store.Leader) {
 		defer stopSweep()
 	}
 
+	expireCtx, stopExpiring := context.WithCancel(ctx)
+	var expirer sync.WaitGroup
+	expirer.Go(func() { d.expireWorkflowRuns(expireCtx) })
+	defer expirer.Wait()
+	defer stopExpiring()
+
 	if d.opts.Alerts != nil {
 		alertsCtx, stopAlerts := context.WithCancel(ctx)
 		var alerts sync.WaitGroup
@@ -590,12 +596,14 @@ func (d *Dispatcher) sweepOnce(ctx context.Context) {
 	}
 	if d.opts.RunRetention > 0 {
 		d.sweepRuns(ctx, store.Sweep{Before: now.Add(-d.opts.RunRetention), Except: except}, d.opts.RunRetention)
+		d.sweepWorkflowRuns(ctx, store.Sweep{Before: now.Add(-d.opts.RunRetention), Except: except}, d.opts.RunRetention)
 	}
 	for _, ws := range except {
 		if r := own[ws]; r > 0 && ctx.Err() == nil {
 			sw := store.Sweep{Before: now.Add(-r), Workspace: ws}
 			d.sweepTasks(ctx, sw, r)
 			d.sweepRuns(ctx, sw, r)
+			d.sweepWorkflowRuns(ctx, sw, r)
 		}
 	}
 }

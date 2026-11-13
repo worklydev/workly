@@ -25,7 +25,7 @@ func queueNotFound(name string) error {
 }
 
 func reservedQueue(name string) error {
-	if name == CallbackQueue {
+	if SystemQueue(name) {
 		return invalid("queue %q is Workly's own: only Workly enqueues into it", name)
 	}
 	return invalid("queue name %q is reserved: names starting with '_' are for Workly's own queues", name)

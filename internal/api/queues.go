@@ -58,7 +58,7 @@ func (h Handlers) PutQueue(ctx context.Context, req PutQueueRequestObject) (PutQ
 		return nil, err
 	}
 	ws := workspaceID(ctx)
-	if req.Queue != CallbackQueue {
+	if !SystemQueue(req.Queue) {
 		if err := h.checkReserved(ctx, ws, req.Queue); err != nil {
 			return nil, err
 		}

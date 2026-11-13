@@ -3,8 +3,8 @@
 import { type DefaultError, type InfiniteData, infiniteQueryOptions, queryOptions, type UseMutationOptions } from '@tanstack/react-query';
 
 import { client } from '../client.gen';
-import { cancelPendingTasks, cancelRun, cancelTask, closeGroup, createAlertChannel, createGroup, createTask, createTasks, deleteAlertChannel, deleteQueue, deleteSchedule, getActivity, getGroup, getHealthz, getQueue, getQueueActivity, getQueueFailures, getReadyz, getRun, getRunDelivery, getSchedule, getTask, getTaskDelivery, listAlertChannels, listAttempts, listGroups, listQueues, listRunAttempts, listRuns, listSchedules, listTasks, type Options, pauseQueue, pauseSchedule, previewCron, putQueue, putSchedule, resumeQueue, resumeSchedule, retryFailedTasks, retryRun, retryTask, searchTasks, testAlertChannel, triggerSchedule } from '../sdk.gen';
-import type { CancelPendingTasksData, CancelPendingTasksError, CancelPendingTasksResponse, CancelRunData, CancelRunError, CancelRunResponse, CancelTaskData, CancelTaskError, CancelTaskResponse, CloseGroupData, CloseGroupError, CloseGroupResponse, CreateAlertChannelData, CreateAlertChannelError, CreateAlertChannelResponse, CreateGroupData, CreateGroupError, CreateGroupResponse, CreateTaskData, CreateTaskError, CreateTaskResponse, CreateTasksData, CreateTasksError, CreateTasksResponse, DeleteAlertChannelData, DeleteAlertChannelError, DeleteAlertChannelResponse, DeleteQueueData, DeleteQueueError, DeleteQueueResponse, DeleteScheduleData, DeleteScheduleError, DeleteScheduleResponse, GetActivityData, GetActivityError, GetActivityResponse, GetGroupData, GetGroupError, GetGroupResponse, GetHealthzData, GetHealthzResponse, GetQueueActivityData, GetQueueActivityError, GetQueueActivityResponse, GetQueueData, GetQueueError, GetQueueFailuresData, GetQueueFailuresError, GetQueueFailuresResponse, GetQueueResponse, GetReadyzData, GetReadyzError, GetReadyzResponse, GetRunData, GetRunDeliveryData, GetRunDeliveryError, GetRunDeliveryResponse, GetRunError, GetRunResponse, GetScheduleData, GetScheduleError, GetScheduleResponse, GetTaskData, GetTaskDeliveryData, GetTaskDeliveryError, GetTaskDeliveryResponse, GetTaskError, GetTaskResponse, ListAlertChannelsData, ListAlertChannelsError, ListAlertChannelsResponse, ListAttemptsData, ListAttemptsError, ListAttemptsResponse, ListGroupsData, ListGroupsError, ListGroupsResponse, ListQueuesData, ListQueuesError, ListQueuesResponse, ListRunAttemptsData, ListRunAttemptsError, ListRunAttemptsResponse, ListRunsData, ListRunsError, ListRunsResponse, ListSchedulesData, ListSchedulesError, ListSchedulesResponse, ListTasksData, ListTasksError, ListTasksResponse, PauseQueueData, PauseQueueError, PauseQueueResponse, PauseScheduleData, PauseScheduleError, PauseScheduleResponse, PreviewCronData, PreviewCronError, PreviewCronResponse, PutQueueData, PutQueueError, PutQueueResponse, PutScheduleData, PutScheduleError, PutScheduleResponse, ResumeQueueData, ResumeQueueError, ResumeQueueResponse, ResumeScheduleData, ResumeScheduleError, ResumeScheduleResponse, RetryFailedTasksData, RetryFailedTasksError, RetryFailedTasksResponse, RetryRunData, RetryRunError, RetryRunResponse, RetryTaskData, RetryTaskError, RetryTaskResponse, SearchTasksData, SearchTasksError, SearchTasksResponse, TestAlertChannelData, TestAlertChannelError, TestAlertChannelResponse, TriggerScheduleData, TriggerScheduleError, TriggerScheduleResponse } from '../types.gen';
+import { cancelPendingTasks, cancelRun, cancelTask, cancelWorkflowRun, closeGroup, createAlertChannel, createGroup, createTask, createTasks, deleteAlertChannel, deleteQueue, deleteSchedule, deleteWorkflow, getActivity, getGroup, getHealthz, getQueue, getQueueActivity, getQueueFailures, getReadyz, getRun, getRunDelivery, getSchedule, getTask, getTaskDelivery, getWorkflow, getWorkflowRun, listAlertChannels, listAttempts, listGroups, listQueues, listRunAttempts, listRuns, listSchedules, listTasks, listWorkflowRuns, listWorkflows, type Options, pauseQueue, pauseSchedule, previewCron, putQueue, putSchedule, putWorkflow, resumeQueue, resumeSchedule, retryFailedTasks, retryRun, retryTask, searchTasks, startWorkflowRun, testAlertChannel, triggerSchedule } from '../sdk.gen';
+import type { CancelPendingTasksData, CancelPendingTasksError, CancelPendingTasksResponse, CancelRunData, CancelRunError, CancelRunResponse, CancelTaskData, CancelTaskError, CancelTaskResponse, CancelWorkflowRunData, CancelWorkflowRunError, CancelWorkflowRunResponse, CloseGroupData, CloseGroupError, CloseGroupResponse, CreateAlertChannelData, CreateAlertChannelError, CreateAlertChannelResponse, CreateGroupData, CreateGroupError, CreateGroupResponse, CreateTaskData, CreateTaskError, CreateTaskResponse, CreateTasksData, CreateTasksError, CreateTasksResponse, DeleteAlertChannelData, DeleteAlertChannelError, DeleteAlertChannelResponse, DeleteQueueData, DeleteQueueError, DeleteQueueResponse, DeleteScheduleData, DeleteScheduleError, DeleteScheduleResponse, DeleteWorkflowData, DeleteWorkflowError, DeleteWorkflowResponse, GetActivityData, GetActivityError, GetActivityResponse, GetGroupData, GetGroupError, GetGroupResponse, GetHealthzData, GetHealthzResponse, GetQueueActivityData, GetQueueActivityError, GetQueueActivityResponse, GetQueueData, GetQueueError, GetQueueFailuresData, GetQueueFailuresError, GetQueueFailuresResponse, GetQueueResponse, GetReadyzData, GetReadyzError, GetReadyzResponse, GetRunData, GetRunDeliveryData, GetRunDeliveryError, GetRunDeliveryResponse, GetRunError, GetRunResponse, GetScheduleData, GetScheduleError, GetScheduleResponse, GetTaskData, GetTaskDeliveryData, GetTaskDeliveryError, GetTaskDeliveryResponse, GetTaskError, GetTaskResponse, GetWorkflowData, GetWorkflowError, GetWorkflowResponse, GetWorkflowRunData, GetWorkflowRunError, GetWorkflowRunResponse, ListAlertChannelsData, ListAlertChannelsError, ListAlertChannelsResponse, ListAttemptsData, ListAttemptsError, ListAttemptsResponse, ListGroupsData, ListGroupsError, ListGroupsResponse, ListQueuesData, ListQueuesError, ListQueuesResponse, ListRunAttemptsData, ListRunAttemptsError, ListRunAttemptsResponse, ListRunsData, ListRunsError, ListRunsResponse, ListSchedulesData, ListSchedulesError, ListSchedulesResponse, ListTasksData, ListTasksError, ListTasksResponse, ListWorkflowRunsData, ListWorkflowRunsError, ListWorkflowRunsResponse, ListWorkflowsData, ListWorkflowsError, ListWorkflowsResponse, PauseQueueData, PauseQueueError, PauseQueueResponse, PauseScheduleData, PauseScheduleError, PauseScheduleResponse, PreviewCronData, PreviewCronError, PreviewCronResponse, PutQueueData, PutQueueError, PutQueueResponse, PutScheduleData, PutScheduleError, PutScheduleResponse, PutWorkflowData, PutWorkflowError, PutWorkflowResponse, ResumeQueueData, ResumeQueueError, ResumeQueueResponse, ResumeScheduleData, ResumeScheduleError, ResumeScheduleResponse, RetryFailedTasksData, RetryFailedTasksError, RetryFailedTasksResponse, RetryRunData, RetryRunError, RetryRunResponse, RetryTaskData, RetryTaskError, RetryTaskResponse, SearchTasksData, SearchTasksError, SearchTasksResponse, StartWorkflowRunData, StartWorkflowRunError, StartWorkflowRunResponse, TestAlertChannelData, TestAlertChannelError, TestAlertChannelResponse, TriggerScheduleData, TriggerScheduleError, TriggerScheduleResponse } from '../types.gen';
 
 export type QueryKey<TOptions extends Options> = [
     Pick<TOptions, 'baseUrl' | 'body' | 'headers' | 'path' | 'query'> & {
@@ -1055,6 +1055,205 @@ export const retryRunMutation = (options?: Partial<Options<RetryRunData>>): UseM
     const mutationOptions: UseMutationOptions<RetryRunResponse, RetryRunError, Options<RetryRunData>> = {
         mutationFn: async (fnOptions) => {
             const { data } = await retryRun({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+export const listWorkflowsQueryKey = (options?: Options<ListWorkflowsData>) => createQueryKey('listWorkflows', options);
+
+/**
+ * List workflows
+ */
+export const listWorkflowsOptions = (options?: Options<ListWorkflowsData>) => queryOptions<ListWorkflowsResponse, ListWorkflowsError, ListWorkflowsResponse, ReturnType<typeof listWorkflowsQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await listWorkflows({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: listWorkflowsQueryKey(options)
+});
+
+/**
+ * Delete a workflow
+ *
+ * Deletes the definition only. Its runs are kept (under retention), and
+ * runs still going finish under the definition they started with.
+ *
+ */
+export const deleteWorkflowMutation = (options?: Partial<Options<DeleteWorkflowData>>): UseMutationOptions<DeleteWorkflowResponse, DeleteWorkflowError, Options<DeleteWorkflowData>> => {
+    const mutationOptions: UseMutationOptions<DeleteWorkflowResponse, DeleteWorkflowError, Options<DeleteWorkflowData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await deleteWorkflow({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+export const getWorkflowQueryKey = (options: Options<GetWorkflowData>) => createQueryKey('getWorkflow', options);
+
+/**
+ * Get a workflow
+ */
+export const getWorkflowOptions = (options: Options<GetWorkflowData>) => queryOptions<GetWorkflowResponse, GetWorkflowError, GetWorkflowResponse, ReturnType<typeof getWorkflowQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await getWorkflow({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: getWorkflowQueryKey(options)
+});
+
+/**
+ * Create or update a workflow
+ *
+ * Declarative and idempotent: the workflow ends up with exactly the
+ * given steps and settings. A changed definition gets a new `version`.
+ * Runs already started keep the definition they started with; new runs
+ * use this one.
+ *
+ */
+export const putWorkflowMutation = (options?: Partial<Options<PutWorkflowData>>): UseMutationOptions<PutWorkflowResponse, PutWorkflowError, Options<PutWorkflowData>> => {
+    const mutationOptions: UseMutationOptions<PutWorkflowResponse, PutWorkflowError, Options<PutWorkflowData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await putWorkflow({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * Start a workflow run
+ *
+ * Starts a run and enqueues the steps without dependencies. With an
+ * `idempotency_key` already used for a run of this workflow, that run
+ * is returned (200) and nothing starts.
+ *
+ */
+export const startWorkflowRunMutation = (options?: Partial<Options<StartWorkflowRunData>>): UseMutationOptions<StartWorkflowRunResponse, StartWorkflowRunError, Options<StartWorkflowRunData>> => {
+    const mutationOptions: UseMutationOptions<StartWorkflowRunResponse, StartWorkflowRunError, Options<StartWorkflowRunData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await startWorkflowRun({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+export const listWorkflowRunsQueryKey = (options?: Options<ListWorkflowRunsData>) => createQueryKey('listWorkflowRuns', options);
+
+/**
+ * List workflow runs, newest first
+ *
+ * Runs of every workflow, or of one with `workflow` (including a
+ * deleted one's).
+ *
+ */
+export const listWorkflowRunsOptions = (options?: Options<ListWorkflowRunsData>) => queryOptions<ListWorkflowRunsResponse, ListWorkflowRunsError, ListWorkflowRunsResponse, ReturnType<typeof listWorkflowRunsQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await listWorkflowRuns({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: listWorkflowRunsQueryKey(options)
+});
+
+export const listWorkflowRunsInfiniteQueryKey = (options?: Options<ListWorkflowRunsData>): QueryKey<Options<ListWorkflowRunsData>> => createQueryKey('listWorkflowRuns', options, true);
+
+/**
+ * List workflow runs, newest first
+ *
+ * Runs of every workflow, or of one with `workflow` (including a
+ * deleted one's).
+ *
+ */
+export const listWorkflowRunsInfiniteOptions = (options?: Options<ListWorkflowRunsData>) => {
+    const opts = infiniteQueryOptions<ListWorkflowRunsResponse, ListWorkflowRunsError, InfiniteData<ListWorkflowRunsResponse>, QueryKey<Options<ListWorkflowRunsData>>, string | Pick<QueryKey<Options<ListWorkflowRunsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<ListWorkflowRunsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    cursor: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await listWorkflowRuns({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: listWorkflowRunsInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
+
+export const getWorkflowRunQueryKey = (options: Options<GetWorkflowRunData>) => createQueryKey('getWorkflowRun', options);
+
+/**
+ * Get a workflow run with its steps
+ */
+export const getWorkflowRunOptions = (options: Options<GetWorkflowRunData>) => queryOptions<GetWorkflowRunResponse, GetWorkflowRunError, GetWorkflowRunResponse, ReturnType<typeof getWorkflowRunQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await getWorkflowRun({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: getWorkflowRunQueryKey(options)
+});
+
+/**
+ * Cancel a workflow run
+ *
+ * Steps that haven't started are skipped, and their pending tasks
+ * cancelled. Requests already being delivered finish and are recorded,
+ * but start nothing. Cancelling a cancelled run is a no-op; other
+ * finished runs are `invalid_state`.
+ *
+ */
+export const cancelWorkflowRunMutation = (options?: Partial<Options<CancelWorkflowRunData>>): UseMutationOptions<CancelWorkflowRunResponse, CancelWorkflowRunError, Options<CancelWorkflowRunData>> => {
+    const mutationOptions: UseMutationOptions<CancelWorkflowRunResponse, CancelWorkflowRunError, Options<CancelWorkflowRunData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await cancelWorkflowRun({
                 ...options,
                 ...fnOptions,
                 throwOnError: true
