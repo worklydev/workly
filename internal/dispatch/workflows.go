@@ -71,7 +71,7 @@ func (s *scheduler) startWorkflow(ctx context.Context, c store.RunClaim) result 
 		}
 		nr.Input = json.RawMessage(c.Run.Body)
 	}
-	wr, _, err := s.d.store.StartWorkflowRun(ctx, c.Run.WorkspaceID, c.Schedule.Workflow, nr, time.Now())
+	wr, created, err := s.d.store.StartWorkflowRun(ctx, c.Run.WorkspaceID, c.Schedule.Workflow, nr, time.Now())
 	r.finished = time.Now()
 	switch {
 	case errors.Is(err, store.ErrNotFound):
@@ -85,6 +85,9 @@ func (s *scheduler) startWorkflow(ctx context.Context, c store.RunClaim) result 
 		r.headers["Content-Type"] = "application/json"
 		b, _ := json.Marshal(map[string]string{"workflow_run_id": wr.ID, "workflow": wr.Workflow})
 		r.body = string(b)
+		if created && s.d.opts.TasksCreated != nil {
+			s.d.opts.TasksCreated(ctx, c.Run.WorkspaceID, len(wr.Config.Steps))
+		}
 		s.d.opts.Changed(c.Run.WorkspaceID)
 	}
 	return r

@@ -87,6 +87,11 @@ type Options struct {
 	// Changed, if set, is told when a workspace's tasks or runs change
 	// state, so dashboards can refresh. It must not block.
 	Changed func(workspace.ID)
+	// TasksCreated, if set, is told how many tasks a schedule created by
+	// starting a workflow run (one per step), as the API's Admission is for
+	// runs started through it. A scheduled run isn't refused: its slot has
+	// already come.
+	TasksCreated func(ctx context.Context, ws workspace.ID, n int)
 }
 
 type Dispatcher struct {

@@ -191,7 +191,8 @@ type Options struct {
 	DeliveryDialControl func(network, address string, c syscall.RawConn) error
 	// Admission, if set, is asked before tasks are enqueued and schedules
 	// created or replaced, through the API and so through MCP, and can
-	// refuse with LimitError. For quotas on a hosted service.
+	// refuse with LimitError. For quotas on a hosted service. It is also
+	// told of the tasks a schedule creates by starting a workflow run.
 	Admission Admission
 	// Mailer, if set, sends alert emails, so workspaces can have email
 	// alert channels; SMTPMailer builds one. Slack channels need nothing.
@@ -298,6 +299,10 @@ func New(opts Options) (*Server, error) {
 		s.handler = opts.WrapHandler(s.handler)
 	}
 	if !opts.DisableDispatcher {
+		var tasksCreated func(context.Context, WorkspaceID, int)
+		if opts.Admission != nil {
+			tasksCreated = opts.Admission.TasksCreated
+		}
 		s.dispatcher = dispatch.New(dispatch.Options{
 			Store:                 opts.Store,
 			Logger:                opts.Logger,
@@ -315,6 +320,7 @@ func New(opts Options) (*Server, error) {
 			DialControl:           opts.DeliveryDialControl,
 			Alerts:                &alert.Notifier{Store: opts.Store, Sender: alerts, Logger: opts.Logger},
 			Changed:               hub.Changed,
+			TasksCreated:          tasksCreated,
 		})
 	}
 	return s, nil
