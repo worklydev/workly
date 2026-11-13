@@ -238,9 +238,11 @@ func allTools() []*tool {
 	return []*tool{
 		listQueues, getQueue, listTasks, getTask, getTaskDelivery, waitForTask, listGroups, getGroup,
 		listSchedules, getSchedule, listRuns, getRun, getRunDelivery, waitForRun,
+		listWorkflows, getWorkflow, listWorkflowRuns, getWorkflowRun,
 		enqueueTask, retryTask, cancelTask, retryFailedTasks, cancelPendingTasks, pauseQueue, resumeQueue,
 		updateQueuePolicy,
 		updateSchedule, triggerSchedule, pauseSchedule, resumeSchedule, retryRun, cancelRun,
+		triggerWorkflow, cancelWorkflowRun, retryWorkflowRun,
 	}
 }
 

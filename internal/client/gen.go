@@ -236,6 +236,39 @@ func (e SkipReason) Valid() bool {
 	}
 }
 
+// Defines values for StepStatus.
+const (
+	StepStatusBlocked   StepStatus = "blocked"
+	StepStatusFailed    StepStatus = "failed"
+	StepStatusPending   StepStatus = "pending"
+	StepStatusRunning   StepStatus = "running"
+	StepStatusSkipped   StepStatus = "skipped"
+	StepStatusSucceeded StepStatus = "succeeded"
+	StepStatusWaiting   StepStatus = "waiting"
+)
+
+// Valid indicates whether the value is a known member of the StepStatus enum.
+func (e StepStatus) Valid() bool {
+	switch e {
+	case StepStatusBlocked:
+		return true
+	case StepStatusFailed:
+		return true
+	case StepStatusPending:
+		return true
+	case StepStatusRunning:
+		return true
+	case StepStatusSkipped:
+		return true
+	case StepStatusSucceeded:
+		return true
+	case StepStatusWaiting:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TaskState.
 const (
 	TaskStateCancelled TaskState = "cancelled"
@@ -257,6 +290,45 @@ func (e TaskState) Valid() bool {
 	case TaskStateRunning:
 		return true
 	case TaskStateSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WaitForType.
+const (
+	WaitForTypeGroup WaitForType = "group"
+)
+
+// Valid indicates whether the value is a known member of the WaitForType enum.
+func (e WaitForType) Valid() bool {
+	switch e {
+	case WaitForTypeGroup:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WorkflowRunStatus.
+const (
+	WorkflowRunStatusCancelled WorkflowRunStatus = "cancelled"
+	WorkflowRunStatusFailed    WorkflowRunStatus = "failed"
+	WorkflowRunStatusRunning   WorkflowRunStatus = "running"
+	WorkflowRunStatusSucceeded WorkflowRunStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the WorkflowRunStatus enum.
+func (e WorkflowRunStatus) Valid() bool {
+	switch e {
+	case WorkflowRunStatusCancelled:
+		return true
+	case WorkflowRunStatusFailed:
+		return true
+	case WorkflowRunStatusRunning:
+		return true
+	case WorkflowRunStatusSucceeded:
 		return true
 	default:
 		return false
@@ -813,8 +885,9 @@ type NewGroup struct {
 type Outcome string
 
 // OverlapPolicy What happens when a slot comes up while the previous run is still
-// pending or running. `skip` records the slot as a `skipped` run;
-// `allow` runs it alongside.
+// pending or running, or, for a schedule with `workflow`, while the
+// workflow run it started is still running. `skip` records the slot as
+// a `skipped` run; `allow` runs it alongside.
 type OverlapPolicy string
 
 // Queue defines model for Queue.
@@ -993,8 +1066,8 @@ type Run struct {
 	// ScheduledFor The cron slot, or when a manual run was triggered. Sent as `Workly-Scheduled-For`.
 	ScheduledFor time.Time `json:"scheduled_for"`
 
-	// SkipReason `overlap`: the previous run was still pending or running (overlap
-	// policy `skip`). `missed`: the server was down at the slot (missed
+	// SkipReason `overlap`: the previous run, or the workflow run it started, was
+	// still going (overlap policy `skip`). `missed`: the server was down at the slot (missed
 	// policy `skip`).
 	SkipReason *SkipReason `json:"skip_reason,omitempty"`
 
@@ -1009,6 +1082,9 @@ type Run struct {
 	Trigger   RunTrigger `json:"trigger"`
 	UpdatedAt time.Time  `json:"updated_at"`
 	Url       string     `json:"url"`
+
+	// WorkflowRunId The workflow run this run started, for a schedule that starts a workflow.
+	WorkflowRunId *string `json:"workflow_run_id,omitempty"`
 }
 
 // RunList defines model for RunList.
@@ -1096,8 +1172,9 @@ type Schedule struct {
 	OnComplete *Callback `json:"on_complete,omitempty"`
 
 	// Overlap What happens when a slot comes up while the previous run is still
-	// pending or running. `skip` records the slot as a `skipped` run;
-	// `allow` runs it alongside.
+	// pending or running, or, for a schedule with `workflow`, while the
+	// workflow run it started is still running. `skip` records the slot as
+	// a `skipped` run; `allow` runs it alongside.
 	Overlap OverlapPolicy `json:"overlap"`
 	Paused  bool          `json:"paused"`
 
@@ -1111,10 +1188,15 @@ type Schedule struct {
 	Timezone       string           `json:"timezone"`
 	UpdatedAt      time.Time        `json:"updated_at"`
 	Url            string           `json:"url"`
+
+	// Workflow The workflow each run starts, for a schedule that starts one. `url` is then empty.
+	Workflow *string `json:"workflow,omitempty"`
 }
 
 // ScheduleConfig A schedule's settings. Omitted fields take the default. The request
-// fields (`url` to `content_type`) work as in `EnqueueRequest`.
+// fields (`url` to `content_type`) work as in `EnqueueRequest`. Set
+// `url` to call an endpoint, or `workflow` to start a run of that
+// workflow instead.
 type ScheduleConfig struct {
 	// BackoffMultiplier Retries back off as for queues (see `QueueConfig`).
 	BackoffMultiplier *float64 `json:"backoff_multiplier,omitempty"`
@@ -1163,8 +1245,9 @@ type ScheduleConfig struct {
 	OnComplete *Callback `json:"on_complete,omitempty"`
 
 	// Overlap What happens when a slot comes up while the previous run is still
-	// pending or running. `skip` records the slot as a `skipped` run;
-	// `allow` runs it alongside.
+	// pending or running, or, for a schedule with `workflow`, while the
+	// workflow run it started is still running. `skip` records the slot as
+	// a `skipped` run; `allow` runs it alongside.
 	Overlap *OverlapPolicy `json:"overlap,omitempty"`
 
 	// Payload A JSON body, sent with `Content-Type: application/json`. Use this or `body`.
@@ -1182,10 +1265,20 @@ type ScheduleConfig struct {
 	// once.
 	Timezone *string `json:"timezone,omitempty"`
 
-	// Url The http(s) URL to call.
+	// Url The http(s) URL to call. Use this or `workflow`.
 	//
 	// Example: https://api.example.com/reports/nightly
-	Url string `json:"url"`
+	Url *string `json:"url,omitempty"`
+
+	// Workflow A workflow to start a run of instead of calling a URL. The
+	// `payload`, if any, is the run's `input`; `method`, `headers` and
+	// `body` don't apply. Each run's attempt starts the workflow run
+	// (`workflow_run_id`), which then goes on independently: the run
+	// succeeding means the workflow started, not that it succeeded.
+	//
+	//
+	// Example: daily-refresh
+	Workflow *string `json:"workflow,omitempty"`
 }
 
 // ScheduleList defines model for ScheduleList.
@@ -1193,10 +1286,26 @@ type ScheduleList struct {
 	Schedules []Schedule `json:"schedules"`
 }
 
-// SkipReason `overlap`: the previous run was still pending or running (overlap
-// policy `skip`). `missed`: the server was down at the slot (missed
+// SkipReason `overlap`: the previous run, or the workflow run it started, was
+// still going (overlap policy `skip`). `missed`: the server was down at the slot (missed
 // policy `skip`).
 type SkipReason string
+
+// StartWorkflowRun defines model for StartWorkflowRun.
+type StartWorkflowRun struct {
+	// IdempotencyKey Deduplicates runs of the workflow.
+	IdempotencyKey *string `json:"idempotency_key,omitempty"`
+
+	// Input JSON passed to every step that has no body of its own.
+	Input *json.RawMessage `json:"input,omitempty"`
+}
+
+// StepStatus `blocked` waits for its dependencies; `pending` has its task
+// enqueued (or retrying); `running` is being delivered; `waiting`
+// succeeded and waits for the resource its response named in
+// `Workly-Wait-For`; `skipped` never ran, or stopped waiting, because
+// the run stopped.
+type StepStatus string
 
 // Task defines model for Task.
 type Task struct {
@@ -1276,6 +1385,10 @@ type Task struct {
 	TimeoutSeconds *float64  `json:"timeout_seconds,omitempty"`
 	UpdatedAt      time.Time `json:"updated_at"`
 	Url            string    `json:"url"`
+
+	// WorkflowStep The workflow step a task delivers, if it is one. A step's task can't be
+	// retried on its own: retry its workflow run instead.
+	WorkflowStep *TaskWorkflowStep `json:"workflow_step,omitempty"`
 }
 
 // TaskList defines model for TaskList.
@@ -1312,6 +1425,248 @@ type TaskSummary struct {
 	TaskId string    `json:"task_id"`
 }
 
+// TaskWorkflowStep The workflow step a task delivers, if it is one. A step's task can't be
+// retried on its own: retry its workflow run instead.
+type TaskWorkflowStep struct {
+	// Id The step, `wfs_…`.
+	//
+	// Example: wfs_01M7AH8EPATE4EPK37FWTA5TBQ
+	Id string `json:"id"`
+
+	// Name The step's name in its workflow.
+	Name string `json:"name"`
+
+	// RunId The workflow run, `wfr_…`.
+	//
+	// Example: wfr_01M7AH8EP90ZQ4E9228337GGVR
+	RunId    string `json:"run_id"`
+	Workflow string `json:"workflow"`
+}
+
+// WaitFor The resource a step handed its completion to.
+type WaitFor struct {
+	Id   string      `json:"id"`
+	Type WaitForType `json:"type"`
+}
+
+// WaitForType defines model for WaitFor.Type.
+type WaitForType string
+
+// Workflow defines model for Workflow.
+type Workflow struct {
+	CreatedAt          time.Time            `json:"created_at"`
+	LastRun            *WorkflowRunSummary  `json:"last_run,omitempty"`
+	MaxDurationSeconds float64              `json:"max_duration_seconds"`
+	Name               string               `json:"name"`
+	Steps              []WorkflowStepConfig `json:"steps"`
+	UpdatedAt          time.Time            `json:"updated_at"`
+
+	// Version Counts changes to the definition, from 1.
+	Version int `json:"version"`
+}
+
+// WorkflowConfig defines model for WorkflowConfig.
+type WorkflowConfig struct {
+	// MaxDurationSeconds How long a run may take. A run still going after it fails, and a
+	// step still waiting fails with it.
+	MaxDurationSeconds *float64 `json:"max_duration_seconds,omitempty"`
+
+	// Steps The steps, which must form a DAG.
+	Steps []WorkflowStepConfig `json:"steps"`
+}
+
+// WorkflowList defines model for WorkflowList.
+type WorkflowList struct {
+	Workflows []Workflow `json:"workflows"`
+}
+
+// WorkflowRun defines model for WorkflowRun.
+type WorkflowRun struct {
+	// Attempt 1, plus one for each time the run was retried. Steps are sent it
+	// as `Workly-Workflow-Run-Attempt`.
+	Attempt   int       `json:"attempt"`
+	CreatedAt time.Time `json:"created_at"`
+
+	// DeadlineAt When a run still going fails (`max_duration_seconds`).
+	DeadlineAt *time.Time `json:"deadline_at,omitempty"`
+
+	// DurationMs From start to finish, or to now while running.
+	DurationMs *int `json:"duration_ms,omitempty"`
+
+	// Error Why the run failed or was cancelled.
+	Error      *string    `json:"error,omitempty"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+
+	// Id Example: wfr_01J9ZK3M5Q8R2T4V6W8X0Y2Z4A
+	Id             string           `json:"id"`
+	IdempotencyKey *string          `json:"idempotency_key,omitempty"`
+	Input          *json.RawMessage `json:"input,omitempty"`
+
+	// RetriedAt When the run was last retried. Absent if never.
+	RetriedAt *time.Time `json:"retried_at,omitempty"`
+
+	// ScheduleRunId The schedule run that started it, if any.
+	ScheduleRunId *string           `json:"schedule_run_id,omitempty"`
+	Status        WorkflowRunStatus `json:"status"`
+
+	// Steps In definition order.
+	Steps    []WorkflowStep `json:"steps"`
+	Version  int            `json:"version"`
+	Workflow string         `json:"workflow"`
+}
+
+// WorkflowRunList defines model for WorkflowRunList.
+type WorkflowRunList struct {
+	// NextCursor Pass as `cursor` to get the next page. Absent on the last page.
+	NextCursor   *string              `json:"next_cursor,omitempty"`
+	WorkflowRuns []WorkflowRunSummary `json:"workflow_runs"`
+}
+
+// WorkflowRunStatus defines model for WorkflowRunStatus.
+type WorkflowRunStatus string
+
+// WorkflowRunSummary defines model for WorkflowRunSummary.
+type WorkflowRunSummary struct {
+	// Attempt 1, plus one for each time the run was retried. Steps are sent it
+	// as `Workly-Workflow-Run-Attempt`.
+	Attempt   int       `json:"attempt"`
+	CreatedAt time.Time `json:"created_at"`
+
+	// DeadlineAt When a run still going fails (`max_duration_seconds`).
+	DeadlineAt *time.Time `json:"deadline_at,omitempty"`
+
+	// DurationMs From start to finish, or to now while running.
+	DurationMs *int `json:"duration_ms,omitempty"`
+
+	// Error Why the run failed or was cancelled.
+	Error      *string    `json:"error,omitempty"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+
+	// Id Example: wfr_01J9ZK3M5Q8R2T4V6W8X0Y2Z4A
+	Id             string  `json:"id"`
+	IdempotencyKey *string `json:"idempotency_key,omitempty"`
+
+	// RetriedAt When the run was last retried. Absent if never.
+	RetriedAt *time.Time `json:"retried_at,omitempty"`
+
+	// ScheduleRunId The schedule run that started it, if any.
+	ScheduleRunId *string           `json:"schedule_run_id,omitempty"`
+	Status        WorkflowRunStatus `json:"status"`
+	Version       int               `json:"version"`
+	Workflow      string            `json:"workflow"`
+}
+
+// WorkflowStep defines model for WorkflowStep.
+type WorkflowStep struct {
+	// BlockedBy Dependencies that haven't succeeded yet.
+	BlockedBy []string `json:"blocked_by"`
+
+	// BlockedMs Time spent waiting for dependencies.
+	BlockedMs *int       `json:"blocked_ms,omitempty"`
+	CreatedAt *time.Time `json:"created_at,omitempty"`
+	DependsOn []string   `json:"depends_on"`
+
+	// DurationMs From its task being enqueued to the step finishing (or now).
+	DurationMs *int       `json:"duration_ms,omitempty"`
+	Error      *string    `json:"error,omitempty"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+
+	// HttpDoneAt When its request succeeded.
+	HttpDoneAt *time.Time `json:"http_done_at,omitempty"`
+
+	// Id Example: wfs_01J9ZK3M5Q8R2T4V6W8X0Y2Z4A
+	Id   string `json:"id"`
+	Name string `json:"name"`
+
+	// ReadyAt When its task was enqueued.
+	ReadyAt *time.Time `json:"ready_at,omitempty"`
+
+	// Status `blocked` waits for its dependencies; `pending` has its task
+	// enqueued (or retrying); `running` is being delivered; `waiting`
+	// succeeded and waits for the resource its response named in
+	// `Workly-Wait-For`; `skipped` never ran, or stopped waiting, because
+	// the run stopped.
+	Status StepStatus `json:"status"`
+
+	// Task The step's task, which records its attempts.
+	Task   *WorkflowStepTask `json:"task,omitempty"`
+	TaskId *string           `json:"task_id,omitempty"`
+
+	// WaitFor The resource a step handed its completion to.
+	WaitFor *WaitFor `json:"wait_for,omitempty"`
+
+	// WaitingMs Time spent waiting for the `wait_for` resource.
+	WaitingMs *int `json:"waiting_ms,omitempty"`
+}
+
+// WorkflowStepConfig A step: an HTTP request, sent as a task once every step in
+// `depends_on` has succeeded. The request fields (`url` to
+// `content_type`) work as in `EnqueueRequest`. A step without `payload`
+// or `body` is sent the run's context as JSON (`workflow_run_id`,
+// `workflow`, `step`, `step_id`, `run_attempt`, `input`); every step
+// gets the `Workly-Workflow`, `Workly-Workflow-Run-Id`,
+// `Workly-Workflow-Step`, `Workly-Workflow-Step-Id` and
+// `Workly-Workflow-Run-Attempt` headers. The step ID is the same on
+// every delivery of the step, so it can serve as an idempotency key;
+// with the run attempt, it keys work that a retried run should redo.
+type WorkflowStepConfig struct {
+	// Body A raw text body. Use this or `payload`.
+	Body *string `json:"body,omitempty"`
+
+	// ContentType Content type of `body`. Defaults to `text/plain; charset=utf-8`.
+	ContentType *string `json:"content_type,omitempty"`
+
+	// DependsOn Steps that must succeed before this one starts.
+	DependsOn *[]string `json:"depends_on,omitempty"`
+
+	// Headers `Workly-*` headers are reserved.
+	Headers *map[string]string `json:"headers,omitempty"`
+
+	// MaxAttempts Overrides the queue's max attempts.
+	MaxAttempts *int        `json:"max_attempts,omitempty"`
+	Method      *HTTPMethod `json:"method,omitempty"`
+
+	// Name Unique within the workflow. Lowercase letters, digits, `-` and `_`; at most 64 characters.
+	//
+	// Example: prices
+	Name string `json:"name"`
+
+	// Payload A JSON body, sent with `Content-Type: application/json`. Use this or `body`.
+	Payload *json.RawMessage `json:"payload,omitempty"`
+
+	// Queue The queue the step's task goes to, for its retry policy, timeout
+	// and rate and concurrency limits. `_workflows` is created on
+	// demand; another queue must exist when the step starts.
+	Queue *string `json:"queue,omitempty"`
+
+	// TimeoutSeconds Overrides the queue's timeout.
+	TimeoutSeconds *float64 `json:"timeout_seconds,omitempty"`
+
+	// Url Example: https://api.example.com/jobs/prices
+	Url string `json:"url"`
+}
+
+// WorkflowStepTask The step's task, which records its attempts.
+type WorkflowStepTask struct {
+	AttemptCount int     `json:"attempt_count"`
+	Id           string  `json:"id"`
+	LastError    *string `json:"last_error,omitempty"`
+
+	// LastOutcome How a delivery attempt ended. `lost` means the result is unknown: the
+	// dispatcher crashed or shut down mid-delivery, and the endpoint may
+	// have processed the request.
+	LastOutcome *Outcome `json:"last_outcome,omitempty"`
+	LastStatus  *int     `json:"last_status,omitempty"`
+	Queue       string   `json:"queue"`
+
+	// RunAt When a pending task is next delivered.
+	RunAt *time.Time `json:"run_at,omitempty"`
+
+	// State A `pending` task with `run_at` in the future is scheduled. A `failed`
+	// task has exhausted its attempts or got a non-retryable response.
+	State TaskState `json:"state"`
+}
+
 // AlertChannelID defines model for AlertChannelID.
 type AlertChannelID = string
 
@@ -1344,6 +1699,12 @@ type TaskID = string
 
 // TaskSort defines model for TaskSort.
 type TaskSort string
+
+// WorkflowName defines model for WorkflowName.
+type WorkflowName = string
+
+// WorkflowRunID defines model for WorkflowRunID.
+type WorkflowRunID = string
 
 // GetActivityParams defines parameters for GetActivity.
 type GetActivityParams struct {
@@ -1501,6 +1862,18 @@ type SearchTasksParamsSort string
 // SearchTasksParamsOrder defines parameters for SearchTasks.
 type SearchTasksParamsOrder string
 
+// ListWorkflowRunsParams defines parameters for ListWorkflowRuns.
+type ListWorkflowRunsParams struct {
+	// Workflow Only this workflow's runs.
+	Workflow *string            `form:"workflow,omitempty" json:"workflow,omitempty"`
+	Status   *WorkflowRunStatus `form:"status,omitempty" json:"status,omitempty"`
+
+	// Cursor The `next_cursor` of the previous page, requested with the same
+	// filters and order.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // CreateAlertChannelJSONRequestBody defines body for CreateAlertChannel for application/json ContentType.
 type CreateAlertChannelJSONRequestBody = NewAlertChannel
 
@@ -1518,6 +1891,12 @@ type CreateTasksJSONRequestBody = BatchEnqueueRequest
 
 // PutScheduleJSONRequestBody defines body for PutSchedule for application/json ContentType.
 type PutScheduleJSONRequestBody = ScheduleConfig
+
+// PutWorkflowJSONRequestBody defines body for PutWorkflow for application/json ContentType.
+type PutWorkflowJSONRequestBody = WorkflowConfig
+
+// StartWorkflowRunJSONRequestBody defines body for StartWorkflowRun for application/json ContentType.
+type StartWorkflowRunJSONRequestBody = StartWorkflowRun
 
 // RequestEditorFn is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
@@ -2058,6 +2437,107 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /v1/tasks/{id}/retry (the `RetryTask` operationId).
 	RetryTask(ctx context.Context, id TaskID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListWorkflowRuns List workflow runs, newest first
+	//
+	// Runs of every workflow, or of one with `workflow` (including a
+	// deleted one's).
+	//
+	// Corresponds with GET /v1/workflow-runs (the `ListWorkflowRuns` operationId).
+	ListWorkflowRuns(ctx context.Context, params *ListWorkflowRunsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetWorkflowRun Get a workflow run with its steps
+	//
+	// Corresponds with GET /v1/workflow-runs/{id} (the `GetWorkflowRun` operationId).
+	GetWorkflowRun(ctx context.Context, id WorkflowRunID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CancelWorkflowRun Cancel a workflow run
+	//
+	// Steps that haven't started are skipped, and their pending tasks
+	// cancelled. Requests already being delivered finish and are recorded,
+	// but start nothing. Cancelling a cancelled run is a no-op; other
+	// finished runs are `invalid_state`.
+	//
+	// Corresponds with POST /v1/workflow-runs/{id}/cancel (the `CancelWorkflowRun` operationId).
+	CancelWorkflowRun(ctx context.Context, id WorkflowRunID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RetryWorkflowRun Retry a workflow run
+	//
+	// Reopens a failed or cancelled run, under the definition it started
+	// with and with the same input: steps that succeeded stay, and the
+	// rest run again. Each step that runs again gets its task back,
+	// pending with a fresh set of attempts. A step that was waiting for a
+	// group follows the group: it succeeds if the group has since
+	// succeeded, and waits for it again if it is still going. The run's
+	// `attempt` goes up by one, and its `max_duration_seconds` starts
+	// over. Other runs are `invalid_state`.
+	//
+	// Corresponds with POST /v1/workflow-runs/{id}/retry (the `RetryWorkflowRun` operationId).
+	RetryWorkflowRun(ctx context.Context, id WorkflowRunID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListWorkflows List workflows
+	//
+	// Corresponds with GET /v1/workflows (the `ListWorkflows` operationId).
+	ListWorkflows(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteWorkflow Delete a workflow
+	//
+	// Deletes the definition only. Its runs are kept (under retention), and
+	// runs still going finish under the definition they started with.
+	//
+	// Corresponds with DELETE /v1/workflows/{workflow} (the `DeleteWorkflow` operationId).
+	DeleteWorkflow(ctx context.Context, workflow WorkflowName, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetWorkflow Get a workflow
+	//
+	// Corresponds with GET /v1/workflows/{workflow} (the `GetWorkflow` operationId).
+	GetWorkflow(ctx context.Context, workflow WorkflowName, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PutWorkflowWithBody Create or update a workflow
+	//
+	// Declarative and idempotent: the workflow ends up with exactly the
+	// given steps and settings. A changed definition gets a new `version`.
+	// Runs already started keep the definition they started with; new runs
+	// use this one.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with PUT /v1/workflows/{workflow} (the `PutWorkflow` operationId).
+	PutWorkflowWithBody(ctx context.Context, workflow WorkflowName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PutWorkflow Create or update a workflow
+	//
+	// Declarative and idempotent: the workflow ends up with exactly the
+	// given steps and settings. A changed definition gets a new `version`.
+	// Runs already started keep the definition they started with; new runs
+	// use this one.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with PUT /v1/workflows/{workflow} (the `PutWorkflow` operationId).
+	PutWorkflow(ctx context.Context, workflow WorkflowName, body PutWorkflowJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// StartWorkflowRunWithBody Start a workflow run
+	//
+	// Starts a run and enqueues the steps without dependencies. With an
+	// `idempotency_key` already used for a run of this workflow, that run
+	// is returned (200) and nothing starts.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /v1/workflows/{workflow}/runs (the `StartWorkflowRun` operationId).
+	StartWorkflowRunWithBody(ctx context.Context, workflow WorkflowName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// StartWorkflowRun Start a workflow run
+	//
+	// Starts a run and enqueues the steps without dependencies. With an
+	// `idempotency_key` already used for a run of this workflow, that run
+	// is returned (200) and nothing starts.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /v1/workflows/{workflow}/runs (the `StartWorkflowRun` operationId).
+	StartWorkflowRun(ctx context.Context, workflow WorkflowName, body StartWorkflowRunJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 // GetHealthz Liveness probe
@@ -3016,6 +3496,217 @@ func (c *Client) GetTaskDelivery(ctx context.Context, id TaskID, reqEditors ...R
 // Corresponds with POST /v1/tasks/{id}/retry (the `RetryTask` operationId).
 func (c *Client) RetryTask(ctx context.Context, id TaskID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRetryTaskRequest(c.Server, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListWorkflowRuns List workflow runs, newest first
+//
+// Runs of every workflow, or of one with `workflow` (including a
+// deleted one's).
+//
+// Corresponds with GET /v1/workflow-runs (the `ListWorkflowRuns` operationId).
+func (c *Client) ListWorkflowRuns(ctx context.Context, params *ListWorkflowRunsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListWorkflowRunsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetWorkflowRun Get a workflow run with its steps
+//
+// Corresponds with GET /v1/workflow-runs/{id} (the `GetWorkflowRun` operationId).
+func (c *Client) GetWorkflowRun(ctx context.Context, id WorkflowRunID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetWorkflowRunRequest(c.Server, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CancelWorkflowRun Cancel a workflow run
+//
+// Steps that haven't started are skipped, and their pending tasks
+// cancelled. Requests already being delivered finish and are recorded,
+// but start nothing. Cancelling a cancelled run is a no-op; other
+// finished runs are `invalid_state`.
+//
+// Corresponds with POST /v1/workflow-runs/{id}/cancel (the `CancelWorkflowRun` operationId).
+func (c *Client) CancelWorkflowRun(ctx context.Context, id WorkflowRunID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCancelWorkflowRunRequest(c.Server, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RetryWorkflowRun Retry a workflow run
+//
+// Reopens a failed or cancelled run, under the definition it started
+// with and with the same input: steps that succeeded stay, and the
+// rest run again. Each step that runs again gets its task back,
+// pending with a fresh set of attempts. A step that was waiting for a
+// group follows the group: it succeeds if the group has since
+// succeeded, and waits for it again if it is still going. The run's
+// `attempt` goes up by one, and its `max_duration_seconds` starts
+// over. Other runs are `invalid_state`.
+//
+// Corresponds with POST /v1/workflow-runs/{id}/retry (the `RetryWorkflowRun` operationId).
+func (c *Client) RetryWorkflowRun(ctx context.Context, id WorkflowRunID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRetryWorkflowRunRequest(c.Server, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListWorkflows List workflows
+//
+// Corresponds with GET /v1/workflows (the `ListWorkflows` operationId).
+func (c *Client) ListWorkflows(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListWorkflowsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// DeleteWorkflow Delete a workflow
+//
+// Deletes the definition only. Its runs are kept (under retention), and
+// runs still going finish under the definition they started with.
+//
+// Corresponds with DELETE /v1/workflows/{workflow} (the `DeleteWorkflow` operationId).
+func (c *Client) DeleteWorkflow(ctx context.Context, workflow WorkflowName, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteWorkflowRequest(c.Server, workflow)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetWorkflow Get a workflow
+//
+// Corresponds with GET /v1/workflows/{workflow} (the `GetWorkflow` operationId).
+func (c *Client) GetWorkflow(ctx context.Context, workflow WorkflowName, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetWorkflowRequest(c.Server, workflow)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PutWorkflowWithBody Create or update a workflow
+//
+// Declarative and idempotent: the workflow ends up with exactly the
+// given steps and settings. A changed definition gets a new `version`.
+// Runs already started keep the definition they started with; new runs
+// use this one.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with PUT /v1/workflows/{workflow} (the `PutWorkflow` operationId).
+func (c *Client) PutWorkflowWithBody(ctx context.Context, workflow WorkflowName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPutWorkflowRequestWithBody(c.Server, workflow, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PutWorkflow Create or update a workflow
+//
+// Declarative and idempotent: the workflow ends up with exactly the
+// given steps and settings. A changed definition gets a new `version`.
+// Runs already started keep the definition they started with; new runs
+// use this one.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with PUT /v1/workflows/{workflow} (the `PutWorkflow` operationId).
+func (c *Client) PutWorkflow(ctx context.Context, workflow WorkflowName, body PutWorkflowJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPutWorkflowRequest(c.Server, workflow, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// StartWorkflowRunWithBody Start a workflow run
+//
+// Starts a run and enqueues the steps without dependencies. With an
+// `idempotency_key` already used for a run of this workflow, that run
+// is returned (200) and nothing starts.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /v1/workflows/{workflow}/runs (the `StartWorkflowRun` operationId).
+func (c *Client) StartWorkflowRunWithBody(ctx context.Context, workflow WorkflowName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewStartWorkflowRunRequestWithBody(c.Server, workflow, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// StartWorkflowRun Start a workflow run
+//
+// Starts a run and enqueues the steps without dependencies. With an
+// `idempotency_key` already used for a run of this workflow, that run
+// is returned (200) and nothing starts.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /v1/workflows/{workflow}/runs (the `StartWorkflowRun` operationId).
+func (c *Client) StartWorkflowRun(ctx context.Context, workflow WorkflowName, body StartWorkflowRunJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewStartWorkflowRunRequest(c.Server, workflow, body)
 	if err != nil {
 		return nil, err
 	}
@@ -5073,6 +5764,387 @@ func NewRetryTaskRequest(server string, id TaskID) (*http.Request, error) {
 	return req, nil
 }
 
+// NewListWorkflowRunsRequest constructs an http.Request for the ListWorkflowRuns method
+func NewListWorkflowRunsRequest(server string, params *ListWorkflowRunsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/workflow-runs")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Workflow != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "workflow", *params.Workflow, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Status != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "status", *params.Status, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Cursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "cursor", *params.Cursor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetWorkflowRunRequest constructs an http.Request for the GetWorkflowRun method
+func NewGetWorkflowRunRequest(server string, id WorkflowRunID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/workflow-runs/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCancelWorkflowRunRequest constructs an http.Request for the CancelWorkflowRun method
+func NewCancelWorkflowRunRequest(server string, id WorkflowRunID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/workflow-runs/%s/cancel", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewRetryWorkflowRunRequest constructs an http.Request for the RetryWorkflowRun method
+func NewRetryWorkflowRunRequest(server string, id WorkflowRunID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/workflow-runs/%s/retry", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListWorkflowsRequest constructs an http.Request for the ListWorkflows method
+func NewListWorkflowsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/workflows")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewDeleteWorkflowRequest constructs an http.Request for the DeleteWorkflow method
+func NewDeleteWorkflowRequest(server string, workflow WorkflowName) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "workflow", workflow, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/workflows/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetWorkflowRequest constructs an http.Request for the GetWorkflow method
+func NewGetWorkflowRequest(server string, workflow WorkflowName) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "workflow", workflow, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/workflows/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewPutWorkflowRequest calls the generic PutWorkflow builder with application/json body
+func NewPutWorkflowRequest(server string, workflow WorkflowName, body PutWorkflowJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPutWorkflowRequestWithBody(server, workflow, "application/json", bodyReader)
+}
+
+// NewPutWorkflowRequestWithBody constructs an http.Request for the PutWorkflow method, with any body, and a specified content type
+func NewPutWorkflowRequestWithBody(server string, workflow WorkflowName, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "workflow", workflow, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/workflows/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewStartWorkflowRunRequest calls the generic StartWorkflowRun builder with application/json body
+func NewStartWorkflowRunRequest(server string, workflow WorkflowName, body StartWorkflowRunJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewStartWorkflowRunRequestWithBody(server, workflow, "application/json", bodyReader)
+}
+
+// NewStartWorkflowRunRequestWithBody constructs an http.Request for the StartWorkflowRun method, with any body, and a specified content type
+func NewStartWorkflowRunRequestWithBody(server string, workflow WorkflowName, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "workflow", workflow, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/workflows/%s/runs", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 func (c *Client) applyEditors(ctx context.Context, req *http.Request, additionalEditors []RequestEditorFn) error {
 	for _, r := range c.RequestEditors {
 		if err := r(ctx, req); err != nil {
@@ -5658,6 +6730,121 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /v1/tasks/{id}/retry (the `RetryTask` operationId).
 	RetryTaskWithResponse(ctx context.Context, id TaskID, reqEditors ...RequestEditorFn) (*RetryTaskResponse, error)
+
+	// ListWorkflowRunsWithResponse List workflow runs, newest first
+	//
+	// Runs of every workflow, or of one with `workflow` (including a
+	// deleted one's).
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /v1/workflow-runs (the `ListWorkflowRuns` operationId).
+	ListWorkflowRunsWithResponse(ctx context.Context, params *ListWorkflowRunsParams, reqEditors ...RequestEditorFn) (*ListWorkflowRunsResponse, error)
+
+	// GetWorkflowRunWithResponse Get a workflow run with its steps
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /v1/workflow-runs/{id} (the `GetWorkflowRun` operationId).
+	GetWorkflowRunWithResponse(ctx context.Context, id WorkflowRunID, reqEditors ...RequestEditorFn) (*GetWorkflowRunResponse, error)
+
+	// CancelWorkflowRunWithResponse Cancel a workflow run
+	//
+	// Steps that haven't started are skipped, and their pending tasks
+	// cancelled. Requests already being delivered finish and are recorded,
+	// but start nothing. Cancelling a cancelled run is a no-op; other
+	// finished runs are `invalid_state`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/workflow-runs/{id}/cancel (the `CancelWorkflowRun` operationId).
+	CancelWorkflowRunWithResponse(ctx context.Context, id WorkflowRunID, reqEditors ...RequestEditorFn) (*CancelWorkflowRunResponse, error)
+
+	// RetryWorkflowRunWithResponse Retry a workflow run
+	//
+	// Reopens a failed or cancelled run, under the definition it started
+	// with and with the same input: steps that succeeded stay, and the
+	// rest run again. Each step that runs again gets its task back,
+	// pending with a fresh set of attempts. A step that was waiting for a
+	// group follows the group: it succeeds if the group has since
+	// succeeded, and waits for it again if it is still going. The run's
+	// `attempt` goes up by one, and its `max_duration_seconds` starts
+	// over. Other runs are `invalid_state`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/workflow-runs/{id}/retry (the `RetryWorkflowRun` operationId).
+	RetryWorkflowRunWithResponse(ctx context.Context, id WorkflowRunID, reqEditors ...RequestEditorFn) (*RetryWorkflowRunResponse, error)
+
+	// ListWorkflowsWithResponse List workflows
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /v1/workflows (the `ListWorkflows` operationId).
+	ListWorkflowsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListWorkflowsResponse, error)
+
+	// DeleteWorkflowWithResponse Delete a workflow
+	//
+	// Deletes the definition only. Its runs are kept (under retention), and
+	// runs still going finish under the definition they started with.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with DELETE /v1/workflows/{workflow} (the `DeleteWorkflow` operationId).
+	DeleteWorkflowWithResponse(ctx context.Context, workflow WorkflowName, reqEditors ...RequestEditorFn) (*DeleteWorkflowResponse, error)
+
+	// GetWorkflowWithResponse Get a workflow
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /v1/workflows/{workflow} (the `GetWorkflow` operationId).
+	GetWorkflowWithResponse(ctx context.Context, workflow WorkflowName, reqEditors ...RequestEditorFn) (*GetWorkflowResponse, error)
+
+	// PutWorkflowWithBodyWithResponse Create or update a workflow
+	//
+	// Declarative and idempotent: the workflow ends up with exactly the
+	// given steps and settings. A changed definition gets a new `version`.
+	// Runs already started keep the definition they started with; new runs
+	// use this one.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /v1/workflows/{workflow} (the `PutWorkflow` operationId).
+	PutWorkflowWithBodyWithResponse(ctx context.Context, workflow WorkflowName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutWorkflowResponse, error)
+
+	// PutWorkflowWithResponse Create or update a workflow
+	//
+	// Declarative and idempotent: the workflow ends up with exactly the
+	// given steps and settings. A changed definition gets a new `version`.
+	// Runs already started keep the definition they started with; new runs
+	// use this one.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /v1/workflows/{workflow} (the `PutWorkflow` operationId).
+	PutWorkflowWithResponse(ctx context.Context, workflow WorkflowName, body PutWorkflowJSONRequestBody, reqEditors ...RequestEditorFn) (*PutWorkflowResponse, error)
+
+	// StartWorkflowRunWithBodyWithResponse Start a workflow run
+	//
+	// Starts a run and enqueues the steps without dependencies. With an
+	// `idempotency_key` already used for a run of this workflow, that run
+	// is returned (200) and nothing starts.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/workflows/{workflow}/runs (the `StartWorkflowRun` operationId).
+	StartWorkflowRunWithBodyWithResponse(ctx context.Context, workflow WorkflowName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*StartWorkflowRunResponse, error)
+
+	// StartWorkflowRunWithResponse Start a workflow run
+	//
+	// Starts a run and enqueues the steps without dependencies. With an
+	// `idempotency_key` already used for a run of this workflow, that run
+	// is returned (200) and nothing starts.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/workflows/{workflow}/runs (the `StartWorkflowRun` operationId).
+	StartWorkflowRunWithResponse(ctx context.Context, workflow WorkflowName, body StartWorkflowRunJSONRequestBody, reqEditors ...RequestEditorFn) (*StartWorkflowRunResponse, error)
 }
 
 type GetHealthzResponse struct {
@@ -7765,6 +8952,445 @@ func (r RetryTaskResponse) ContentType() string {
 	return ""
 }
 
+type ListWorkflowRunsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *WorkflowRunList
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListWorkflowRunsResponse) GetJSON200() *WorkflowRunList {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ListWorkflowRunsResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ListWorkflowRunsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListWorkflowRunsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListWorkflowRunsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListWorkflowRunsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetWorkflowRunResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *WorkflowRun
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetWorkflowRunResponse) GetJSON200() *WorkflowRun {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetWorkflowRunResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetWorkflowRunResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetWorkflowRunResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetWorkflowRunResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetWorkflowRunResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CancelWorkflowRunResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *WorkflowRun
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r CancelWorkflowRunResponse) GetJSON200() *WorkflowRun {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r CancelWorkflowRunResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r CancelWorkflowRunResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CancelWorkflowRunResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CancelWorkflowRunResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CancelWorkflowRunResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type RetryWorkflowRunResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *WorkflowRun
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r RetryWorkflowRunResponse) GetJSON200() *WorkflowRun {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r RetryWorkflowRunResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r RetryWorkflowRunResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RetryWorkflowRunResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RetryWorkflowRunResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RetryWorkflowRunResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListWorkflowsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *WorkflowList
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListWorkflowsResponse) GetJSON200() *WorkflowList {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ListWorkflowsResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ListWorkflowsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListWorkflowsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListWorkflowsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListWorkflowsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type DeleteWorkflowResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r DeleteWorkflowResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r DeleteWorkflowResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteWorkflowResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteWorkflowResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DeleteWorkflowResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetWorkflowResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Workflow
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetWorkflowResponse) GetJSON200() *Workflow {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetWorkflowResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetWorkflowResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetWorkflowResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetWorkflowResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetWorkflowResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type PutWorkflowResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Workflow
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *Workflow
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r PutWorkflowResponse) GetJSON200() *Workflow {
+	return r.JSON200
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r PutWorkflowResponse) GetJSON201() *Workflow {
+	return r.JSON201
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r PutWorkflowResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r PutWorkflowResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r PutWorkflowResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PutWorkflowResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r PutWorkflowResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type StartWorkflowRunResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *WorkflowRun
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *WorkflowRun
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r StartWorkflowRunResponse) GetJSON200() *WorkflowRun {
+	return r.JSON200
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r StartWorkflowRunResponse) GetJSON201() *WorkflowRun {
+	return r.JSON201
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r StartWorkflowRunResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r StartWorkflowRunResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r StartWorkflowRunResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r StartWorkflowRunResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r StartWorkflowRunResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // GetHealthzWithResponse Liveness probe
 //
 // Returns 200 while the process is running. Does not touch the database.
@@ -8605,6 +10231,187 @@ func (c *ClientWithResponses) RetryTaskWithResponse(ctx context.Context, id Task
 		return nil, err
 	}
 	return ParseRetryTaskResponse(rsp)
+}
+
+// ListWorkflowRunsWithResponse List workflow runs, newest first
+//
+// Runs of every workflow, or of one with `workflow` (including a
+// deleted one's).
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /v1/workflow-runs (the `ListWorkflowRuns` operationId).
+func (c *ClientWithResponses) ListWorkflowRunsWithResponse(ctx context.Context, params *ListWorkflowRunsParams, reqEditors ...RequestEditorFn) (*ListWorkflowRunsResponse, error) {
+	rsp, err := c.ListWorkflowRuns(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListWorkflowRunsResponse(rsp)
+}
+
+// GetWorkflowRunWithResponse Get a workflow run with its steps
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /v1/workflow-runs/{id} (the `GetWorkflowRun` operationId).
+func (c *ClientWithResponses) GetWorkflowRunWithResponse(ctx context.Context, id WorkflowRunID, reqEditors ...RequestEditorFn) (*GetWorkflowRunResponse, error) {
+	rsp, err := c.GetWorkflowRun(ctx, id, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetWorkflowRunResponse(rsp)
+}
+
+// CancelWorkflowRunWithResponse Cancel a workflow run
+//
+// Steps that haven't started are skipped, and their pending tasks
+// cancelled. Requests already being delivered finish and are recorded,
+// but start nothing. Cancelling a cancelled run is a no-op; other
+// finished runs are `invalid_state`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/workflow-runs/{id}/cancel (the `CancelWorkflowRun` operationId).
+func (c *ClientWithResponses) CancelWorkflowRunWithResponse(ctx context.Context, id WorkflowRunID, reqEditors ...RequestEditorFn) (*CancelWorkflowRunResponse, error) {
+	rsp, err := c.CancelWorkflowRun(ctx, id, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCancelWorkflowRunResponse(rsp)
+}
+
+// RetryWorkflowRunWithResponse Retry a workflow run
+//
+// Reopens a failed or cancelled run, under the definition it started
+// with and with the same input: steps that succeeded stay, and the
+// rest run again. Each step that runs again gets its task back,
+// pending with a fresh set of attempts. A step that was waiting for a
+// group follows the group: it succeeds if the group has since
+// succeeded, and waits for it again if it is still going. The run's
+// `attempt` goes up by one, and its `max_duration_seconds` starts
+// over. Other runs are `invalid_state`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/workflow-runs/{id}/retry (the `RetryWorkflowRun` operationId).
+func (c *ClientWithResponses) RetryWorkflowRunWithResponse(ctx context.Context, id WorkflowRunID, reqEditors ...RequestEditorFn) (*RetryWorkflowRunResponse, error) {
+	rsp, err := c.RetryWorkflowRun(ctx, id, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRetryWorkflowRunResponse(rsp)
+}
+
+// ListWorkflowsWithResponse List workflows
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /v1/workflows (the `ListWorkflows` operationId).
+func (c *ClientWithResponses) ListWorkflowsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListWorkflowsResponse, error) {
+	rsp, err := c.ListWorkflows(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListWorkflowsResponse(rsp)
+}
+
+// DeleteWorkflowWithResponse Delete a workflow
+//
+// Deletes the definition only. Its runs are kept (under retention), and
+// runs still going finish under the definition they started with.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with DELETE /v1/workflows/{workflow} (the `DeleteWorkflow` operationId).
+func (c *ClientWithResponses) DeleteWorkflowWithResponse(ctx context.Context, workflow WorkflowName, reqEditors ...RequestEditorFn) (*DeleteWorkflowResponse, error) {
+	rsp, err := c.DeleteWorkflow(ctx, workflow, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteWorkflowResponse(rsp)
+}
+
+// GetWorkflowWithResponse Get a workflow
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /v1/workflows/{workflow} (the `GetWorkflow` operationId).
+func (c *ClientWithResponses) GetWorkflowWithResponse(ctx context.Context, workflow WorkflowName, reqEditors ...RequestEditorFn) (*GetWorkflowResponse, error) {
+	rsp, err := c.GetWorkflow(ctx, workflow, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetWorkflowResponse(rsp)
+}
+
+// PutWorkflowWithBodyWithResponse Create or update a workflow
+//
+// Declarative and idempotent: the workflow ends up with exactly the
+// given steps and settings. A changed definition gets a new `version`.
+// Runs already started keep the definition they started with; new runs
+// use this one.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /v1/workflows/{workflow} (the `PutWorkflow` operationId).
+func (c *ClientWithResponses) PutWorkflowWithBodyWithResponse(ctx context.Context, workflow WorkflowName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutWorkflowResponse, error) {
+	rsp, err := c.PutWorkflowWithBody(ctx, workflow, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePutWorkflowResponse(rsp)
+}
+
+// PutWorkflowWithResponse Create or update a workflow
+//
+// Declarative and idempotent: the workflow ends up with exactly the
+// given steps and settings. A changed definition gets a new `version`.
+// Runs already started keep the definition they started with; new runs
+// use this one.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /v1/workflows/{workflow} (the `PutWorkflow` operationId).
+func (c *ClientWithResponses) PutWorkflowWithResponse(ctx context.Context, workflow WorkflowName, body PutWorkflowJSONRequestBody, reqEditors ...RequestEditorFn) (*PutWorkflowResponse, error) {
+	rsp, err := c.PutWorkflow(ctx, workflow, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePutWorkflowResponse(rsp)
+}
+
+// StartWorkflowRunWithBodyWithResponse Start a workflow run
+//
+// Starts a run and enqueues the steps without dependencies. With an
+// `idempotency_key` already used for a run of this workflow, that run
+// is returned (200) and nothing starts.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/workflows/{workflow}/runs (the `StartWorkflowRun` operationId).
+func (c *ClientWithResponses) StartWorkflowRunWithBodyWithResponse(ctx context.Context, workflow WorkflowName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*StartWorkflowRunResponse, error) {
+	rsp, err := c.StartWorkflowRunWithBody(ctx, workflow, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseStartWorkflowRunResponse(rsp)
+}
+
+// StartWorkflowRunWithResponse Start a workflow run
+//
+// Starts a run and enqueues the steps without dependencies. With an
+// `idempotency_key` already used for a run of this workflow, that run
+// is returned (200) and nothing starts.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/workflows/{workflow}/runs (the `StartWorkflowRun` operationId).
+func (c *ClientWithResponses) StartWorkflowRunWithResponse(ctx context.Context, workflow WorkflowName, body StartWorkflowRunJSONRequestBody, reqEditors ...RequestEditorFn) (*StartWorkflowRunResponse, error) {
+	rsp, err := c.StartWorkflowRun(ctx, workflow, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseStartWorkflowRunResponse(rsp)
 }
 
 // ParseGetHealthzResponse parses an HTTP response from a GetHealthzWithResponse call
@@ -10051,6 +11858,313 @@ func ParseRetryTaskResponse(rsp *http.Response) (*RetryTaskResponse, error) {
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListWorkflowRunsResponse parses an HTTP response from a ListWorkflowRunsWithResponse call
+func ParseListWorkflowRunsResponse(rsp *http.Response) (*ListWorkflowRunsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListWorkflowRunsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest WorkflowRunList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetWorkflowRunResponse parses an HTTP response from a GetWorkflowRunWithResponse call
+func ParseGetWorkflowRunResponse(rsp *http.Response) (*GetWorkflowRunResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetWorkflowRunResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest WorkflowRun
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCancelWorkflowRunResponse parses an HTTP response from a CancelWorkflowRunWithResponse call
+func ParseCancelWorkflowRunResponse(rsp *http.Response) (*CancelWorkflowRunResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CancelWorkflowRunResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest WorkflowRun
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRetryWorkflowRunResponse parses an HTTP response from a RetryWorkflowRunWithResponse call
+func ParseRetryWorkflowRunResponse(rsp *http.Response) (*RetryWorkflowRunResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RetryWorkflowRunResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest WorkflowRun
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListWorkflowsResponse parses an HTTP response from a ListWorkflowsWithResponse call
+func ParseListWorkflowsResponse(rsp *http.Response) (*ListWorkflowsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListWorkflowsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest WorkflowList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteWorkflowResponse parses an HTTP response from a DeleteWorkflowWithResponse call
+func ParseDeleteWorkflowResponse(rsp *http.Response) (*DeleteWorkflowResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteWorkflowResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 204:
+		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetWorkflowResponse parses an HTTP response from a GetWorkflowWithResponse call
+func ParseGetWorkflowResponse(rsp *http.Response) (*GetWorkflowResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetWorkflowResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Workflow
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePutWorkflowResponse parses an HTTP response from a PutWorkflowWithResponse call
+func ParsePutWorkflowResponse(rsp *http.Response) (*PutWorkflowResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PutWorkflowResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Workflow
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest Workflow
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseStartWorkflowRunResponse parses an HTTP response from a StartWorkflowRunWithResponse call
+func ParseStartWorkflowRunResponse(rsp *http.Response) (*StartWorkflowRunResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &StartWorkflowRunResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest WorkflowRun
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest WorkflowRun
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error

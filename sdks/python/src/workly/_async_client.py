@@ -39,6 +39,11 @@ from ._models import (
     TaskPage,
     TaskSort,
     TaskState,
+    Workflow,
+    WorkflowRun,
+    WorkflowRunPage,
+    WorkflowRunStatus,
+    WorkflowRunSummary,
 )
 
 
@@ -69,6 +74,8 @@ class AsyncWorkly:
         self.groups = AsyncGroups(self)
         self.schedules = AsyncSchedules(self)
         self.runs = AsyncRuns(self)
+        self.workflows = AsyncWorkflows(self)
+        self.workflow_runs = AsyncWorkflowRuns(self)
         self.alerts = AsyncAlerts(self)
 
     @property
@@ -446,7 +453,8 @@ class AsyncSchedules:
         name: str,
         *,
         cron: str,
-        url: str,
+        url: str | None = None,
+        workflow: str | None = None,
         timezone: str | None = None,
         payload: Any = None,
         body: str | None = None,
@@ -465,6 +473,9 @@ class AsyncSchedules:
     ) -> Schedule:
         """Create or update a schedule that calls `url` on `cron` (read in `timezone`, default UTC).
 
+        With `workflow` instead of `url`, each run starts a run of that
+        workflow, with `payload` as its input.
+
         Declarative: the schedule ends up with exactly these settings, and
         omitted ones are reset to their defaults. It doesn't change whether
         the schedule is paused. `next_runs` on the result shows when it runs
@@ -474,6 +485,7 @@ class AsyncSchedules:
         config = dict(
             cron=cron,
             url=url,
+            workflow=workflow,
             timezone=timezone,
             payload=payload,
             body=body,
@@ -611,3 +623,106 @@ class AsyncAlerts:
     async def test(self, channel_id: str) -> None:
         """Send a test alert to the channel now. Raises APIError (alert_failed) if it can't."""
         await self._client._send(r.test_alert_channel(channel_id))
+
+
+class AsyncWorkflows:
+    """Workflows: DAGs of HTTP steps, each delivered as a task once its dependencies succeed.
+
+    A step's endpoint can hand its completion to a task group by answering
+    2xx with `Workly-Wait-For: group/<id>`; the step then finishes when the
+    group does. Define workflows in workly.yaml (`workly deploy`) or with `put`.
+    """
+
+    def __init__(self, client: AsyncWorkly) -> None:
+        self._client = client
+
+    async def list(self) -> list[Workflow]:
+        """All workflows, by name, with their latest run."""
+        data = await self._client._send(r.list_workflows())
+        return [Workflow._from_json(w) for w in data["workflows"]]
+
+    async def get(self, name: str) -> Workflow:
+        return Workflow._from_json(await self._client._send(r.get_workflow(name)))
+
+    async def put(
+        self,
+        name: str,
+        *,
+        steps: list[r.WorkflowStepSpec],
+        max_duration_seconds: float | None = None,
+    ) -> Workflow:
+        """Create or update a workflow with exactly these steps.
+
+        Runs already started keep the definition they started with. A run
+        still going after `max_duration_seconds` (default a day) fails.
+        """
+        req = r.put_workflow(name, steps, max_duration_seconds)
+        return Workflow._from_json(await self._client._send(req))
+
+    async def delete(self, name: str) -> None:
+        """Delete the definition. Its runs are kept, and those going finish."""
+        await self._client._send(r.delete_workflow(name))
+
+    async def trigger(
+        self, name: str, *, input: Any = None, idempotency_key: str | None = None
+    ) -> WorkflowRun:
+        """Start a run. `input` (any JSON) is sent to every step without a body of its own.
+
+        With an `idempotency_key` already used for a run of this workflow,
+        that run is returned and nothing starts.
+        """
+        req = r.start_workflow_run(name, input, idempotency_key)
+        return WorkflowRun._from_json(await self._client._send(req))
+
+
+class AsyncWorkflowRuns:
+    """Runs of workflows, with each step's status, task and what it waits for."""
+
+    def __init__(self, client: AsyncWorkly) -> None:
+        self._client = client
+
+    async def list(
+        self,
+        *,
+        workflow: str | None = None,
+        status: WorkflowRunStatus | None = None,
+        page_size: int | None = None,
+    ) -> AsyncIterator[WorkflowRunSummary]:
+        """Runs of every workflow, or of one, newest first, fetching pages as needed."""
+        cursor: str | None = None
+        while True:
+            page = await self.list_page(
+                workflow=workflow, status=status, cursor=cursor, limit=page_size
+            )
+            for run in page.workflow_runs:
+                yield run
+            if page.next_cursor is None:
+                return
+            cursor = page.next_cursor
+
+    async def list_page(
+        self,
+        *,
+        workflow: str | None = None,
+        status: WorkflowRunStatus | None = None,
+        cursor: str | None = None,
+        limit: int | None = None,
+    ) -> WorkflowRunPage:
+        """One page of `list`. Pass the previous page's `next_cursor` as `cursor`."""
+        req = r.list_workflow_runs(workflow=workflow, status=status, cursor=cursor, limit=limit)
+        return WorkflowRunPage._from_json(await self._client._send(req))
+
+    async def get(self, run_id: str) -> WorkflowRun:
+        return WorkflowRun._from_json(await self._client._send(r.get_workflow_run(run_id)))
+
+    async def cancel(self, run_id: str) -> WorkflowRun:
+        """Stop a run: steps not yet started are skipped. Requests in flight finish."""
+        return WorkflowRun._from_json(await self._client._send(r.cancel_workflow_run(run_id)))
+
+    async def retry(self, run_id: str) -> WorkflowRun:
+        """Reopen a failed or cancelled run under the definition it started with.
+
+        Steps that succeeded stay; the rest run again, each on its old task with a
+        fresh set of attempts. A step that was waiting for a group follows the group.
+        """
+        return WorkflowRun._from_json(await self._client._send(r.retry_workflow_run(run_id)))

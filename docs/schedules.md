@@ -86,6 +86,7 @@ The expression is read in the schedule's `timezone`, an IANA name such as `Europ
 | `cron` | required | When to run. |
 | `timezone` | `UTC` | |
 | `url` | required | The endpoint to call. |
+| `workflow` | none | Instead of `url`: start a run of this [workflow](workflows.md), with `payload` as its input. |
 | `method`, `headers`, `payload` or `body`, `content_type` | `POST` | The request, as for [tasks](quickstart.md). |
 | `timeout_seconds` | `30` | How long to wait for a response. |
 | `max_attempts` | `3` | Attempts per run before it fails. |
@@ -95,9 +96,11 @@ The expression is read in the schedule's `timezone`, an IANA name such as `Europ
 | `missed` | `skip` | What to do about times missed while the server was down. |
 | `on_complete` | none | A [callback](callbacks.md), `{url, headers}`, called with a summary each time a run finishes. |
 
+A schedule with `workflow` sends no request of its own: each run starts a workflow run, using the schedule run's ID as its idempotency key, and succeeds once it has started (a workflow that doesn't exist yet is retried like a failed request). The schedule run links to the workflow run, which has its own status. For `overlap`, the schedule counts as still going until that workflow run finishes, so with `skip` a slow workflow never has two scheduled runs at once. `method`, `headers`, `body` and `content_type` don't apply.
+
 Retries are fewer and shorter than a queue's by default, so a failing run gives up well before a frequent schedule's next one.
 
-**Overlap.** With `skip`, a run that comes up while the previous run is still pending or running is recorded as `skipped`, with `skip_reason: overlap`, and not delivered. With `allow`, it runs alongside. Runs you start by hand always run.
+**Overlap.** With `skip`, a run that comes up while the previous run is still pending or running (or, for a schedule with `workflow`, while the workflow run it started is still going) is recorded as `skipped`, with `skip_reason: overlap`, and not delivered. With `allow`, it runs alongside. Runs you start by hand always run.
 
 **Missed runs.** If no server was running at a scheduled time (a run is missed if it can't start within a minute), `skip` records the most recent missed time as a `skipped` run with `skip_reason: missed` and carries on; `catch_up` runs it once. Either way, a server that was down for a day doesn't make up every run it missed.
 

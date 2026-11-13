@@ -20,9 +20,9 @@ export function timestamp(value: Date | string | undefined, name: string): strin
 }
 
 // The API's JSON is snake_case and the SDK's objects are camelCase. These keys
-// hold the caller's own data (a JSON payload, header names, queue names), so
-// their values are passed through as they are.
-const verbatim = new Set(['payload', 'headers', 'responseHeaders', 'counts']);
+// hold the caller's own data (a JSON payload or workflow input, header names,
+// queue names), so their values are passed through as they are.
+const verbatim = new Set(['payload', 'headers', 'responseHeaders', 'counts', 'input']);
 
 /** The API's JSON as SDK objects: snake_case keys to camelCase, recursively. */
 export function fromAPI(value: unknown): unknown {

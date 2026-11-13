@@ -180,6 +180,18 @@ export interface Task {
   onComplete?: Callback;
   /** The callback task enqueued when the task last finished, if it has `onComplete`. */
   callbackTaskId?: string;
+  /** The workflow step the task delivers, if it is one. */
+  workflowStep?: TaskWorkflowStep;
+}
+
+/** The workflow step a task delivers. Its task can't be retried alone: retry its run instead. */
+export interface TaskWorkflowStep {
+  /** The step, `wfs_…`. */
+  id: string;
+  name: string;
+  workflow: string;
+  /** The workflow run, `wfr_…`. */
+  runId: string;
 }
 
 export interface Attempt {
@@ -284,8 +296,13 @@ export interface ScheduleConfig {
   cron: string;
   /** IANA timezone the cron expression is read in. Default `UTC`. */
   timezone?: string | undefined;
-  /** The http(s) URL to call. */
-  url: string;
+  /** The http(s) URL to call. Use this or `workflow`. */
+  url?: string | undefined;
+  /**
+   * A workflow to start a run of instead of calling a URL, with `payload` as
+   * the run's input. Use this or `url`.
+   */
+  workflow?: string | undefined;
   /** Sent as JSON. Use this or `body`. */
   payload?: unknown | undefined;
   /** Sent as raw text. Use this or `payload`. */
@@ -360,6 +377,8 @@ export interface Schedule {
   nextRunsIfResumed?: string[];
   lastRun?: LastRun;
   onComplete?: Callback;
+  /** The workflow each run starts, for a schedule that starts one instead of calling `url`. */
+  workflow?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -395,6 +414,8 @@ export interface Run {
   retriedAt?: string;
   /** The callback task enqueued when the run last finished, if its schedule has `onComplete`. */
   callbackTaskId?: string;
+  /** The workflow run it started, for a schedule that starts a workflow. */
+  workflowRunId?: string;
 }
 
 export interface RunPage {
@@ -519,4 +540,143 @@ export interface RunSummary {
   last_outcome?: AttemptOutcome;
   last_error?: string;
   finished_at: string;
+}
+
+export type WorkflowRunStatus = 'running' | 'succeeded' | 'failed' | 'cancelled';
+
+/**
+ * `blocked` waits for its dependencies; `pending` has its task queued or
+ * retrying; `running` is being delivered; `waiting` succeeded and waits for
+ * its `waitFor` group; `skipped` never ran because the run stopped.
+ */
+export type StepStatus = 'blocked' | 'pending' | 'running' | 'waiting' | 'succeeded' | 'failed' | 'skipped';
+
+/**
+ * A step of a workflow: an HTTP request, sent as a task once the steps in
+ * `dependsOn` have succeeded. The request fields work as in `TaskSpec`.
+ * Without `payload` or `body`, the step is sent the run's context as JSON
+ * (`workflow_run_id`, `workflow`, `step`, `step_id`, `input`).
+ */
+export interface WorkflowStepConfig {
+  /** Unique within the workflow. */
+  name: string;
+  url: string;
+  dependsOn?: string[] | undefined;
+  method?: HTTPMethod | undefined;
+  headers?: Record<string, string> | undefined;
+  payload?: unknown | undefined;
+  body?: string | undefined;
+  contentType?: string | undefined;
+  /** The queue the step's task goes to, for its retry policy and limits. Default `_workflows`. */
+  queue?: string | undefined;
+  /** Overrides the queue's timeout. */
+  timeoutSeconds?: number | undefined;
+  /** Overrides the queue's max attempts. */
+  maxAttempts?: number | undefined;
+}
+
+/** A workflow's definition, for `workflows.put`. */
+export interface WorkflowConfig {
+  steps: WorkflowStepConfig[];
+  /** How long a run may take before it fails. Default a day. */
+  maxDurationSeconds?: number | undefined;
+}
+
+/** A DAG of HTTP steps, each delivered as a task once its dependencies have succeeded. */
+export interface Workflow {
+  name: string;
+  steps: WorkflowStepConfig[];
+  maxDurationSeconds: number;
+  /** Counts changes to the definition, from 1. */
+  version: number;
+  lastRun?: WorkflowRunSummary;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StartWorkflowRunOptions {
+  /** JSON passed to every step without a body of its own. */
+  input?: unknown;
+  /** Deduplicates runs of the workflow: an existing run with this key is returned. */
+  idempotencyKey?: string | undefined;
+}
+
+/** A workflow run without its steps, as lists show it. */
+export interface WorkflowRunSummary {
+  id: string;
+  workflow: string;
+  /** The definition's version the run started with. */
+  version: number;
+  status: WorkflowRunStatus;
+  /** Why the run failed or was cancelled. */
+  error?: string;
+  idempotencyKey?: string;
+  /** The schedule run that started it, if any. */
+  scheduleRunId?: string;
+  /** 1, plus one for each time the run was retried. */
+  attempt: number;
+  /** When the run was last retried. */
+  retriedAt?: string;
+  createdAt: string;
+  /** When a run still going fails (`maxDurationSeconds`). */
+  deadlineAt?: string;
+  finishedAt?: string;
+  /** From start to finish, or to now while running. */
+  durationMs?: number;
+}
+
+/** One execution of a workflow, under the definition it started with. */
+export interface WorkflowRun extends WorkflowRunSummary {
+  input?: unknown;
+  /** In definition order. */
+  steps: WorkflowStep[];
+}
+
+export interface WorkflowRunPage {
+  workflowRuns: WorkflowRunSummary[];
+  /** Pass as `cursor` to get the next page. Absent on the last page. */
+  nextCursor?: string;
+}
+
+/** The resource a step handed its completion to with `Workly-Wait-For`. */
+export interface WaitFor {
+  type: 'group';
+  id: string;
+}
+
+/** A step's task, which records its delivery attempts (`tasks.attempts`). */
+export interface WorkflowStepTask {
+  id: string;
+  queue: string;
+  state: TaskState;
+  attemptCount: number;
+  lastStatus?: number;
+  lastOutcome?: AttemptOutcome;
+  lastError?: string;
+  /** When a pending task is next delivered. */
+  runAt?: string;
+}
+
+/** A step of a run: where it is, and why. */
+export interface WorkflowStep {
+  /** Stable across retries of its request: use it as an idempotency key. */
+  id: string;
+  name: string;
+  status: StepStatus;
+  dependsOn: string[];
+  /** Dependencies that haven't succeeded yet. */
+  blockedBy: string[];
+  taskId?: string;
+  task?: WorkflowStepTask;
+  waitFor?: WaitFor;
+  error?: string;
+  createdAt?: string;
+  /** When its task was enqueued. */
+  readyAt?: string;
+  /** When its request succeeded. */
+  httpDoneAt?: string;
+  finishedAt?: string;
+  blockedMs?: number;
+  waitingMs?: number;
+  durationMs?: number;
 }

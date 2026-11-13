@@ -12,7 +12,7 @@ import {
   listAttemptsOptions,
   retryTaskMutation,
 } from '../../api/@tanstack/react-query.gen';
-import type { Attempt, Queue, Task } from '../../api';
+import type { Attempt, Queue, Task, TaskWorkflowStep } from '../../api';
 import { CodePanel } from '../../components/CodePanel';
 import { ConfirmButton } from '../../components/ConfirmButton';
 import { DisabledReason } from '../../components/DisabledReason';
@@ -31,7 +31,8 @@ import { hasDoubleSlash, toCurl } from '../../lib/curl';
 import { useNow } from '../../hooks/useNow';
 import { displayState } from '../../lib/states';
 import { errorMessage, LIVE } from '../../lib/api';
-import { formatDate, formatDuration, prettyBody } from '../../lib/format';
+import { formatDate, formatDuration, prettyBody, shortId } from '../../lib/format';
+import { isSystemQueue } from '../../lib/queues';
 import { Button } from '../../primitives/button';
 import { AttemptTable } from './AttemptTable';
 
@@ -83,7 +84,13 @@ export function TaskPage() {
                 </Link>
               ),
             },
-            { label: 'Group', value: task.group_id ? <GroupLink id={task.group_id} /> : <None /> },
+            ...(task.workflow_step
+              ? [{ label: 'Workflow step', value: <WorkflowStepLink step={task.workflow_step} /> }]
+              : []),
+            // Step tasks never join groups.
+            ...(task.workflow_step && !task.group_id
+              ? []
+              : [{ label: 'Group', value: task.group_id ? <GroupLink id={task.group_id} /> : <None /> }]),
             { label: 'Created', value: <RelativeTime iso={task.created_at} /> },
             { label: 'First attempt', value: firstAttempt ? <RelativeTime iso={firstAttempt.started_at} /> : <None /> },
             { label: 'Timeout', value: `${task.timeout_seconds ?? queue?.timeout_seconds ?? '…'}s` },
@@ -178,6 +185,27 @@ function Duration({ task }: { task: Task }) {
   );
 }
 
+const LINK = 'underline decoration-border underline-offset-4 hover:text-primary hover:decoration-primary';
+
+/** "prices of daily-refresh, run wfr_…": the step's run is where its progress and the steps after it are. */
+function WorkflowStepLink({ step }: { step: TaskWorkflowStep }) {
+  return (
+    <span>
+      <Link to={`/workflow-runs/${step.run_id}`} title={step.run_id} className={LINK}>
+        {step.name}
+      </Link>{' '}
+      of{' '}
+      <Link to={`/workflows/${encodeURIComponent(step.workflow)}`} className={LINK}>
+        {step.workflow}
+      </Link>
+      , run{' '}
+      <Link to={`/workflow-runs/${step.run_id}`} title={step.run_id} className={cn(LINK, 'font-mono text-xs')}>
+        {shortId(step.run_id)}
+      </Link>
+    </span>
+  );
+}
+
 /** The group by name when it has one; its ID otherwise, and while it loads. */
 function GroupLink({ id }: { id: string }) {
   const { data: group } = useQuery(getGroupOptions({ path: { id } }));
@@ -204,32 +232,43 @@ function TaskActions({ task }: { task: Task }) {
   const path = { path: { id: task.id } };
   const error = cancel.error ?? retry.error;
   const finished = task.state === 'succeeded' || task.state === 'failed' || task.state === 'cancelled';
+  // A step's task belongs to its run: it is retried by starting a new run, and
+  // a copy of its request (Workly-* headers and all) wouldn't be a step. Nothing
+  // can be enqueued into a system queue at all.
+  const step = task.workflow_step !== undefined;
+  const duplicable = !step && !isSystemQueue(task.queue);
 
   return (
     <>
       {error && <span className="text-xs text-destructive">{errorMessage(error)}</span>}
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => setDuplicating(true)}
-        title="Enqueue a new task with this request"
-      >
-        <Copy />
-        Duplicate
-      </Button>
-      <EnqueueTask queue={task.queue} from={task} open={duplicating} onClose={() => setDuplicating(false)} />
-      <DisabledReason
-        reason={task.state === 'running' ? 'An attempt is in flight; retry once it finishes.' : undefined}
-      >
-        <Button
-          variant={task.state === 'failed' ? 'default' : 'secondary'}
-          onClick={() => retry.mutate(path)}
-          disabled={task.state === 'running' || retry.isPending}
+      {duplicable && (
+        <>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setDuplicating(true)}
+            title="Enqueue a new task with this request"
+          >
+            <Copy />
+            Duplicate
+          </Button>
+          <EnqueueTask queue={task.queue} from={task} open={duplicating} onClose={() => setDuplicating(false)} />
+        </>
+      )}
+      {!step && (
+        <DisabledReason
+          reason={task.state === 'running' ? 'An attempt is in flight; retry once it finishes.' : undefined}
         >
-          <RotateCcw />
-          {finished ? 'Retry' : 'Run now'}
-        </Button>
-      </DisabledReason>
+          <Button
+            variant={task.state === 'failed' ? 'default' : 'secondary'}
+            onClick={() => retry.mutate(path)}
+            disabled={task.state === 'running' || retry.isPending}
+          >
+            <RotateCcw />
+            {finished ? 'Retry' : 'Run now'}
+          </Button>
+        </DisabledReason>
+      )}
       <DisabledReason reason={finished ? `A ${task.state} task can't be cancelled.` : undefined}>
         <ConfirmButton
           confirmLabel="Cancel task?"
@@ -255,6 +294,15 @@ function Notices({ task, queue, attempts }: { task: Task; queue?: Queue; attempt
         Failed after {n} attempt{n === 1 ? '' : 's'}
         {task.retried_at && attempts ? ' since the last manual retry' : ''}
         {task.last_error ? `: ${task.last_error}` : '.'}
+        {task.workflow_step && (
+          <span className="block">
+            A step of workflow run{' '}
+            <Link to={`/workflow-runs/${task.workflow_step.run_id}`} className={cn(LINK, 'font-mono text-xs')}>
+              {shortId(task.workflow_step.run_id)}
+            </Link>
+            of {task.workflow_step.workflow}: retry the run to try again, once the cause is fixed.
+          </span>
+        )}
       </Notice>
     );
   }

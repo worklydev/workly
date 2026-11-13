@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -236,6 +237,39 @@ func (e SkipReason) Valid() bool {
 	}
 }
 
+// Defines values for StepStatus.
+const (
+	StepStatusBlocked   StepStatus = "blocked"
+	StepStatusFailed    StepStatus = "failed"
+	StepStatusPending   StepStatus = "pending"
+	StepStatusRunning   StepStatus = "running"
+	StepStatusSkipped   StepStatus = "skipped"
+	StepStatusSucceeded StepStatus = "succeeded"
+	StepStatusWaiting   StepStatus = "waiting"
+)
+
+// Valid indicates whether the value is a known member of the StepStatus enum.
+func (e StepStatus) Valid() bool {
+	switch e {
+	case StepStatusBlocked:
+		return true
+	case StepStatusFailed:
+		return true
+	case StepStatusPending:
+		return true
+	case StepStatusRunning:
+		return true
+	case StepStatusSkipped:
+		return true
+	case StepStatusSucceeded:
+		return true
+	case StepStatusWaiting:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TaskState.
 const (
 	TaskStateCancelled TaskState = "cancelled"
@@ -257,6 +291,45 @@ func (e TaskState) Valid() bool {
 	case TaskStateRunning:
 		return true
 	case TaskStateSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WaitForType.
+const (
+	WaitForTypeGroup WaitForType = "group"
+)
+
+// Valid indicates whether the value is a known member of the WaitForType enum.
+func (e WaitForType) Valid() bool {
+	switch e {
+	case WaitForTypeGroup:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WorkflowRunStatus.
+const (
+	WorkflowRunStatusCancelled WorkflowRunStatus = "cancelled"
+	WorkflowRunStatusFailed    WorkflowRunStatus = "failed"
+	WorkflowRunStatusRunning   WorkflowRunStatus = "running"
+	WorkflowRunStatusSucceeded WorkflowRunStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the WorkflowRunStatus enum.
+func (e WorkflowRunStatus) Valid() bool {
+	switch e {
+	case WorkflowRunStatusCancelled:
+		return true
+	case WorkflowRunStatusFailed:
+		return true
+	case WorkflowRunStatusRunning:
+		return true
+	case WorkflowRunStatusSucceeded:
 		return true
 	default:
 		return false
@@ -796,8 +869,9 @@ type NewGroup struct {
 type Outcome string
 
 // OverlapPolicy What happens when a slot comes up while the previous run is still
-// pending or running. `skip` records the slot as a `skipped` run;
-// `allow` runs it alongside.
+// pending or running, or, for a schedule with `workflow`, while the
+// workflow run it started is still running. `skip` records the slot as
+// a `skipped` run; `allow` runs it alongside.
 type OverlapPolicy string
 
 // Queue defines model for Queue.
@@ -976,8 +1050,8 @@ type Run struct {
 	// ScheduledFor The cron slot, or when a manual run was triggered. Sent as `Workly-Scheduled-For`.
 	ScheduledFor time.Time `json:"scheduled_for"`
 
-	// SkipReason `overlap`: the previous run was still pending or running (overlap
-	// policy `skip`). `missed`: the server was down at the slot (missed
+	// SkipReason `overlap`: the previous run, or the workflow run it started, was
+	// still going (overlap policy `skip`). `missed`: the server was down at the slot (missed
 	// policy `skip`).
 	SkipReason *SkipReason `json:"skip_reason,omitempty"`
 
@@ -992,6 +1066,9 @@ type Run struct {
 	Trigger   RunTrigger `json:"trigger"`
 	UpdatedAt time.Time  `json:"updated_at"`
 	Url       string     `json:"url"`
+
+	// WorkflowRunId The workflow run this run started, for a schedule that starts a workflow.
+	WorkflowRunId *string `json:"workflow_run_id,omitempty"`
 }
 
 // RunList defines model for RunList.
@@ -1056,8 +1133,9 @@ type Schedule struct {
 	OnComplete *Callback `json:"on_complete,omitempty"`
 
 	// Overlap What happens when a slot comes up while the previous run is still
-	// pending or running. `skip` records the slot as a `skipped` run;
-	// `allow` runs it alongside.
+	// pending or running, or, for a schedule with `workflow`, while the
+	// workflow run it started is still running. `skip` records the slot as
+	// a `skipped` run; `allow` runs it alongside.
 	Overlap OverlapPolicy `json:"overlap"`
 	Paused  bool          `json:"paused"`
 
@@ -1071,10 +1149,15 @@ type Schedule struct {
 	Timezone       string           `json:"timezone"`
 	UpdatedAt      time.Time        `json:"updated_at"`
 	Url            string           `json:"url"`
+
+	// Workflow The workflow each run starts, for a schedule that starts one. `url` is then empty.
+	Workflow *string `json:"workflow,omitempty"`
 }
 
 // ScheduleConfig A schedule's settings. Omitted fields take the default. The request
-// fields (`url` to `content_type`) work as in `EnqueueRequest`.
+// fields (`url` to `content_type`) work as in `EnqueueRequest`. Set
+// `url` to call an endpoint, or `workflow` to start a run of that
+// workflow instead.
 type ScheduleConfig struct {
 	// BackoffMultiplier Retries back off as for queues (see `QueueConfig`).
 	BackoffMultiplier *float64 `json:"backoff_multiplier,omitempty"`
@@ -1123,8 +1206,9 @@ type ScheduleConfig struct {
 	OnComplete *Callback `json:"on_complete,omitempty"`
 
 	// Overlap What happens when a slot comes up while the previous run is still
-	// pending or running. `skip` records the slot as a `skipped` run;
-	// `allow` runs it alongside.
+	// pending or running, or, for a schedule with `workflow`, while the
+	// workflow run it started is still running. `skip` records the slot as
+	// a `skipped` run; `allow` runs it alongside.
 	Overlap *OverlapPolicy `json:"overlap,omitempty"`
 
 	// Payload A JSON body, sent with `Content-Type: application/json`. Use this or `body`.
@@ -1142,10 +1226,20 @@ type ScheduleConfig struct {
 	// once.
 	Timezone *string `json:"timezone,omitempty"`
 
-	// Url The http(s) URL to call.
+	// Url The http(s) URL to call. Use this or `workflow`.
 	//
 	// Example: https://api.example.com/reports/nightly
-	Url string `json:"url"`
+	Url *string `json:"url,omitempty"`
+
+	// Workflow A workflow to start a run of instead of calling a URL. The
+	// `payload`, if any, is the run's `input`; `method`, `headers` and
+	// `body` don't apply. Each run's attempt starts the workflow run
+	// (`workflow_run_id`), which then goes on independently: the run
+	// succeeding means the workflow started, not that it succeeded.
+	//
+	//
+	// Example: daily-refresh
+	Workflow *string `json:"workflow,omitempty"`
 }
 
 // ScheduleList defines model for ScheduleList.
@@ -1153,10 +1247,26 @@ type ScheduleList struct {
 	Schedules []Schedule `json:"schedules"`
 }
 
-// SkipReason `overlap`: the previous run was still pending or running (overlap
-// policy `skip`). `missed`: the server was down at the slot (missed
+// SkipReason `overlap`: the previous run, or the workflow run it started, was
+// still going (overlap policy `skip`). `missed`: the server was down at the slot (missed
 // policy `skip`).
 type SkipReason string
+
+// StartWorkflowRun defines model for StartWorkflowRun.
+type StartWorkflowRun struct {
+	// IdempotencyKey Deduplicates runs of the workflow.
+	IdempotencyKey *string `json:"idempotency_key,omitempty"`
+
+	// Input JSON passed to every step that has no body of its own.
+	Input *json.RawMessage `json:"input,omitempty"`
+}
+
+// StepStatus `blocked` waits for its dependencies; `pending` has its task
+// enqueued (or retrying); `running` is being delivered; `waiting`
+// succeeded and waits for the resource its response named in
+// `Workly-Wait-For`; `skipped` never ran, or stopped waiting, because
+// the run stopped.
+type StepStatus string
 
 // Task defines model for Task.
 type Task struct {
@@ -1236,6 +1346,10 @@ type Task struct {
 	TimeoutSeconds *float64  `json:"timeout_seconds,omitempty"`
 	UpdatedAt      time.Time `json:"updated_at"`
 	Url            string    `json:"url"`
+
+	// WorkflowStep The workflow step a task delivers, if it is one. A step's task can't be
+	// retried on its own: retry its workflow run instead.
+	WorkflowStep *TaskWorkflowStep `json:"workflow_step,omitempty"`
 }
 
 // TaskList defines model for TaskList.
@@ -1248,6 +1362,248 @@ type TaskList struct {
 // TaskState A `pending` task with `run_at` in the future is scheduled. A `failed`
 // task has exhausted its attempts or got a non-retryable response.
 type TaskState string
+
+// TaskWorkflowStep The workflow step a task delivers, if it is one. A step's task can't be
+// retried on its own: retry its workflow run instead.
+type TaskWorkflowStep struct {
+	// Id The step, `wfs_…`.
+	//
+	// Example: wfs_01M7AH8EPATE4EPK37FWTA5TBQ
+	Id string `json:"id"`
+
+	// Name The step's name in its workflow.
+	Name string `json:"name"`
+
+	// RunId The workflow run, `wfr_…`.
+	//
+	// Example: wfr_01M7AH8EP90ZQ4E9228337GGVR
+	RunId    string `json:"run_id"`
+	Workflow string `json:"workflow"`
+}
+
+// WaitFor The resource a step handed its completion to.
+type WaitFor struct {
+	Id   string      `json:"id"`
+	Type WaitForType `json:"type"`
+}
+
+// WaitForType defines model for WaitFor.Type.
+type WaitForType string
+
+// Workflow defines model for Workflow.
+type Workflow struct {
+	CreatedAt          time.Time            `json:"created_at"`
+	LastRun            *WorkflowRunSummary  `json:"last_run,omitempty"`
+	MaxDurationSeconds float64              `json:"max_duration_seconds"`
+	Name               string               `json:"name"`
+	Steps              []WorkflowStepConfig `json:"steps"`
+	UpdatedAt          time.Time            `json:"updated_at"`
+
+	// Version Counts changes to the definition, from 1.
+	Version int `json:"version"`
+}
+
+// WorkflowConfig defines model for WorkflowConfig.
+type WorkflowConfig struct {
+	// MaxDurationSeconds How long a run may take. A run still going after it fails, and a
+	// step still waiting fails with it.
+	MaxDurationSeconds *float64 `json:"max_duration_seconds,omitempty"`
+
+	// Steps The steps, which must form a DAG.
+	Steps []WorkflowStepConfig `json:"steps"`
+}
+
+// WorkflowList defines model for WorkflowList.
+type WorkflowList struct {
+	Workflows []Workflow `json:"workflows"`
+}
+
+// WorkflowRun defines model for WorkflowRun.
+type WorkflowRun struct {
+	// Attempt 1, plus one for each time the run was retried. Steps are sent it
+	// as `Workly-Workflow-Run-Attempt`.
+	Attempt   int       `json:"attempt"`
+	CreatedAt time.Time `json:"created_at"`
+
+	// DeadlineAt When a run still going fails (`max_duration_seconds`).
+	DeadlineAt *time.Time `json:"deadline_at,omitempty"`
+
+	// DurationMs From start to finish, or to now while running.
+	DurationMs *int `json:"duration_ms,omitempty"`
+
+	// Error Why the run failed or was cancelled.
+	Error      *string    `json:"error,omitempty"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+
+	// Id Example: wfr_01J9ZK3M5Q8R2T4V6W8X0Y2Z4A
+	Id             string           `json:"id"`
+	IdempotencyKey *string          `json:"idempotency_key,omitempty"`
+	Input          *json.RawMessage `json:"input,omitempty"`
+
+	// RetriedAt When the run was last retried. Absent if never.
+	RetriedAt *time.Time `json:"retried_at,omitempty"`
+
+	// ScheduleRunId The schedule run that started it, if any.
+	ScheduleRunId *string           `json:"schedule_run_id,omitempty"`
+	Status        WorkflowRunStatus `json:"status"`
+
+	// Steps In definition order.
+	Steps    []WorkflowStep `json:"steps"`
+	Version  int            `json:"version"`
+	Workflow string         `json:"workflow"`
+}
+
+// WorkflowRunList defines model for WorkflowRunList.
+type WorkflowRunList struct {
+	// NextCursor Pass as `cursor` to get the next page. Absent on the last page.
+	NextCursor   *string              `json:"next_cursor,omitempty"`
+	WorkflowRuns []WorkflowRunSummary `json:"workflow_runs"`
+}
+
+// WorkflowRunStatus defines model for WorkflowRunStatus.
+type WorkflowRunStatus string
+
+// WorkflowRunSummary defines model for WorkflowRunSummary.
+type WorkflowRunSummary struct {
+	// Attempt 1, plus one for each time the run was retried. Steps are sent it
+	// as `Workly-Workflow-Run-Attempt`.
+	Attempt   int       `json:"attempt"`
+	CreatedAt time.Time `json:"created_at"`
+
+	// DeadlineAt When a run still going fails (`max_duration_seconds`).
+	DeadlineAt *time.Time `json:"deadline_at,omitempty"`
+
+	// DurationMs From start to finish, or to now while running.
+	DurationMs *int `json:"duration_ms,omitempty"`
+
+	// Error Why the run failed or was cancelled.
+	Error      *string    `json:"error,omitempty"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+
+	// Id Example: wfr_01J9ZK3M5Q8R2T4V6W8X0Y2Z4A
+	Id             string  `json:"id"`
+	IdempotencyKey *string `json:"idempotency_key,omitempty"`
+
+	// RetriedAt When the run was last retried. Absent if never.
+	RetriedAt *time.Time `json:"retried_at,omitempty"`
+
+	// ScheduleRunId The schedule run that started it, if any.
+	ScheduleRunId *string           `json:"schedule_run_id,omitempty"`
+	Status        WorkflowRunStatus `json:"status"`
+	Version       int               `json:"version"`
+	Workflow      string            `json:"workflow"`
+}
+
+// WorkflowStep defines model for WorkflowStep.
+type WorkflowStep struct {
+	// BlockedBy Dependencies that haven't succeeded yet.
+	BlockedBy []string `json:"blocked_by"`
+
+	// BlockedMs Time spent waiting for dependencies.
+	BlockedMs *int       `json:"blocked_ms,omitempty"`
+	CreatedAt *time.Time `json:"created_at,omitempty"`
+	DependsOn []string   `json:"depends_on"`
+
+	// DurationMs From its task being enqueued to the step finishing (or now).
+	DurationMs *int       `json:"duration_ms,omitempty"`
+	Error      *string    `json:"error,omitempty"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+
+	// HttpDoneAt When its request succeeded.
+	HttpDoneAt *time.Time `json:"http_done_at,omitempty"`
+
+	// Id Example: wfs_01J9ZK3M5Q8R2T4V6W8X0Y2Z4A
+	Id   string `json:"id"`
+	Name string `json:"name"`
+
+	// ReadyAt When its task was enqueued.
+	ReadyAt *time.Time `json:"ready_at,omitempty"`
+
+	// Status `blocked` waits for its dependencies; `pending` has its task
+	// enqueued (or retrying); `running` is being delivered; `waiting`
+	// succeeded and waits for the resource its response named in
+	// `Workly-Wait-For`; `skipped` never ran, or stopped waiting, because
+	// the run stopped.
+	Status StepStatus `json:"status"`
+
+	// Task The step's task, which records its attempts.
+	Task   *WorkflowStepTask `json:"task,omitempty"`
+	TaskId *string           `json:"task_id,omitempty"`
+
+	// WaitFor The resource a step handed its completion to.
+	WaitFor *WaitFor `json:"wait_for,omitempty"`
+
+	// WaitingMs Time spent waiting for the `wait_for` resource.
+	WaitingMs *int `json:"waiting_ms,omitempty"`
+}
+
+// WorkflowStepConfig A step: an HTTP request, sent as a task once every step in
+// `depends_on` has succeeded. The request fields (`url` to
+// `content_type`) work as in `EnqueueRequest`. A step without `payload`
+// or `body` is sent the run's context as JSON (`workflow_run_id`,
+// `workflow`, `step`, `step_id`, `run_attempt`, `input`); every step
+// gets the `Workly-Workflow`, `Workly-Workflow-Run-Id`,
+// `Workly-Workflow-Step`, `Workly-Workflow-Step-Id` and
+// `Workly-Workflow-Run-Attempt` headers. The step ID is the same on
+// every delivery of the step, so it can serve as an idempotency key;
+// with the run attempt, it keys work that a retried run should redo.
+type WorkflowStepConfig struct {
+	// Body A raw text body. Use this or `payload`.
+	Body *string `json:"body,omitempty"`
+
+	// ContentType Content type of `body`. Defaults to `text/plain; charset=utf-8`.
+	ContentType *string `json:"content_type,omitempty"`
+
+	// DependsOn Steps that must succeed before this one starts.
+	DependsOn *[]string `json:"depends_on,omitempty"`
+
+	// Headers `Workly-*` headers are reserved.
+	Headers *map[string]string `json:"headers,omitempty"`
+
+	// MaxAttempts Overrides the queue's max attempts.
+	MaxAttempts *int        `json:"max_attempts,omitempty"`
+	Method      *HTTPMethod `json:"method,omitempty"`
+
+	// Name Unique within the workflow. Lowercase letters, digits, `-` and `_`; at most 64 characters.
+	//
+	// Example: prices
+	Name string `json:"name"`
+
+	// Payload A JSON body, sent with `Content-Type: application/json`. Use this or `body`.
+	Payload *json.RawMessage `json:"payload,omitempty"`
+
+	// Queue The queue the step's task goes to, for its retry policy, timeout
+	// and rate and concurrency limits. `_workflows` is created on
+	// demand; another queue must exist when the step starts.
+	Queue *string `json:"queue,omitempty"`
+
+	// TimeoutSeconds Overrides the queue's timeout.
+	TimeoutSeconds *float64 `json:"timeout_seconds,omitempty"`
+
+	// Url Example: https://api.example.com/jobs/prices
+	Url string `json:"url"`
+}
+
+// WorkflowStepTask The step's task, which records its attempts.
+type WorkflowStepTask struct {
+	AttemptCount int     `json:"attempt_count"`
+	Id           string  `json:"id"`
+	LastError    *string `json:"last_error,omitempty"`
+
+	// LastOutcome How a delivery attempt ended. `lost` means the result is unknown: the
+	// dispatcher crashed or shut down mid-delivery, and the endpoint may
+	// have processed the request.
+	LastOutcome *Outcome `json:"last_outcome,omitempty"`
+	LastStatus  *int     `json:"last_status,omitempty"`
+	Queue       string   `json:"queue"`
+
+	// RunAt When a pending task is next delivered.
+	RunAt *time.Time `json:"run_at,omitempty"`
+
+	// State A `pending` task with `run_at` in the future is scheduled. A `failed`
+	// task has exhausted its attempts or got a non-retryable response.
+	State TaskState `json:"state"`
+}
 
 // AlertChannelID defines model for AlertChannelID.
 type AlertChannelID = string
@@ -1281,6 +1637,12 @@ type TaskID = string
 
 // TaskSort defines model for TaskSort.
 type TaskSort string
+
+// WorkflowName defines model for WorkflowName.
+type WorkflowName = string
+
+// WorkflowRunID defines model for WorkflowRunID.
+type WorkflowRunID = string
 
 // GetActivityParams defines parameters for GetActivity.
 type GetActivityParams struct {
@@ -1438,6 +1800,18 @@ type SearchTasksParamsSort string
 // SearchTasksParamsOrder defines parameters for SearchTasks.
 type SearchTasksParamsOrder string
 
+// ListWorkflowRunsParams defines parameters for ListWorkflowRuns.
+type ListWorkflowRunsParams struct {
+	// Workflow Only this workflow's runs.
+	Workflow *string            `form:"workflow,omitempty" json:"workflow,omitempty"`
+	Status   *WorkflowRunStatus `form:"status,omitempty" json:"status,omitempty"`
+
+	// Cursor The `next_cursor` of the previous page, requested with the same
+	// filters and order.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // CreateAlertChannelJSONRequestBody defines body for CreateAlertChannel for application/json ContentType.
 type CreateAlertChannelJSONRequestBody = NewAlertChannel
 
@@ -1455,6 +1829,12 @@ type CreateTasksJSONRequestBody = BatchEnqueueRequest
 
 // PutScheduleJSONRequestBody defines body for PutSchedule for application/json ContentType.
 type PutScheduleJSONRequestBody = ScheduleConfig
+
+// PutWorkflowJSONRequestBody defines body for PutWorkflow for application/json ContentType.
+type PutWorkflowJSONRequestBody = WorkflowConfig
+
+// StartWorkflowRunJSONRequestBody defines body for StartWorkflowRun for application/json ContentType.
+type StartWorkflowRunJSONRequestBody = StartWorkflowRun
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -1590,6 +1970,33 @@ type ServerInterface interface {
 	// RetryTask Retry a task now
 	// (POST /v1/tasks/{id}/retry)
 	RetryTask(w http.ResponseWriter, r *http.Request, id TaskID)
+	// ListWorkflowRuns List workflow runs, newest first
+	// (GET /v1/workflow-runs)
+	ListWorkflowRuns(w http.ResponseWriter, r *http.Request, params ListWorkflowRunsParams)
+	// GetWorkflowRun Get a workflow run with its steps
+	// (GET /v1/workflow-runs/{id})
+	GetWorkflowRun(w http.ResponseWriter, r *http.Request, id WorkflowRunID)
+	// CancelWorkflowRun Cancel a workflow run
+	// (POST /v1/workflow-runs/{id}/cancel)
+	CancelWorkflowRun(w http.ResponseWriter, r *http.Request, id WorkflowRunID)
+	// RetryWorkflowRun Retry a workflow run
+	// (POST /v1/workflow-runs/{id}/retry)
+	RetryWorkflowRun(w http.ResponseWriter, r *http.Request, id WorkflowRunID)
+	// ListWorkflows List workflows
+	// (GET /v1/workflows)
+	ListWorkflows(w http.ResponseWriter, r *http.Request)
+	// DeleteWorkflow Delete a workflow
+	// (DELETE /v1/workflows/{workflow})
+	DeleteWorkflow(w http.ResponseWriter, r *http.Request, workflow WorkflowName)
+	// GetWorkflow Get a workflow
+	// (GET /v1/workflows/{workflow})
+	GetWorkflow(w http.ResponseWriter, r *http.Request, workflow WorkflowName)
+	// PutWorkflow Create or update a workflow
+	// (PUT /v1/workflows/{workflow})
+	PutWorkflow(w http.ResponseWriter, r *http.Request, workflow WorkflowName)
+	// StartWorkflowRun Start a workflow run
+	// (POST /v1/workflows/{workflow}/runs)
+	StartWorkflowRun(w http.ResponseWriter, r *http.Request, workflow WorkflowName)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -3120,6 +3527,274 @@ func (siw *ServerInterfaceWrapper) RetryTask(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
+// ListWorkflowRuns operation middleware
+func (siw *ServerInterfaceWrapper) ListWorkflowRuns(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListWorkflowRunsParams
+
+	// ------------- Optional query parameter "workflow" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workflow", r.URL.Query(), &params.Workflow, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "workflow"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workflow", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListWorkflowRuns(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetWorkflowRun operation middleware
+func (siw *ServerInterfaceWrapper) GetWorkflowRun(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id WorkflowRunID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetWorkflowRun(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CancelWorkflowRun operation middleware
+func (siw *ServerInterfaceWrapper) CancelWorkflowRun(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id WorkflowRunID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CancelWorkflowRun(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RetryWorkflowRun operation middleware
+func (siw *ServerInterfaceWrapper) RetryWorkflowRun(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id WorkflowRunID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RetryWorkflowRun(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListWorkflows operation middleware
+func (siw *ServerInterfaceWrapper) ListWorkflows(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListWorkflows(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteWorkflow operation middleware
+func (siw *ServerInterfaceWrapper) DeleteWorkflow(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "workflow" -------------
+	var workflow WorkflowName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workflow", r.PathValue("workflow"), &workflow, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workflow", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteWorkflow(w, r, workflow)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetWorkflow operation middleware
+func (siw *ServerInterfaceWrapper) GetWorkflow(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "workflow" -------------
+	var workflow WorkflowName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workflow", r.PathValue("workflow"), &workflow, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workflow", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetWorkflow(w, r, workflow)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PutWorkflow operation middleware
+func (siw *ServerInterfaceWrapper) PutWorkflow(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "workflow" -------------
+	var workflow WorkflowName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workflow", r.PathValue("workflow"), &workflow, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workflow", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutWorkflow(w, r, workflow)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartWorkflowRun operation middleware
+func (siw *ServerInterfaceWrapper) StartWorkflowRun(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "workflow" -------------
+	var workflow WorkflowName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workflow", r.PathValue("workflow"), &workflow, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workflow", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartWorkflowRun(w, r, workflow)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -3280,6 +3955,15 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/runs/{id}/delivery", wrapper.GetRunDelivery)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/runs/{id}/cancel", wrapper.CancelRun)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/runs/{id}/retry", wrapper.RetryRun)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/workflows", wrapper.ListWorkflows)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/workflows/{workflow}", wrapper.DeleteWorkflow)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/workflows/{workflow}", wrapper.GetWorkflow)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/workflows/{workflow}", wrapper.PutWorkflow)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/workflows/{workflow}/runs", wrapper.StartWorkflowRun)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/workflow-runs", wrapper.ListWorkflowRuns)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/workflow-runs/{id}", wrapper.GetWorkflowRun)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/workflow-runs/{id}/cancel", wrapper.CancelWorkflowRun)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/workflow-runs/{id}/retry", wrapper.RetryWorkflowRun)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/alert-channels", wrapper.ListAlertChannels)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/alert-channels", wrapper.CreateAlertChannel)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/alert-channels/{id}", wrapper.DeleteAlertChannel)
@@ -5023,6 +5707,380 @@ func (response RetryTaskdefaultJSONResponse) VisitRetryTaskResponse(w http.Respo
 	return err
 }
 
+type ListWorkflowRunsRequestObject struct {
+	Params ListWorkflowRunsParams
+}
+
+type ListWorkflowRunsResponseObject interface {
+	VisitListWorkflowRunsResponse(w http.ResponseWriter) error
+}
+
+type ListWorkflowRuns200JSONResponse WorkflowRunList
+
+func (response ListWorkflowRuns200JSONResponse) VisitListWorkflowRunsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkflowRunsdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListWorkflowRunsdefaultJSONResponse) VisitListWorkflowRunsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetWorkflowRunRequestObject struct {
+	Id WorkflowRunID `json:"id"`
+}
+
+type GetWorkflowRunResponseObject interface {
+	VisitGetWorkflowRunResponse(w http.ResponseWriter) error
+}
+
+type GetWorkflowRun200JSONResponse WorkflowRun
+
+func (response GetWorkflowRun200JSONResponse) VisitGetWorkflowRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetWorkflowRundefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetWorkflowRundefaultJSONResponse) VisitGetWorkflowRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelWorkflowRunRequestObject struct {
+	Id WorkflowRunID `json:"id"`
+}
+
+type CancelWorkflowRunResponseObject interface {
+	VisitCancelWorkflowRunResponse(w http.ResponseWriter) error
+}
+
+type CancelWorkflowRun200JSONResponse WorkflowRun
+
+func (response CancelWorkflowRun200JSONResponse) VisitCancelWorkflowRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelWorkflowRundefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response CancelWorkflowRundefaultJSONResponse) VisitCancelWorkflowRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RetryWorkflowRunRequestObject struct {
+	Id WorkflowRunID `json:"id"`
+}
+
+type RetryWorkflowRunResponseObject interface {
+	VisitRetryWorkflowRunResponse(w http.ResponseWriter) error
+}
+
+type RetryWorkflowRun200JSONResponse WorkflowRun
+
+func (response RetryWorkflowRun200JSONResponse) VisitRetryWorkflowRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RetryWorkflowRundefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response RetryWorkflowRundefaultJSONResponse) VisitRetryWorkflowRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkflowsRequestObject struct {
+}
+
+type ListWorkflowsResponseObject interface {
+	VisitListWorkflowsResponse(w http.ResponseWriter) error
+}
+
+type ListWorkflows200JSONResponse WorkflowList
+
+func (response ListWorkflows200JSONResponse) VisitListWorkflowsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkflowsdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListWorkflowsdefaultJSONResponse) VisitListWorkflowsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteWorkflowRequestObject struct {
+	Workflow WorkflowName `json:"workflow"`
+}
+
+type DeleteWorkflowResponseObject interface {
+	VisitDeleteWorkflowResponse(w http.ResponseWriter) error
+}
+
+type DeleteWorkflow204Response struct {
+}
+
+func (response DeleteWorkflow204Response) VisitDeleteWorkflowResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteWorkflowdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response DeleteWorkflowdefaultJSONResponse) VisitDeleteWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetWorkflowRequestObject struct {
+	Workflow WorkflowName `json:"workflow"`
+}
+
+type GetWorkflowResponseObject interface {
+	VisitGetWorkflowResponse(w http.ResponseWriter) error
+}
+
+type GetWorkflow200JSONResponse Workflow
+
+func (response GetWorkflow200JSONResponse) VisitGetWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetWorkflowdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetWorkflowdefaultJSONResponse) VisitGetWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutWorkflowRequestObject struct {
+	Workflow WorkflowName `json:"workflow"`
+	Body     *PutWorkflowJSONRequestBody
+}
+
+type PutWorkflowResponseObject interface {
+	VisitPutWorkflowResponse(w http.ResponseWriter) error
+}
+
+type PutWorkflow200JSONResponse Workflow
+
+func (response PutWorkflow200JSONResponse) VisitPutWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutWorkflow201JSONResponse Workflow
+
+func (response PutWorkflow201JSONResponse) VisitPutWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutWorkflowdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response PutWorkflowdefaultJSONResponse) VisitPutWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartWorkflowRunRequestObject struct {
+	Workflow WorkflowName `json:"workflow"`
+	Body     *StartWorkflowRunJSONRequestBody
+}
+
+type StartWorkflowRunResponseObject interface {
+	VisitStartWorkflowRunResponse(w http.ResponseWriter) error
+}
+
+type StartWorkflowRun200JSONResponse WorkflowRun
+
+func (response StartWorkflowRun200JSONResponse) VisitStartWorkflowRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartWorkflowRun201JSONResponse WorkflowRun
+
+func (response StartWorkflowRun201JSONResponse) VisitStartWorkflowRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartWorkflowRundefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response StartWorkflowRundefaultJSONResponse) VisitStartWorkflowRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// GetHealthz Liveness probe
@@ -5157,6 +6215,33 @@ type StrictServerInterface interface {
 	// RetryTask Retry a task now
 	// (POST /v1/tasks/{id}/retry)
 	RetryTask(ctx context.Context, request RetryTaskRequestObject) (RetryTaskResponseObject, error)
+	// ListWorkflowRuns List workflow runs, newest first
+	// (GET /v1/workflow-runs)
+	ListWorkflowRuns(ctx context.Context, request ListWorkflowRunsRequestObject) (ListWorkflowRunsResponseObject, error)
+	// GetWorkflowRun Get a workflow run with its steps
+	// (GET /v1/workflow-runs/{id})
+	GetWorkflowRun(ctx context.Context, request GetWorkflowRunRequestObject) (GetWorkflowRunResponseObject, error)
+	// CancelWorkflowRun Cancel a workflow run
+	// (POST /v1/workflow-runs/{id}/cancel)
+	CancelWorkflowRun(ctx context.Context, request CancelWorkflowRunRequestObject) (CancelWorkflowRunResponseObject, error)
+	// RetryWorkflowRun Retry a workflow run
+	// (POST /v1/workflow-runs/{id}/retry)
+	RetryWorkflowRun(ctx context.Context, request RetryWorkflowRunRequestObject) (RetryWorkflowRunResponseObject, error)
+	// ListWorkflows List workflows
+	// (GET /v1/workflows)
+	ListWorkflows(ctx context.Context, request ListWorkflowsRequestObject) (ListWorkflowsResponseObject, error)
+	// DeleteWorkflow Delete a workflow
+	// (DELETE /v1/workflows/{workflow})
+	DeleteWorkflow(ctx context.Context, request DeleteWorkflowRequestObject) (DeleteWorkflowResponseObject, error)
+	// GetWorkflow Get a workflow
+	// (GET /v1/workflows/{workflow})
+	GetWorkflow(ctx context.Context, request GetWorkflowRequestObject) (GetWorkflowResponseObject, error)
+	// PutWorkflow Create or update a workflow
+	// (PUT /v1/workflows/{workflow})
+	PutWorkflow(ctx context.Context, request PutWorkflowRequestObject) (PutWorkflowResponseObject, error)
+	// StartWorkflowRun Start a workflow run
+	// (POST /v1/workflows/{workflow}/runs)
+	StartWorkflowRun(ctx context.Context, request StartWorkflowRunRequestObject) (StartWorkflowRunResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -6369,6 +7454,255 @@ func (sh *strictHandler) RetryTask(w http.ResponseWriter, r *http.Request, id Ta
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RetryTaskResponseObject); ok {
 		if err := validResponse.VisitRetryTaskResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListWorkflowRuns operation middleware
+func (sh *strictHandler) ListWorkflowRuns(w http.ResponseWriter, r *http.Request, params ListWorkflowRunsParams) {
+	var request ListWorkflowRunsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListWorkflowRuns(ctx, request.(ListWorkflowRunsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListWorkflowRuns")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListWorkflowRunsResponseObject); ok {
+		if err := validResponse.VisitListWorkflowRunsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetWorkflowRun operation middleware
+func (sh *strictHandler) GetWorkflowRun(w http.ResponseWriter, r *http.Request, id WorkflowRunID) {
+	var request GetWorkflowRunRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetWorkflowRun(ctx, request.(GetWorkflowRunRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetWorkflowRun")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetWorkflowRunResponseObject); ok {
+		if err := validResponse.VisitGetWorkflowRunResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CancelWorkflowRun operation middleware
+func (sh *strictHandler) CancelWorkflowRun(w http.ResponseWriter, r *http.Request, id WorkflowRunID) {
+	var request CancelWorkflowRunRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CancelWorkflowRun(ctx, request.(CancelWorkflowRunRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CancelWorkflowRun")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CancelWorkflowRunResponseObject); ok {
+		if err := validResponse.VisitCancelWorkflowRunResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RetryWorkflowRun operation middleware
+func (sh *strictHandler) RetryWorkflowRun(w http.ResponseWriter, r *http.Request, id WorkflowRunID) {
+	var request RetryWorkflowRunRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RetryWorkflowRun(ctx, request.(RetryWorkflowRunRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RetryWorkflowRun")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RetryWorkflowRunResponseObject); ok {
+		if err := validResponse.VisitRetryWorkflowRunResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListWorkflows operation middleware
+func (sh *strictHandler) ListWorkflows(w http.ResponseWriter, r *http.Request) {
+	var request ListWorkflowsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListWorkflows(ctx, request.(ListWorkflowsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListWorkflows")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListWorkflowsResponseObject); ok {
+		if err := validResponse.VisitListWorkflowsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteWorkflow operation middleware
+func (sh *strictHandler) DeleteWorkflow(w http.ResponseWriter, r *http.Request, workflow WorkflowName) {
+	var request DeleteWorkflowRequestObject
+
+	request.Workflow = workflow
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteWorkflow(ctx, request.(DeleteWorkflowRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteWorkflow")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteWorkflowResponseObject); ok {
+		if err := validResponse.VisitDeleteWorkflowResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetWorkflow operation middleware
+func (sh *strictHandler) GetWorkflow(w http.ResponseWriter, r *http.Request, workflow WorkflowName) {
+	var request GetWorkflowRequestObject
+
+	request.Workflow = workflow
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetWorkflow(ctx, request.(GetWorkflowRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetWorkflow")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetWorkflowResponseObject); ok {
+		if err := validResponse.VisitGetWorkflowResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PutWorkflow operation middleware
+func (sh *strictHandler) PutWorkflow(w http.ResponseWriter, r *http.Request, workflow WorkflowName) {
+	var request PutWorkflowRequestObject
+
+	request.Workflow = workflow
+
+	var body PutWorkflowJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PutWorkflow(ctx, request.(PutWorkflowRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PutWorkflow")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PutWorkflowResponseObject); ok {
+		if err := validResponse.VisitPutWorkflowResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// StartWorkflowRun operation middleware
+func (sh *strictHandler) StartWorkflowRun(w http.ResponseWriter, r *http.Request, workflow WorkflowName) {
+	var request StartWorkflowRunRequestObject
+
+	request.Workflow = workflow
+
+	var body StartWorkflowRunJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.StartWorkflowRun(ctx, request.(StartWorkflowRunRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "StartWorkflowRun")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(StartWorkflowRunResponseObject); ok {
+		if err := validResponse.VisitStartWorkflowRunResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -11,7 +11,7 @@ The server is configured with environment variables. `--port` and `--database-ur
 | `WORKLY_PORT` | `7337` | Port for the API and dashboard. |
 | `WORKLY_METRICS_PORT` | unset | Serve `/metrics` on this port instead, without the API key. Keep it internal. |
 | `WORKLY_RETENTION` | `168h` | How long succeeded, failed and cancelled tasks (with their attempts) are kept. `0` keeps them forever. |
-| `WORKLY_RUN_RETENTION` | `WORKLY_RETENTION` | How long finished [schedule](schedules.md) runs are kept. Each schedule's latest run is always kept. `0` keeps them forever. |
+| `WORKLY_RUN_RETENTION` | `WORKLY_RETENTION` | How long finished [schedule](schedules.md) and [workflow](workflows.md) runs are kept. Each schedule's and workflow's latest run is always kept. `0` keeps them forever. |
 | `WORKLY_SHUTDOWN_TIMEOUT` | `25s` | How long in-flight requests and deliveries get to finish on shutdown. Deliveries still running after it are retried. |
 | `WORKLY_MAX_PAYLOAD_BYTES` | `1048576` | Largest task body, up to 100 MiB. |
 | `WORKLY_MAX_IN_FLIGHT` | `100` | Most task deliveries in flight at once, across all queues, up to 10,000. Throughput to slow endpoints is at most this divided by their response time; queues' `max_concurrency` limits them further. Schedule runs have their own cap of 20. |

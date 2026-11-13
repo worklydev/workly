@@ -6,7 +6,8 @@ import (
 	"github.com/worklydev/workly/internal/store"
 )
 
-// QueueSettings, ScheduleSettings and ValidateName validate settings as the
+// QueueSettings, ScheduleSettings, WorkflowSettings and ValidateName validate
+// settings as the
 // PUT handlers do, and apply the same defaults, so that `workly validate`
 // and `workly plan` can check a workly.yaml and compare it without a server.
 // Errors carry the message alone, without the error code.
@@ -28,4 +29,10 @@ func message(err error) error {
 		return errors.New(e.message)
 	}
 	return err
+}
+
+// WorkflowSettings validates a workflow definition as PutWorkflow does.
+func WorkflowSettings(in WorkflowConfig, maxBody int64) (store.WorkflowConfig, error) {
+	cfg, err := workflowConfig(in, maxBody)
+	return cfg, message(err)
 }

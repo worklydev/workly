@@ -249,6 +249,7 @@ function Upcoming({ schedule }: { schedule: Schedule }) {
 }
 
 function Request({ schedule: s }: { schedule: Schedule }) {
+  if (s.workflow) return <StartsWorkflow schedule={s} workflow={s.workflow} />;
   const body = s.payload !== undefined ? JSON.stringify(s.payload, null, 2) : s.body && prettyBody(s.body);
   const headers = Object.entries(s.headers)
     .map(([k, v]) => `${k}: ${v}`)
@@ -305,6 +306,33 @@ function Runs({ schedule }: { schedule: string }) {
         </TabsList>
       </Tabs>
       <RunTable pages={pages} empty={state === 'all' ? 'No runs yet.' : `No ${state} runs.`} />
+    </Section>
+  );
+}
+
+/** A schedule that starts a workflow run instead of calling a URL. */
+function StartsWorkflow({ schedule: s, workflow }: { schedule: Schedule; workflow: string }) {
+  return (
+    <Section title="Starts">
+      <CodePanel
+        title={
+          <span>
+            A run of workflow{' '}
+            <Link
+              to={`/workflows/${encodeURIComponent(workflow)}`}
+              className="font-mono text-foreground hover:underline"
+            >
+              {workflow}
+            </Link>
+            {s.payload !== undefined && ', with this input'}
+          </span>
+        }
+      >
+        {s.payload !== undefined ? JSON.stringify(s.payload, null, 2) : undefined}
+      </CodePanel>
+      <p className="text-xs text-faint">
+        A run succeeds once the workflow run has started; how the workflow went is on the workflow run's page.
+      </p>
     </Section>
   );
 }

@@ -94,7 +94,7 @@ export function RunPage() {
         />
         <StatCard label="Next attempt" value={run.state === 'pending' ? <RelativeTime iso={run.run_at} /> : <None />} />
       </StatStrip>
-      <Request run={run} />
+      {run.workflow_run_id || !run.url ? <StartedWorkflow run={run} /> : <Request run={run} />}
       {schedule?.on_complete && run.state !== 'skipped' && (
         <CallbackSection
           callback={schedule.on_complete}
@@ -260,4 +260,23 @@ function Attempts({ run }: { run: Run }) {
     return <p className="text-muted-foreground">Skipped runs aren't delivered, so there are no attempts.</p>;
   }
   return <AttemptTable task={run} attempts={data.attempts} />;
+}
+
+/** A run of a schedule that starts a workflow: the workflow run it started. */
+function StartedWorkflow({ run }: { run: Run }) {
+  return (
+    <Section title="Workflow run">
+      {run.workflow_run_id ? (
+        <p className="text-sm">
+          Started{' '}
+          <Link to={`/workflow-runs/${run.workflow_run_id}`} className="font-mono text-xs hover:underline">
+            {run.workflow_run_id}
+          </Link>
+          <span className="text-muted-foreground">: its steps and how they went are on its page.</span>
+        </p>
+      ) : (
+        <Muted>Not started yet.</Muted>
+      )}
+    </Section>
+  );
 }

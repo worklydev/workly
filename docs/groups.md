@@ -6,7 +6,7 @@ A task group tracks a set of tasks and calls you back once all of them have fini
 create group → enqueue tasks into it → close it → … tasks finish … → callback task
 ```
 
-A group is one execution, not a reusable definition: a nightly job creates a new group each night, and can give them all the same `name`. Groups are deliberately small. There are no dependencies between tasks, no chains and no nested groups: Workly is a task queue, not a workflow engine.
+A group is one execution, not a reusable definition: a nightly job creates a new group each night, and can give them all the same `name`. Groups are deliberately small: there are no dependencies between tasks, no chains and no nested groups. To run steps in order, with a group in the middle, use a [workflow](workflows.md): a step can hand its completion to a group with `Workly-Wait-For`, and the next step starts once the group has succeeded.
 
 ## Example: refresh stock prices, then rebuild the views
 

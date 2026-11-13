@@ -16,22 +16,23 @@ import (
 
 const scheduleColumns = `workspace_id, name, cron, timezone, method, url, headers, body,
 	timeout_ms, max_attempts, min_backoff_ms, max_backoff_ms, backoff_multiplier, retry_on_4xx,
-	overlap, missed, paused, next_run_at, created_at, updated_at, paused_at, callback_url, callback_headers`
+	overlap, missed, paused, next_run_at, created_at, updated_at, paused_at, callback_url, callback_headers, workflow`
 
 func scanSchedule(row interface{ Scan(...any) error }) (store.Schedule, error) {
 	var (
 		sc                               store.Schedule
 		headers, cbHeaders               []byte
-		cbURL                            sql.NullString
+		cbURL, workflow                  sql.NullString
 		timeout, minBackoff, maxBackoff  int64
 		next, created, updated, pausedAt dbTime
 	)
 	err := row.Scan(&sc.WorkspaceID, &sc.Name, &sc.Cron, &sc.Timezone, &sc.Method, &sc.URL, &headers, &sc.Body,
 		&timeout, &sc.MaxAttempts, &minBackoff, &maxBackoff, &sc.BackoffMultiplier, &sc.RetryOn4xx,
-		&sc.Overlap, &sc.Missed, &sc.Paused, &next, &created, &updated, &pausedAt, &cbURL, &cbHeaders)
+		&sc.Overlap, &sc.Missed, &sc.Paused, &next, &created, &updated, &pausedAt, &cbURL, &cbHeaders, &workflow)
 	if err != nil {
 		return sc, err
 	}
+	sc.Workflow = workflow.String
 	if sc.OnComplete, err = scanCallback(cbURL, cbHeaders); err != nil {
 		return sc, err
 	}
@@ -75,7 +76,7 @@ func (s *Store) PutSchedule(ctx context.Context, ws workspace.ID, name string, c
 		now := s.ts(time.Now())
 		// A paused schedule stays paused, with no next slot.
 		_, err = s.exec(ctx, tx, `INSERT INTO schedules (`+scheduleColumns+`)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
 			ON CONFLICT (workspace_id, name) DO UPDATE SET
 				cron = excluded.cron, timezone = excluded.timezone, method = excluded.method,
 				url = excluded.url, headers = excluded.headers, body = excluded.body,
@@ -84,12 +85,13 @@ func (s *Store) PutSchedule(ctx context.Context, ws workspace.ID, name string, c
 				backoff_multiplier = excluded.backoff_multiplier, retry_on_4xx = excluded.retry_on_4xx,
 				overlap = excluded.overlap, missed = excluded.missed,
 				callback_url = excluded.callback_url, callback_headers = excluded.callback_headers,
+				workflow = excluded.workflow,
 				next_run_at = CASE WHEN schedules.paused THEN NULL ELSE excluded.next_run_at END,
 				updated_at = excluded.updated_at`,
 			ws, name, cfg.Cron, cfg.Timezone, cfg.Method, cfg.URL, headers, cfg.Body,
 			cfg.Timeout.Milliseconds(), cfg.MaxAttempts, cfg.MinBackoff.Milliseconds(), cfg.MaxBackoff.Milliseconds(),
 			cfg.BackoffMultiplier, cfg.RetryOn4xx, cfg.Overlap, cfg.Missed, false, s.ts(nextRunAt), now, now,
-			cbURL, cbHeaders)
+			cbURL, cbHeaders, nullString(cfg.Workflow))
 		if err != nil {
 			return err
 		}
@@ -301,24 +303,25 @@ func (s *Store) insertRun(ctx context.Context, tx *sql.Tx, sc store.Schedule, tr
 const runColumns = `id, workspace_id, schedule, state, trigger_type, scheduled_for, skip_reason,
 	method, url, headers, body, run_at, attempt_count, replayed_attempts, lease_expires_at,
 	last_status, last_outcome, last_error, created_at, updated_at, finished_at, last_attempt_at, retried_at,
-	started_at, last_duration_ms, callback_task_id`
+	started_at, last_duration_ms, callback_task_id, workflow_run_id`
 
 func scanRun(row interface{ Scan(...any) error }) (store.Run, error) {
 	var (
 		r                                                        store.Run
 		headers                                                  []byte
 		lastStatus, lastDuration                                 sql.NullInt64
-		skipReason, lastOutcome, lastError, cbTask               sql.NullString
+		skipReason, lastOutcome, lastError, cbTask, wfRun        sql.NullString
 		slot, runAt, lease, created, updated, fin, last, retried dbTime
 		started                                                  dbTime
 	)
 	err := row.Scan(&r.ID, &r.WorkspaceID, &r.Schedule, &r.State, &r.Trigger, &slot, &skipReason,
 		&r.Method, &r.URL, &headers, &r.Body, &runAt, &r.AttemptCount, &r.ReplayedAttempts, &lease,
 		&lastStatus, &lastOutcome, &lastError, &created, &updated, &fin, &last, &retried, &started, &lastDuration,
-		&cbTask)
+		&cbTask, &wfRun)
 	if err != nil {
 		return r, err
 	}
+	r.WorkflowRunID = wfRun.String
 	if r.Headers, err = unmarshalHeaders(headers); err != nil {
 		return r, err
 	}
@@ -498,10 +501,17 @@ func (s *Store) FireSchedule(ctx context.Context, f store.Fire, now time.Time) (
 		}
 		state, reason := store.RunPending, f.SkipReason
 		if reason == "" && sc.Overlap == store.OverlapSkip {
+			// A schedule that starts a workflow is still going while that
+			// workflow run is, though its own run finished once it started it.
 			var active int
-			err := s.queryRow(ctx, tx, `SELECT count(*) FROM (SELECT 1 FROM runs
-				WHERE workspace_id = ? AND schedule = ? AND state IN ('pending', 'running') LIMIT 1) a`,
-				f.WorkspaceID, f.Schedule).Scan(&active)
+			err := s.queryRow(ctx, tx, `SELECT count(*) FROM (
+				SELECT 1 FROM runs
+				WHERE workspace_id = ? AND schedule = ? AND state IN ('pending', 'running')
+				UNION ALL
+				SELECT 1 FROM workflow_runs w JOIN runs ON runs.id = w.schedule_run_id
+				WHERE w.status = 'running' AND w.workspace_id = ? AND runs.schedule = ?
+				LIMIT 1) a`,
+				f.WorkspaceID, f.Schedule, f.WorkspaceID, f.Schedule).Scan(&active)
 			if err != nil {
 				return err
 			}

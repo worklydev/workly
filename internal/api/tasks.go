@@ -99,7 +99,7 @@ func (h Handlers) CreateTasks(ctx context.Context, req CreateTasksRequestObject)
 // checkEnqueue rejects enqueueing into Workly's own queues, and into new
 // queues with reserved names.
 func (h Handlers) checkEnqueue(ctx context.Context, ws workspace.ID, queue string) error {
-	if queue == CallbackQueue {
+	if SystemQueue(queue) {
 		return reservedQueue(queue)
 	}
 	return h.checkReserved(ctx, ws, queue)
@@ -327,6 +327,8 @@ func (h Handlers) RetryTask(ctx context.Context, req RetryTaskRequestObject) (Re
 		return nil, taskNotFound(req.Id)
 	case errors.Is(err, store.ErrInvalidState):
 		return nil, invalidState("task %q has an attempt in flight; retry it once the attempt finishes", req.Id)
+	case errors.Is(err, store.ErrWorkflowStepTask):
+		return nil, invalidState("task %q is a workflow step and can't be retried alone; retry its workflow run (POST /v1/workflow-runs/{id}/retry)", req.Id)
 	case err != nil:
 		return nil, err
 	}

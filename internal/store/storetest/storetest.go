@@ -78,6 +78,18 @@ func Run(t *testing.T, factory Factory) {
 		{"DeleteFinishedGroups", testDeleteFinishedGroups},
 		{"TaskCallbacks", testTaskCallbacks},
 		{"RunCallbacks", testRunCallbacks},
+		{"Workflows", testWorkflows},
+		{"WorkflowOrder", testWorkflowOrder},
+		{"WorkflowFailure", testWorkflowFailure},
+		{"RetryWorkflowRun", testRetryWorkflowRun},
+		{"RetryWorkflowRunWaitFor", testRetryWorkflowRunWaitFor},
+		{"WorkflowQueues", testWorkflowQueues},
+		{"WorkflowWaitFor", testWorkflowWaitFor},
+		{"WorkflowWaitRace", testWorkflowWaitRace},
+		{"WorkflowSnapshot", testWorkflowSnapshot},
+		{"ScheduledWorkflowOverlap", testScheduledWorkflowOverlap},
+		{"ExpireWorkflowRuns", testExpireWorkflowRuns},
+		{"DeleteFinishedWorkflowRuns", testDeleteFinishedWorkflowRuns},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

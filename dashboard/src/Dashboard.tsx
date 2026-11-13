@@ -21,6 +21,9 @@ import { SchedulePage } from './pages/schedules/SchedulePage';
 import { SchedulesPage } from './pages/schedules/SchedulesPage';
 import { TaskPage } from './pages/tasks/TaskPage';
 import { TasksPage } from './pages/tasks/TasksPage';
+import { WorkflowPage } from './pages/workflows/WorkflowPage';
+import { WorkflowRunPage } from './pages/workflows/WorkflowRunPage';
+import { WorkflowsPage } from './pages/workflows/WorkflowsPage';
 
 export type DashboardProps = {
   /** How API requests authenticate. Defaults to an API key prompt. */
@@ -115,6 +118,9 @@ export function Dashboard({
               <Route path="schedules" element={<SchedulesPage />} />
               <Route path="schedules/:schedule" element={<SchedulePage />} />
               <Route path="runs/:id" element={<RunPage />} />
+              <Route path="workflows" element={<WorkflowsPage />} />
+              <Route path="workflows/:workflow" element={<WorkflowPage />} />
+              <Route path="workflow-runs/:id" element={<WorkflowRunPage />} />
               <Route path="alerts" element={<AlertsPage />} />
               {routes}
               <Route path="*" element={<NotFoundPage />} />

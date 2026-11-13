@@ -21,6 +21,10 @@ func validateScheduleName(name string) error { return validateName("schedule", n
 // Workly enqueues into it.
 const CallbackQueue = store.CallbackQueue
 
+// SystemQueue reports whether a queue is one of Workly's own, which users
+// can configure but only Workly enqueues into: _callbacks and _workflows.
+func SystemQueue(queue string) bool { return queue == CallbackQueue || queue == store.WorkflowQueue }
+
 // Reserved reports whether a queue name is reserved for Workly's own queues.
 // Queues with such names that users created before they were reserved keep
 // working, but no new ones can be created.

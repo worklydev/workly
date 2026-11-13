@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { CancelPendingTasksData, CancelPendingTasksErrors, CancelPendingTasksResponses, CancelRunData, CancelRunErrors, CancelRunResponses, CancelTaskData, CancelTaskErrors, CancelTaskResponses, CloseGroupData, CloseGroupErrors, CloseGroupResponses, CreateAlertChannelData, CreateAlertChannelErrors, CreateAlertChannelResponses, CreateGroupData, CreateGroupErrors, CreateGroupResponses, CreateTaskData, CreateTaskErrors, CreateTaskResponses, CreateTasksData, CreateTasksErrors, CreateTasksResponses, DeleteAlertChannelData, DeleteAlertChannelErrors, DeleteAlertChannelResponses, DeleteQueueData, DeleteQueueErrors, DeleteQueueResponses, DeleteScheduleData, DeleteScheduleErrors, DeleteScheduleResponses, GetActivityData, GetActivityErrors, GetActivityResponses, GetGroupData, GetGroupErrors, GetGroupResponses, GetHealthzData, GetHealthzResponses, GetQueueActivityData, GetQueueActivityErrors, GetQueueActivityResponses, GetQueueData, GetQueueErrors, GetQueueFailuresData, GetQueueFailuresErrors, GetQueueFailuresResponses, GetQueueResponses, GetReadyzData, GetReadyzErrors, GetReadyzResponses, GetRunData, GetRunDeliveryData, GetRunDeliveryErrors, GetRunDeliveryResponses, GetRunErrors, GetRunResponses, GetScheduleData, GetScheduleErrors, GetScheduleResponses, GetTaskData, GetTaskDeliveryData, GetTaskDeliveryErrors, GetTaskDeliveryResponses, GetTaskErrors, GetTaskResponses, ListAlertChannelsData, ListAlertChannelsErrors, ListAlertChannelsResponses, ListAttemptsData, ListAttemptsErrors, ListAttemptsResponses, ListGroupsData, ListGroupsErrors, ListGroupsResponses, ListQueuesData, ListQueuesErrors, ListQueuesResponses, ListRunAttemptsData, ListRunAttemptsErrors, ListRunAttemptsResponses, ListRunsData, ListRunsErrors, ListRunsResponses, ListSchedulesData, ListSchedulesErrors, ListSchedulesResponses, ListTasksData, ListTasksErrors, ListTasksResponses, PauseQueueData, PauseQueueErrors, PauseQueueResponses, PauseScheduleData, PauseScheduleErrors, PauseScheduleResponses, PreviewCronData, PreviewCronErrors, PreviewCronResponses, PutQueueData, PutQueueErrors, PutQueueResponses, PutScheduleData, PutScheduleErrors, PutScheduleResponses, ResumeQueueData, ResumeQueueErrors, ResumeQueueResponses, ResumeScheduleData, ResumeScheduleErrors, ResumeScheduleResponses, RetryFailedTasksData, RetryFailedTasksErrors, RetryFailedTasksResponses, RetryRunData, RetryRunErrors, RetryRunResponses, RetryTaskData, RetryTaskErrors, RetryTaskResponses, SearchTasksData, SearchTasksErrors, SearchTasksResponses, TestAlertChannelData, TestAlertChannelErrors, TestAlertChannelResponses, TriggerScheduleData, TriggerScheduleErrors, TriggerScheduleResponses } from './types.gen';
+import type { CancelPendingTasksData, CancelPendingTasksErrors, CancelPendingTasksResponses, CancelRunData, CancelRunErrors, CancelRunResponses, CancelTaskData, CancelTaskErrors, CancelTaskResponses, CancelWorkflowRunData, CancelWorkflowRunErrors, CancelWorkflowRunResponses, CloseGroupData, CloseGroupErrors, CloseGroupResponses, CreateAlertChannelData, CreateAlertChannelErrors, CreateAlertChannelResponses, CreateGroupData, CreateGroupErrors, CreateGroupResponses, CreateTaskData, CreateTaskErrors, CreateTaskResponses, CreateTasksData, CreateTasksErrors, CreateTasksResponses, DeleteAlertChannelData, DeleteAlertChannelErrors, DeleteAlertChannelResponses, DeleteQueueData, DeleteQueueErrors, DeleteQueueResponses, DeleteScheduleData, DeleteScheduleErrors, DeleteScheduleResponses, DeleteWorkflowData, DeleteWorkflowErrors, DeleteWorkflowResponses, GetActivityData, GetActivityErrors, GetActivityResponses, GetGroupData, GetGroupErrors, GetGroupResponses, GetHealthzData, GetHealthzResponses, GetQueueActivityData, GetQueueActivityErrors, GetQueueActivityResponses, GetQueueData, GetQueueErrors, GetQueueFailuresData, GetQueueFailuresErrors, GetQueueFailuresResponses, GetQueueResponses, GetReadyzData, GetReadyzErrors, GetReadyzResponses, GetRunData, GetRunDeliveryData, GetRunDeliveryErrors, GetRunDeliveryResponses, GetRunErrors, GetRunResponses, GetScheduleData, GetScheduleErrors, GetScheduleResponses, GetTaskData, GetTaskDeliveryData, GetTaskDeliveryErrors, GetTaskDeliveryResponses, GetTaskErrors, GetTaskResponses, GetWorkflowData, GetWorkflowErrors, GetWorkflowResponses, GetWorkflowRunData, GetWorkflowRunErrors, GetWorkflowRunResponses, ListAlertChannelsData, ListAlertChannelsErrors, ListAlertChannelsResponses, ListAttemptsData, ListAttemptsErrors, ListAttemptsResponses, ListGroupsData, ListGroupsErrors, ListGroupsResponses, ListQueuesData, ListQueuesErrors, ListQueuesResponses, ListRunAttemptsData, ListRunAttemptsErrors, ListRunAttemptsResponses, ListRunsData, ListRunsErrors, ListRunsResponses, ListSchedulesData, ListSchedulesErrors, ListSchedulesResponses, ListTasksData, ListTasksErrors, ListTasksResponses, ListWorkflowRunsData, ListWorkflowRunsErrors, ListWorkflowRunsResponses, ListWorkflowsData, ListWorkflowsErrors, ListWorkflowsResponses, PauseQueueData, PauseQueueErrors, PauseQueueResponses, PauseScheduleData, PauseScheduleErrors, PauseScheduleResponses, PreviewCronData, PreviewCronErrors, PreviewCronResponses, PutQueueData, PutQueueErrors, PutQueueResponses, PutScheduleData, PutScheduleErrors, PutScheduleResponses, PutWorkflowData, PutWorkflowErrors, PutWorkflowResponses, ResumeQueueData, ResumeQueueErrors, ResumeQueueResponses, ResumeScheduleData, ResumeScheduleErrors, ResumeScheduleResponses, RetryFailedTasksData, RetryFailedTasksErrors, RetryFailedTasksResponses, RetryRunData, RetryRunErrors, RetryRunResponses, RetryTaskData, RetryTaskErrors, RetryTaskResponses, RetryWorkflowRunData, RetryWorkflowRunErrors, RetryWorkflowRunResponses, SearchTasksData, SearchTasksErrors, SearchTasksResponses, StartWorkflowRunData, StartWorkflowRunErrors, StartWorkflowRunResponses, TestAlertChannelData, TestAlertChannelErrors, TestAlertChannelResponses, TriggerScheduleData, TriggerScheduleErrors, TriggerScheduleResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -550,6 +550,130 @@ export const cancelRun = <ThrowOnError extends boolean = false>(options: Options
 export const retryRun = <ThrowOnError extends boolean = false>(options: Options<RetryRunData, ThrowOnError>): RequestResult<RetryRunResponses, RetryRunErrors, ThrowOnError> => (options.client ?? client).post<RetryRunResponses, RetryRunErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/v1/runs/{id}/retry',
+    ...options
+});
+
+/**
+ * List workflows
+ */
+export const listWorkflows = <ThrowOnError extends boolean = false>(options?: Options<ListWorkflowsData, ThrowOnError>): RequestResult<ListWorkflowsResponses, ListWorkflowsErrors, ThrowOnError> => (options?.client ?? client).get<ListWorkflowsResponses, ListWorkflowsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/workflows',
+    ...options
+});
+
+/**
+ * Delete a workflow
+ *
+ * Deletes the definition only. Its runs are kept (under retention), and
+ * runs still going finish under the definition they started with.
+ *
+ */
+export const deleteWorkflow = <ThrowOnError extends boolean = false>(options: Options<DeleteWorkflowData, ThrowOnError>): RequestResult<DeleteWorkflowResponses, DeleteWorkflowErrors, ThrowOnError> => (options.client ?? client).delete<DeleteWorkflowResponses, DeleteWorkflowErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/workflows/{workflow}',
+    ...options
+});
+
+/**
+ * Get a workflow
+ */
+export const getWorkflow = <ThrowOnError extends boolean = false>(options: Options<GetWorkflowData, ThrowOnError>): RequestResult<GetWorkflowResponses, GetWorkflowErrors, ThrowOnError> => (options.client ?? client).get<GetWorkflowResponses, GetWorkflowErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/workflows/{workflow}',
+    ...options
+});
+
+/**
+ * Create or update a workflow
+ *
+ * Declarative and idempotent: the workflow ends up with exactly the
+ * given steps and settings. A changed definition gets a new `version`.
+ * Runs already started keep the definition they started with; new runs
+ * use this one.
+ *
+ */
+export const putWorkflow = <ThrowOnError extends boolean = false>(options: Options<PutWorkflowData, ThrowOnError>): RequestResult<PutWorkflowResponses, PutWorkflowErrors, ThrowOnError> => (options.client ?? client).put<PutWorkflowResponses, PutWorkflowErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/workflows/{workflow}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Start a workflow run
+ *
+ * Starts a run and enqueues the steps without dependencies. With an
+ * `idempotency_key` already used for a run of this workflow, that run
+ * is returned (200) and nothing starts.
+ *
+ */
+export const startWorkflowRun = <ThrowOnError extends boolean = false>(options: Options<StartWorkflowRunData, ThrowOnError>): RequestResult<StartWorkflowRunResponses, StartWorkflowRunErrors, ThrowOnError> => (options.client ?? client).post<StartWorkflowRunResponses, StartWorkflowRunErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/workflows/{workflow}/runs',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * List workflow runs, newest first
+ *
+ * Runs of every workflow, or of one with `workflow` (including a
+ * deleted one's).
+ *
+ */
+export const listWorkflowRuns = <ThrowOnError extends boolean = false>(options?: Options<ListWorkflowRunsData, ThrowOnError>): RequestResult<ListWorkflowRunsResponses, ListWorkflowRunsErrors, ThrowOnError> => (options?.client ?? client).get<ListWorkflowRunsResponses, ListWorkflowRunsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/workflow-runs',
+    ...options
+});
+
+/**
+ * Get a workflow run with its steps
+ */
+export const getWorkflowRun = <ThrowOnError extends boolean = false>(options: Options<GetWorkflowRunData, ThrowOnError>): RequestResult<GetWorkflowRunResponses, GetWorkflowRunErrors, ThrowOnError> => (options.client ?? client).get<GetWorkflowRunResponses, GetWorkflowRunErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/workflow-runs/{id}',
+    ...options
+});
+
+/**
+ * Cancel a workflow run
+ *
+ * Steps that haven't started are skipped, and their pending tasks
+ * cancelled. Requests already being delivered finish and are recorded,
+ * but start nothing. Cancelling a cancelled run is a no-op; other
+ * finished runs are `invalid_state`.
+ *
+ */
+export const cancelWorkflowRun = <ThrowOnError extends boolean = false>(options: Options<CancelWorkflowRunData, ThrowOnError>): RequestResult<CancelWorkflowRunResponses, CancelWorkflowRunErrors, ThrowOnError> => (options.client ?? client).post<CancelWorkflowRunResponses, CancelWorkflowRunErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/workflow-runs/{id}/cancel',
+    ...options
+});
+
+/**
+ * Retry a workflow run
+ *
+ * Reopens a failed or cancelled run, under the definition it started
+ * with and with the same input: steps that succeeded stay, and the
+ * rest run again. Each step that runs again gets its task back,
+ * pending with a fresh set of attempts. A step that was waiting for a
+ * group follows the group: it succeeds if the group has since
+ * succeeded, and waits for it again if it is still going. The run's
+ * `attempt` goes up by one, and its `max_duration_seconds` starts
+ * over. Other runs are `invalid_state`.
+ *
+ */
+export const retryWorkflowRun = <ThrowOnError extends boolean = false>(options: Options<RetryWorkflowRunData, ThrowOnError>): RequestResult<RetryWorkflowRunResponses, RetryWorkflowRunErrors, ThrowOnError> => (options.client ?? client).post<RetryWorkflowRunResponses, RetryWorkflowRunErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/workflow-runs/{id}/retry',
     ...options
 });
 

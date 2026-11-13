@@ -1,9 +1,9 @@
-import type { Queue, Schedule } from '../api';
+import type { Queue, Schedule, Workflow } from '../api';
 import type { QueueFailureGroup, RunFailureGroup } from '../hooks/useFailureGroups';
 import { lastFailed } from '../hooks/useFailureGroups';
 import { COUNT_LIMIT, formatCount, formatDuration } from './format';
 
-/** Something about one queue or schedule that someone should look at. */
+/** Something about one queue, schedule or workflow that someone should look at. */
 export type Issue = {
   key: string;
   tone: 'danger' | 'warning' | 'neutral';
@@ -34,6 +34,7 @@ export const BEHIND_MS = 60_000;
 const plural = (n: number, one: string, many = one + 's') => `${formatCount(n)} ${n === 1 ? one : many}`;
 const queuePath = (name: string) => `/queues/${encodeURIComponent(name)}`;
 const schedulePath = (name: string) => `/schedules/${encodeURIComponent(name)}`;
+const workflowPath = (name: string) => `/workflows/${encodeURIComponent(name)}`;
 
 /** How long a queue's oldest due task has waited, if it's behind. */
 export function behindBy(q: Queue, now: number): number | undefined {
@@ -51,6 +52,7 @@ export function behindBy(q: Queue, now: number): number | undefined {
 export function workspaceStatus({
   queues,
   schedules,
+  workflows = [],
   queueFailures,
   runFailures,
   created,
@@ -59,6 +61,7 @@ export function workspaceStatus({
 }: {
   queues: Queue[];
   schedules: Schedule[];
+  workflows?: Workflow[];
   queueFailures: QueueFailureGroup[];
   runFailures: RunFailureGroup[];
   /** Tasks created in the range; undefined while loading. */
@@ -104,6 +107,20 @@ export function workspaceStatus({
       detail: latest?.error || undefined,
       at: latest ? new Date(lastFailed(latest)).toISOString() : s.last_run.scheduled_for,
       to: `${schedulePath(s.name)}?state=failed`,
+    });
+  }
+
+  for (const w of workflows) {
+    const last = w.last_run;
+    if (last?.status !== 'failed') continue;
+    issues.push({
+      key: `workflow\n${w.name}`,
+      tone: 'danger',
+      name: w.name,
+      what: 'last workflow run failed',
+      detail: last.error,
+      at: last.finished_at ?? last.created_at,
+      to: `${workflowPath(w.name)}?status=failed`,
     });
   }
 

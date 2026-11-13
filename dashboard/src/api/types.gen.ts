@@ -394,6 +394,28 @@ export type Task = {
      * The callback task enqueued when the task last finished, if it has `on_complete`.
      */
     callback_task_id?: string;
+    workflow_step?: TaskWorkflowStep;
+};
+
+/**
+ * The workflow step a task delivers, if it is one. A step's task can't be
+ * retried on its own: retry its workflow run instead.
+ *
+ */
+export type TaskWorkflowStep = {
+    /**
+     * The step, `wfs_…`.
+     */
+    id: string;
+    /**
+     * The step's name in its workflow.
+     */
+    name: string;
+    workflow: string;
+    /**
+     * The workflow run, `wfr_…`.
+     */
+    run_id: string;
 };
 
 /**
@@ -574,7 +596,9 @@ export type GroupList = {
 
 /**
  * A schedule's settings. Omitted fields take the default. The request
- * fields (`url` to `content_type`) work as in `EnqueueRequest`.
+ * fields (`url` to `content_type`) work as in `EnqueueRequest`. Set
+ * `url` to call an endpoint, or `workflow` to start a run of that
+ * workflow instead.
  *
  */
 export type ScheduleConfig = {
@@ -595,9 +619,18 @@ export type ScheduleConfig = {
      */
     timezone?: string;
     /**
-     * The http(s) URL to call.
+     * The http(s) URL to call. Use this or `workflow`.
      */
-    url: string;
+    url?: string;
+    /**
+     * A workflow to start a run of instead of calling a URL. The
+     * `payload`, if any, is the run's `input`; `method`, `headers` and
+     * `body` don't apply. Each run's attempt starts the workflow run
+     * (`workflow_run_id`), which then goes on independently: the run
+     * succeeding means the workflow started, not that it succeeded.
+     *
+     */
+    workflow?: string;
     method?: HttpMethod;
     /**
      * Headers sent with every run. `Workly-*` headers are reserved.
@@ -642,8 +675,9 @@ export type ScheduleConfig = {
 
 /**
  * What happens when a slot comes up while the previous run is still
- * pending or running. `skip` records the slot as a `skipped` run;
- * `allow` runs it alongside.
+ * pending or running, or, for a schedule with `workflow`, while the
+ * workflow run it started is still running. `skip` records the slot as
+ * a `skipped` run; `allow` runs it alongside.
  *
  */
 export type OverlapPolicy = 'skip' | 'allow';
@@ -659,6 +693,10 @@ export type MissedPolicy = 'skip' | 'catch_up';
 
 export type Schedule = {
     name: string;
+    /**
+     * The workflow each run starts, for a schedule that starts one. `url` is then empty.
+     */
+    workflow?: string;
     cron: string;
     timezone: string;
     method: HttpMethod;
@@ -738,8 +776,8 @@ export type RunState = 'pending' | 'running' | 'succeeded' | 'failed' | 'cancell
 export type RunTrigger = 'schedule' | 'manual';
 
 /**
- * `overlap`: the previous run was still pending or running (overlap
- * policy `skip`). `missed`: the server was down at the slot (missed
+ * `overlap`: the previous run, or the workflow run it started, was
+ * still going (overlap policy `skip`). `missed`: the server was down at the slot (missed
  * policy `skip`).
  *
  */
@@ -748,6 +786,10 @@ export type SkipReason = 'overlap' | 'missed';
 export type Run = {
     id: string;
     schedule: string;
+    /**
+     * The workflow run this run started, for a schedule that starts a workflow.
+     */
+    workflow_run_id?: string;
     state: RunState;
     trigger: RunTrigger;
     /**
@@ -826,6 +868,232 @@ export type RunList = {
      * Pass as `cursor` to get the next page. Absent on the last page.
      */
     next_cursor?: string;
+};
+
+/**
+ * A step: an HTTP request, sent as a task once every step in
+ * `depends_on` has succeeded. The request fields (`url` to
+ * `content_type`) work as in `EnqueueRequest`. A step without `payload`
+ * or `body` is sent the run's context as JSON (`workflow_run_id`,
+ * `workflow`, `step`, `step_id`, `run_attempt`, `input`); every step
+ * gets the `Workly-Workflow`, `Workly-Workflow-Run-Id`,
+ * `Workly-Workflow-Step`, `Workly-Workflow-Step-Id` and
+ * `Workly-Workflow-Run-Attempt` headers. The step ID is the same on
+ * every delivery of the step, so it can serve as an idempotency key;
+ * with the run attempt, it keys work that a retried run should redo.
+ *
+ */
+export type WorkflowStepConfig = {
+    /**
+     * Unique within the workflow. Lowercase letters, digits, `-` and `_`; at most 64 characters.
+     */
+    name: string;
+    /**
+     * Steps that must succeed before this one starts.
+     */
+    depends_on?: Array<string>;
+    url: string;
+    method?: HttpMethod;
+    /**
+     * `Workly-*` headers are reserved.
+     */
+    headers?: {
+        [key: string]: string;
+    };
+    /**
+     * A JSON body, sent with `Content-Type: application/json`. Use this or `body`.
+     */
+    payload?: unknown;
+    /**
+     * A raw text body. Use this or `payload`.
+     */
+    body?: string;
+    /**
+     * Content type of `body`. Defaults to `text/plain; charset=utf-8`.
+     */
+    content_type?: string;
+    /**
+     * The queue the step's task goes to, for its retry policy, timeout
+     * and rate and concurrency limits. `_workflows` is created on
+     * demand; another queue must exist when the step starts.
+     *
+     */
+    queue?: string;
+    /**
+     * Overrides the queue's timeout.
+     */
+    timeout_seconds?: number;
+    /**
+     * Overrides the queue's max attempts.
+     */
+    max_attempts?: number;
+};
+
+export type WorkflowConfig = {
+    /**
+     * The steps, which must form a DAG.
+     */
+    steps: Array<WorkflowStepConfig>;
+    /**
+     * How long a run may take. A run still going after it fails, and a
+     * step still waiting fails with it.
+     *
+     */
+    max_duration_seconds?: number;
+};
+
+export type Workflow = {
+    name: string;
+    steps: Array<WorkflowStepConfig>;
+    max_duration_seconds: number;
+    /**
+     * Counts changes to the definition, from 1.
+     */
+    version: number;
+    last_run?: WorkflowRunSummary;
+    created_at: string;
+    updated_at: string;
+};
+
+export type WorkflowList = {
+    workflows: Array<Workflow>;
+};
+
+export type StartWorkflowRun = {
+    /**
+     * JSON passed to every step that has no body of its own.
+     */
+    input?: unknown;
+    /**
+     * Deduplicates runs of the workflow.
+     */
+    idempotency_key?: string;
+};
+
+export type WorkflowRunStatus = 'running' | 'succeeded' | 'failed' | 'cancelled';
+
+/**
+ * `blocked` waits for its dependencies; `pending` has its task
+ * enqueued (or retrying); `running` is being delivered; `waiting`
+ * succeeded and waits for the resource its response named in
+ * `Workly-Wait-For`; `skipped` never ran, or stopped waiting, because
+ * the run stopped.
+ *
+ */
+export type StepStatus = 'blocked' | 'pending' | 'running' | 'waiting' | 'succeeded' | 'failed' | 'skipped';
+
+export type WorkflowRunSummary = {
+    id: string;
+    workflow: string;
+    version: number;
+    status: WorkflowRunStatus;
+    /**
+     * Why the run failed or was cancelled.
+     */
+    error?: string;
+    idempotency_key?: string;
+    /**
+     * The schedule run that started it, if any.
+     */
+    schedule_run_id?: string;
+    /**
+     * 1, plus one for each time the run was retried. Steps are sent it
+     * as `Workly-Workflow-Run-Attempt`.
+     *
+     */
+    attempt: number;
+    /**
+     * When the run was last retried. Absent if never.
+     */
+    retried_at?: string;
+    created_at: string;
+    /**
+     * When a run still going fails (`max_duration_seconds`).
+     */
+    deadline_at?: string;
+    finished_at?: string;
+    /**
+     * From start to finish, or to now while running.
+     */
+    duration_ms?: number;
+};
+
+export type WorkflowRun = WorkflowRunSummary & {
+    input?: unknown;
+    /**
+     * In definition order.
+     */
+    steps: Array<WorkflowStep>;
+};
+
+export type WorkflowRunList = {
+    workflow_runs: Array<WorkflowRunSummary>;
+    /**
+     * Pass as `cursor` to get the next page. Absent on the last page.
+     */
+    next_cursor?: string;
+};
+
+/**
+ * The resource a step handed its completion to.
+ */
+export type WaitFor = {
+    type: 'group';
+    id: string;
+};
+
+/**
+ * The step's task, which records its attempts.
+ */
+export type WorkflowStepTask = {
+    id: string;
+    queue: string;
+    state: TaskState;
+    attempt_count: number;
+    last_status?: number;
+    last_outcome?: Outcome;
+    last_error?: string;
+    /**
+     * When a pending task is next delivered.
+     */
+    run_at?: string;
+};
+
+export type WorkflowStep = {
+    id: string;
+    name: string;
+    status: StepStatus;
+    depends_on: Array<string>;
+    /**
+     * Dependencies that haven't succeeded yet.
+     */
+    blocked_by: Array<string>;
+    task_id?: string;
+    task?: WorkflowStepTask;
+    wait_for?: WaitFor;
+    error?: string;
+    created_at?: string;
+    /**
+     * When its task was enqueued.
+     */
+    ready_at?: string;
+    /**
+     * When its request succeeded.
+     */
+    http_done_at?: string;
+    finished_at?: string;
+    /**
+     * Time spent waiting for dependencies.
+     */
+    blocked_ms?: number;
+    /**
+     * Time spent waiting for the `wait_for` resource.
+     */
+    waiting_ms?: number;
+    /**
+     * From its task being enqueued to the step finishing (or now).
+     */
+    duration_ms?: number;
 };
 
 export type AlertChannelType = 'email' | 'slack';
@@ -929,6 +1197,13 @@ export type GroupId = string;
 
 export type RunId = string;
 
+/**
+ * Workflow name. Lowercase letters, digits, `-` and `_`; at most 64 characters.
+ */
+export type WorkflowName = string;
+
+export type WorkflowRunId = string;
+
 export type AlertChannelId = string;
 
 export type GetHealthzData = {
@@ -984,6 +1259,7 @@ export type ListQueuesErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -1025,6 +1301,7 @@ export type DeleteQueueErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -1066,6 +1343,7 @@ export type GetQueueErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -1107,6 +1385,7 @@ export type PutQueueErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -1152,6 +1431,7 @@ export type PauseQueueErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -1193,6 +1473,7 @@ export type ResumeQueueErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -1234,6 +1515,7 @@ export type CancelPendingTasksErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -1280,6 +1562,7 @@ export type RetryFailedTasksErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -1326,6 +1609,7 @@ export type GetQueueFailuresErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -1372,6 +1656,7 @@ export type GetQueueActivityErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -1406,6 +1691,7 @@ export type GetActivityErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -1480,6 +1766,7 @@ export type ListTasksErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -1527,6 +1814,7 @@ export type CreateTaskErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -1578,6 +1866,7 @@ export type CreateTasksErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -1657,6 +1946,7 @@ export type SearchTasksErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -1691,6 +1981,7 @@ export type GetTaskErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -1725,6 +2016,7 @@ export type ListAttemptsErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -1759,6 +2051,7 @@ export type GetTaskDeliveryErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -1793,6 +2086,7 @@ export type CancelTaskErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -1827,6 +2121,7 @@ export type RetryTaskErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -1869,6 +2164,7 @@ export type ListGroupsErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -1901,6 +2197,7 @@ export type CreateGroupErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -1939,6 +2236,7 @@ export type GetGroupErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -1973,6 +2271,7 @@ export type CloseGroupErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -2005,6 +2304,7 @@ export type ListSchedulesErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -2042,6 +2342,7 @@ export type DeleteScheduleErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -2079,6 +2380,7 @@ export type GetScheduleErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -2116,6 +2418,7 @@ export type PutScheduleErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -2166,6 +2469,7 @@ export type PreviewCronErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -2203,6 +2507,7 @@ export type PauseScheduleErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -2240,6 +2545,7 @@ export type ResumeScheduleErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -2277,6 +2583,7 @@ export type TriggerScheduleErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -2322,6 +2629,7 @@ export type ListRunsErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -2356,6 +2664,7 @@ export type GetRunErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -2390,6 +2699,7 @@ export type ListRunAttemptsErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -2424,6 +2734,7 @@ export type GetRunDeliveryErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -2458,6 +2769,7 @@ export type CancelRunErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -2492,6 +2804,7 @@ export type RetryRunErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -2512,6 +2825,350 @@ export type RetryRunResponses = {
 
 export type RetryRunResponse = RetryRunResponses[keyof RetryRunResponses];
 
+export type ListWorkflowsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/v1/workflows';
+};
+
+export type ListWorkflowsErrors = {
+    /**
+     * An error. Codes include `invalid_request`, `unauthorized`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
+     * `alert_channel_not_found`,
+     * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
+     * `invalid_state` (409), `payload_too_large` and
+     * `internal`.
+     *
+     */
+    default: Error;
+};
+
+export type ListWorkflowsError = ListWorkflowsErrors[keyof ListWorkflowsErrors];
+
+export type ListWorkflowsResponses = {
+    /**
+     * All workflows in the workspace, by name
+     */
+    200: WorkflowList;
+};
+
+export type ListWorkflowsResponse = ListWorkflowsResponses[keyof ListWorkflowsResponses];
+
+export type DeleteWorkflowData = {
+    body?: never;
+    path: {
+        /**
+         * Workflow name. Lowercase letters, digits, `-` and `_`; at most 64 characters.
+         */
+        workflow: string;
+    };
+    query?: never;
+    url: '/v1/workflows/{workflow}';
+};
+
+export type DeleteWorkflowErrors = {
+    /**
+     * An error. Codes include `invalid_request`, `unauthorized`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
+     * `alert_channel_not_found`,
+     * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
+     * `invalid_state` (409), `payload_too_large` and
+     * `internal`.
+     *
+     */
+    default: Error;
+};
+
+export type DeleteWorkflowError = DeleteWorkflowErrors[keyof DeleteWorkflowErrors];
+
+export type DeleteWorkflowResponses = {
+    /**
+     * Workflow deleted
+     */
+    204: void;
+};
+
+export type DeleteWorkflowResponse = DeleteWorkflowResponses[keyof DeleteWorkflowResponses];
+
+export type GetWorkflowData = {
+    body?: never;
+    path: {
+        /**
+         * Workflow name. Lowercase letters, digits, `-` and `_`; at most 64 characters.
+         */
+        workflow: string;
+    };
+    query?: never;
+    url: '/v1/workflows/{workflow}';
+};
+
+export type GetWorkflowErrors = {
+    /**
+     * An error. Codes include `invalid_request`, `unauthorized`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
+     * `alert_channel_not_found`,
+     * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
+     * `invalid_state` (409), `payload_too_large` and
+     * `internal`.
+     *
+     */
+    default: Error;
+};
+
+export type GetWorkflowError = GetWorkflowErrors[keyof GetWorkflowErrors];
+
+export type GetWorkflowResponses = {
+    /**
+     * The workflow
+     */
+    200: Workflow;
+};
+
+export type GetWorkflowResponse = GetWorkflowResponses[keyof GetWorkflowResponses];
+
+export type PutWorkflowData = {
+    body: WorkflowConfig;
+    path: {
+        /**
+         * Workflow name. Lowercase letters, digits, `-` and `_`; at most 64 characters.
+         */
+        workflow: string;
+    };
+    query?: never;
+    url: '/v1/workflows/{workflow}';
+};
+
+export type PutWorkflowErrors = {
+    /**
+     * An error. Codes include `invalid_request`, `unauthorized`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
+     * `alert_channel_not_found`,
+     * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
+     * `invalid_state` (409), `payload_too_large` and
+     * `internal`.
+     *
+     */
+    default: Error;
+};
+
+export type PutWorkflowError = PutWorkflowErrors[keyof PutWorkflowErrors];
+
+export type PutWorkflowResponses = {
+    /**
+     * Workflow updated
+     */
+    200: Workflow;
+    /**
+     * Workflow created
+     */
+    201: Workflow;
+};
+
+export type PutWorkflowResponse = PutWorkflowResponses[keyof PutWorkflowResponses];
+
+export type StartWorkflowRunData = {
+    body?: StartWorkflowRun;
+    path: {
+        /**
+         * Workflow name. Lowercase letters, digits, `-` and `_`; at most 64 characters.
+         */
+        workflow: string;
+    };
+    query?: never;
+    url: '/v1/workflows/{workflow}/runs';
+};
+
+export type StartWorkflowRunErrors = {
+    /**
+     * An error. Codes include `invalid_request`, `unauthorized`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
+     * `alert_channel_not_found`,
+     * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
+     * `invalid_state` (409), `payload_too_large` and
+     * `internal`.
+     *
+     */
+    default: Error;
+};
+
+export type StartWorkflowRunError = StartWorkflowRunErrors[keyof StartWorkflowRunErrors];
+
+export type StartWorkflowRunResponses = {
+    /**
+     * The run with that idempotency key
+     */
+    200: WorkflowRun;
+    /**
+     * The new run
+     */
+    201: WorkflowRun;
+};
+
+export type StartWorkflowRunResponse = StartWorkflowRunResponses[keyof StartWorkflowRunResponses];
+
+export type ListWorkflowRunsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Only this workflow's runs.
+         */
+        workflow?: string;
+        status?: WorkflowRunStatus;
+        /**
+         * The `next_cursor` of the previous page, requested with the same
+         * filters and order.
+         *
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/v1/workflow-runs';
+};
+
+export type ListWorkflowRunsErrors = {
+    /**
+     * An error. Codes include `invalid_request`, `unauthorized`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
+     * `alert_channel_not_found`,
+     * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
+     * `invalid_state` (409), `payload_too_large` and
+     * `internal`.
+     *
+     */
+    default: Error;
+};
+
+export type ListWorkflowRunsError = ListWorkflowRunsErrors[keyof ListWorkflowRunsErrors];
+
+export type ListWorkflowRunsResponses = {
+    /**
+     * A page of runs, without their steps
+     */
+    200: WorkflowRunList;
+};
+
+export type ListWorkflowRunsResponse = ListWorkflowRunsResponses[keyof ListWorkflowRunsResponses];
+
+export type GetWorkflowRunData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/v1/workflow-runs/{id}';
+};
+
+export type GetWorkflowRunErrors = {
+    /**
+     * An error. Codes include `invalid_request`, `unauthorized`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
+     * `alert_channel_not_found`,
+     * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
+     * `invalid_state` (409), `payload_too_large` and
+     * `internal`.
+     *
+     */
+    default: Error;
+};
+
+export type GetWorkflowRunError = GetWorkflowRunErrors[keyof GetWorkflowRunErrors];
+
+export type GetWorkflowRunResponses = {
+    /**
+     * The run
+     */
+    200: WorkflowRun;
+};
+
+export type GetWorkflowRunResponse = GetWorkflowRunResponses[keyof GetWorkflowRunResponses];
+
+export type CancelWorkflowRunData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/v1/workflow-runs/{id}/cancel';
+};
+
+export type CancelWorkflowRunErrors = {
+    /**
+     * An error. Codes include `invalid_request`, `unauthorized`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
+     * `alert_channel_not_found`,
+     * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
+     * `invalid_state` (409), `payload_too_large` and
+     * `internal`.
+     *
+     */
+    default: Error;
+};
+
+export type CancelWorkflowRunError = CancelWorkflowRunErrors[keyof CancelWorkflowRunErrors];
+
+export type CancelWorkflowRunResponses = {
+    /**
+     * The cancelled run
+     */
+    200: WorkflowRun;
+};
+
+export type CancelWorkflowRunResponse = CancelWorkflowRunResponses[keyof CancelWorkflowRunResponses];
+
+export type RetryWorkflowRunData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/v1/workflow-runs/{id}/retry';
+};
+
+export type RetryWorkflowRunErrors = {
+    /**
+     * An error. Codes include `invalid_request`, `unauthorized`,
+     * `queue_not_found`, `task_not_found`, `group_not_found`,
+     * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
+     * `alert_channel_not_found`,
+     * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
+     * `invalid_state` (409), `payload_too_large` and
+     * `internal`.
+     *
+     */
+    default: Error;
+};
+
+export type RetryWorkflowRunError = RetryWorkflowRunErrors[keyof RetryWorkflowRunErrors];
+
+export type RetryWorkflowRunResponses = {
+    /**
+     * The run, running again
+     */
+    200: WorkflowRun;
+};
+
+export type RetryWorkflowRunResponse = RetryWorkflowRunResponses[keyof RetryWorkflowRunResponses];
+
 export type ListAlertChannelsData = {
     body?: never;
     path?: never;
@@ -2524,6 +3181,7 @@ export type ListAlertChannelsErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -2556,6 +3214,7 @@ export type CreateAlertChannelErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -2590,6 +3249,7 @@ export type DeleteAlertChannelErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and
@@ -2624,6 +3284,7 @@ export type TestAlertChannelErrors = {
      * An error. Codes include `invalid_request`, `unauthorized`,
      * `queue_not_found`, `task_not_found`, `group_not_found`,
      * `group_closed` (409), `schedule_not_found`, `run_not_found`,
+     * `workflow_not_found`, `workflow_run_not_found`,
      * `alert_channel_not_found`,
      * `alert_channel_exists` (409), `email_unavailable`, `alert_failed` (502),
      * `invalid_state` (409), `payload_too_large` and

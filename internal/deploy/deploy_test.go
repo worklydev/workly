@@ -53,7 +53,7 @@ schedules:
 		t.Errorf("an empty queue gets defaults: %+v", f.Queues[1].settings)
 	}
 	s := f.Schedules[0].Config
-	if s.Url != "https://api.example.com/jobs/nightly" || (*s.Headers)["Authorization"] != "Bearer s3cret" ||
+	if *s.Url != "https://api.example.com/jobs/nightly" || (*s.Headers)["Authorization"] != "Bearer s3cret" ||
 		string(*s.Payload) != `{"full":true,"note":"s3cret"}` {
 		t.Errorf("schedule = %+v", s)
 	}
@@ -165,7 +165,7 @@ schedules:
 		schedule("changed", "@hourly", "Bearer old", `{"a": 1}`),
 		schedule("legacy", "@daily", "", `{}`),
 	}
-	plan, err := f.Plan(queues, schedules)
+	plan, err := f.Plan(queues, nil, schedules)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,15 +191,15 @@ schedules:
 	}
 
 	// Workly's own queues can be configured, but no new reserved ones created.
-	if _, err := parse(t, "version: 1\nqueues:\n  _callbacks: {max_attempts: 10}").Plan(nil, nil); err != nil {
+	if _, err := parse(t, "version: 1\nqueues:\n  _callbacks: {max_attempts: 10}").Plan(nil, nil, nil); err != nil {
 		t.Errorf("_callbacks: %v", err)
 	}
-	if _, err := parse(t, "version: 1\nqueues:\n  _mine: {}").Plan(nil, nil); err == nil || !strings.Contains(err.Error(), "reserved") {
+	if _, err := parse(t, "version: 1\nqueues:\n  _mine: {}").Plan(nil, nil, nil); err == nil || !strings.Contains(err.Error(), "reserved") {
 		t.Errorf("_mine: %v", err)
 	}
 
 	// Without a schedules section, the server's schedules aren't the file's business.
-	plan, _ = parse(t, "version: 1\nqueues: {}").Plan(queues, schedules)
+	plan, _ = parse(t, "version: 1\nqueues: {}").Plan(queues, nil, schedules)
 	if len(plan.Changes) != 0 || plan.Undeclared != nil {
 		t.Errorf("plan = %+v", plan)
 	}

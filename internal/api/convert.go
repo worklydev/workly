@@ -63,6 +63,9 @@ func toTask(t store.Task) Task {
 		OnComplete:     toCallback(t.OnComplete),
 		CallbackTaskId: optional(t.CallbackTaskID),
 	}
+	if step, ok := t.WorkflowStep(); ok {
+		out.WorkflowStep = &TaskWorkflowStep{Id: step.ID, Name: step.Name, Workflow: step.Workflow, RunId: step.RunID}
+	}
 	if t.Timeout != nil {
 		s := seconds(*t.Timeout)
 		out.TimeoutSeconds = &s

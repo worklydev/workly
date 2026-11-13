@@ -9,7 +9,8 @@ import (
 
 // Schedules are separate from queues: a schedule calls its endpoint on a
 // cron schedule, and each call is a Run with its own attempts. Nothing here
-// creates tasks or reads a queue.
+// creates tasks or reads a queue, except that a schedule can start a
+// workflow run instead of calling a URL.
 
 // OverlapPolicy decides what happens to a slot that comes up while the
 // previous run is still pending or running.
@@ -38,6 +39,10 @@ const (
 type ScheduleConfig struct {
 	Cron     string
 	Timezone string
+
+	// Workflow, if set, is the workflow each run starts instead of calling
+	// URL, with Body as the workflow run's input.
+	Workflow string
 
 	Method  string
 	URL     string
@@ -164,6 +169,9 @@ type Run struct {
 	RetriedAt    *time.Time
 	// CallbackTaskID is the callback enqueued when the run last finished.
 	CallbackTaskID string
+	// WorkflowRunID is the workflow run it started, for a schedule that
+	// starts a workflow.
+	WorkflowRunID string
 }
 
 // RunCallbackBody is the body of a schedule's callback.

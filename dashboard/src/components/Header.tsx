@@ -2,7 +2,12 @@ import { Fragment } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useLocation } from 'react-router';
 import { cn } from 'cn';
-import { getGroupOptions, getHealthzOptions, getRunOptions } from '../api/@tanstack/react-query.gen';
+import {
+  getGroupOptions,
+  getHealthzOptions,
+  getRunOptions,
+  getWorkflowRunOptions,
+} from '../api/@tanstack/react-query.gen';
 import { useSlots, type NavItem } from '../context';
 import { useFrom } from '../lib/from';
 import { Badge } from '../primitives/badge';
@@ -17,6 +22,7 @@ const LABELS: Record<string, string> = {
   groups: 'Groups',
   failures: 'Failures',
   schedules: 'Schedules',
+  workflows: 'Workflows',
 };
 
 /**
@@ -61,6 +67,16 @@ function useRunCrumbs(path: string, from: string | undefined) {
   return [...before, { to: path, label: id, mono: true }];
 }
 
+/** A workflow run belongs to its workflow: Workflows / daily-refresh / wfr_…. */
+function useWorkflowRunCrumbs(path: string) {
+  const id = path.startsWith('/workflow-runs/') ? decodeURIComponent(path.slice('/workflow-runs/'.length)) : '';
+  // Shares the run page's query.
+  const { data: run } = useQuery({ ...getWorkflowRunOptions({ path: { id } }), enabled: id !== '' });
+  if (!id) return undefined;
+  const before = crumbs(run ? `/workflows/${encodeURIComponent(run.workflow)}` : '/workflows');
+  return [...before, { to: path, label: id, mono: true }];
+}
+
 /** A group is named in the crumbs when it has a name: Groups / nightly-export. */
 function useGroupCrumbs(path: string) {
   const id = path.startsWith('/groups/') ? decodeURIComponent(path.slice('/groups/'.length)) : '';
@@ -76,7 +92,12 @@ export function Header() {
   const from = useFrom();
   const runItems = useRunCrumbs(path, from);
   const groupItems = useGroupCrumbs(path);
-  const items = runItems ?? groupItems ?? (path.startsWith('/tasks/') ? taskCrumbs(path, from) : crumbs(path, nav));
+  const workflowRunItems = useWorkflowRunCrumbs(path);
+  const items =
+    runItems ??
+    groupItems ??
+    workflowRunItems ??
+    (path.startsWith('/tasks/') ? taskCrumbs(path, from) : crumbs(path, nav));
 
   return (
     <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border px-4 sm:gap-4 sm:px-6">

@@ -246,13 +246,15 @@ func (s *server) instructions(r *http.Request) string {
 
 Schedules are separate from queues: a schedule calls its URL on a cron timetable, and each call is a run, retried and recorded like a task. get_schedule shows a schedule with its recent runs; a skipped run says why it didn't go (overlap or missed); get_run shows a run's attempts. list_runs without a schedule lists runs of every schedule, e.g. with state "failed".
 
+Workflows run a DAG of HTTP steps; each step is delivered as a task (in the _workflows queue unless the step names one) once the steps it depends on have succeeded. A step's endpoint can answer 2xx with the header Workly-Wait-For: group/<id> to finish only when that group completes. get_workflow_run shows where a run is and why: blocked steps list blocked_by, waiting steps their wait_for group (get_group shows its progress), and failed steps their error. A failed step stops the run: steps not yet started are skipped.
+
 To check health: list_queues shows each queue's current work and its last 24 hours (last_24h: succeeded, failed, and p50/p95 duration of the latest attempt, over duration_samples attempts). In task and run summaries, started_at minus created_at is time spent waiting to be delivered, and last_duration_ms is time spent in the handler. Fields with no value are null, not left out.
 
 To debug failures: get_queue groups a queue's failed tasks by error, with the latest task of each group; get_task shows a task and its attempts (status codes, errors, response bodies). list_tasks with state "failed" (and last_error) lists the tasks behind a group. get_task_delivery returns the exact signed request, with a curl command to replay it against a local handler.`)
 	if s.mode(r) == Full {
 		b.WriteString(`
 
-To test a handler: enqueue_task to its URL, then wait_for_task to see how the first attempt went. After fixing a handler, retry_task delivers a task again at once (retry_failed_tasks for a whole queue, or one group of failures with last_error). For a schedule's handler, trigger_schedule runs it now and wait_for_run shows the result; update_schedule creates or changes a schedule. Tools that change one task, run, queue or schedule return it as changed, so there is no need to read it again.`)
+To test a handler: enqueue_task to its URL, then wait_for_task to see how the first attempt went. After fixing a handler, retry_task delivers a task again at once (retry_failed_tasks for a whole queue, or one group of failures with last_error). For a schedule's handler, trigger_schedule runs it now and wait_for_run shows the result; update_schedule creates or changes a schedule. trigger_workflow starts a workflow run and cancel_workflow_run stops one; after fixing what failed a run, retry_workflow_run runs its failed and skipped steps again. Tools that change one task, run, queue or schedule return it as changed, so there is no need to read it again.`)
 	} else if s.opts.Mode == Full {
 		b.WriteString(`
 

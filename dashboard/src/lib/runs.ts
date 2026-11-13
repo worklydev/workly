@@ -17,7 +17,7 @@ export const runPaging = {
 };
 
 export const SKIP_REASONS = {
-  overlap: 'The previous run was still pending or running (overlap: skip).',
+  overlap: 'The previous run, or the workflow run it started, was still going (overlap: skip).',
   missed: 'The server was down at this time (missed: skip).',
 } as const;
 

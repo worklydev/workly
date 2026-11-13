@@ -162,8 +162,9 @@ func (s *Store) CloseGroup(ctx context.Context, ws workspace.ID, id string) (sto
 }
 
 // completeGroup completes g, which the transaction has just updated, if it
-// is closed and its tasks are all finished, and enqueues its callback. It
-// reports whether it enqueued one.
+// is closed and its tasks are all finished, enqueues its callback and
+// finishes the workflow steps waiting for it. It reports whether it
+// enqueued any task.
 func (s *Store) completeGroup(ctx context.Context, tx *sql.Tx, g *store.Group, now time.Time) (bool, error) {
 	if g.Status != store.GroupRunning || g.Remaining() > 0 {
 		return false, nil
@@ -181,8 +182,11 @@ func (s *Store) completeGroup(ctx context.Context, tx *sql.Tx, g *store.Group, n
 		return false, err
 	}
 	g.Status, g.FinishedAt = status, &now
-	if g.OnComplete == nil {
-		return false, nil
+	// Workflow steps waiting for the group, and its callback, are separate
+	// consumers of it completing: neither depends on the other.
+	enqueued, err := s.groupSteps(ctx, tx, *g)
+	if err != nil || g.OnComplete == nil {
+		return enqueued, err
 	}
 	// The group's ID as idempotency key is a second guard against a
 	// duplicate callback.

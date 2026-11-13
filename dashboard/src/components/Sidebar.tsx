@@ -59,6 +59,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const path =
     (location.pathname.startsWith('/tasks/') && from?.split('?')[0]) ||
     (location.pathname.startsWith('/runs/') && '/schedules') ||
+    (location.pathname.startsWith('/workflow-runs/') && '/workflows') ||
     location.pathname;
   const items = [...ITEMS, ...nav];
   const active = items.find((item) => path === item.to || path.startsWith(item.to + '/'));

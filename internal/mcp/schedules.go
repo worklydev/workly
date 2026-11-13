@@ -44,7 +44,7 @@ var listSchedules = newTool("list_schedules", "List schedules",
 // scheduleOverview is what list_schedules shows of a schedule.
 func scheduleOverview(s map[string]any) map[string]any {
 	out := map[string]any{}
-	for _, k := range []string{"name", "cron", "timezone", "url", "paused", "paused_at", "next_run_at", "last_run"} {
+	for _, k := range []string{"name", "cron", "timezone", "url", "workflow", "paused", "paused_at", "next_run_at", "last_run"} {
 		out[k] = s[k]
 	}
 	return out
@@ -280,12 +280,13 @@ var cancelRun = newTool("cancel_run", "Cancel run",
 	})
 
 var updateSchedule = newTool("update_schedule", "Create or update schedule",
-	"Creates a schedule, or changes an existing one's settings. For an existing schedule only the settings given change. A new one needs cron and url. Returns the schedule with its next five slots (next_runs, or next_runs_if_resumed while it is paused), to check the cron expression.",
+	"Creates a schedule, or changes an existing one's settings. For an existing schedule only the settings given change. A new one needs cron and url (or workflow). Returns the schedule with its next five slots (next_runs, or next_runs_if_resumed while it is paused), to check the cron expression.",
 	object(map[string]any{
 		"schedule":            scheduleProp,
 		"cron":                prop("string", `Five fields (minute hour day-of-month month day-of-week), e.g. "0 3 * * *" or "*/15 * * * mon-fri", or @hourly, @daily, @weekly, @monthly, @yearly.`),
 		"timezone":            prop("string", "IANA timezone the cron expression is read in (default UTC), e.g. Europe/Stockholm."),
-		"url":                 prop("string", "The http(s) URL to call."),
+		"url":                 prop("string", "The http(s) URL to call. Use this or workflow."),
+		"workflow":            prop("string", "A workflow to start a run of instead of calling a URL; payload, if any, is the run's input. Use this or url."),
 		"method":              prop("string", "HTTP method (default POST).", "enum", []string{"GET", "POST", "PUT", "PATCH", "DELETE"}),
 		"headers":             prop("object", "Headers sent with every run. Workly-* headers are reserved.", "additionalProperties", map[string]any{"type": "string"}),
 		"payload":             map[string]any{"description": "A JSON body (any JSON value). Use this or body."},
@@ -344,6 +345,18 @@ var updateSchedule = newTool("update_schedule", "Create or update schedule",
 				}
 			}
 		}
+		// A schedule calls a URL or starts a workflow: whichever is given
+		// replaces the other, and a workflow has no request but its payload.
+		if _, ok := args["url"]; ok {
+			delete(config, "workflow")
+		}
+		if _, ok := args["workflow"]; ok || (config["workflow"] != nil && args["url"] == nil) {
+			for _, k := range []string{"url", "method", "headers", "body", "content_type"} {
+				if _, given := args[k]; !given {
+					delete(config, k)
+				}
+			}
+		}
 		for k, v := range args {
 			config[k] = v
 		}
@@ -355,7 +368,7 @@ var updateSchedule = newTool("update_schedule", "Create or update schedule",
 	})
 
 var scheduleFields = []string{
-	"cron", "timezone", "url", "method", "headers", "payload", "body", "content_type",
+	"cron", "timezone", "url", "workflow", "method", "headers", "payload", "body", "content_type",
 	"timeout_seconds", "max_attempts", "min_backoff_seconds", "max_backoff_seconds", "backoff_multiplier",
 	"retry_on_4xx", "overlap", "missed", "on_complete",
 }
@@ -381,7 +394,7 @@ func runAction(ctx context.Context, api apiClient, id, action string) (any, erro
 var runSummaryKeys = []string{
 	"id", "schedule", "state", "trigger", "scheduled_for", "skip_reason", "run_at", "attempt_count",
 	"last_status", "last_outcome", "last_error", "created_at", "started_at", "finished_at", "last_attempt_at",
-	"last_duration_ms", "retried_at", "callback_task_id",
+	"last_duration_ms", "retried_at", "callback_task_id", "workflow_run_id",
 }
 
 // runSummary is a run without its request: what list views need.

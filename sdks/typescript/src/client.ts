@@ -6,6 +6,7 @@ import { Runs, Schedules } from './schedules.ts';
 import { Tasks } from './tasks.ts';
 import { env, fromAPI, toAPI } from './util.ts';
 import { VERSION } from './version.ts';
+import { WorkflowRuns, Workflows } from './workflows.ts';
 
 export const DEFAULT_URL = 'http://localhost:7337';
 
@@ -63,6 +64,8 @@ export class Workly {
   readonly groups: Groups;
   readonly schedules: Schedules;
   readonly runs: Runs;
+  readonly workflows: Workflows;
+  readonly workflowRuns: WorkflowRuns;
   readonly alerts: Alerts;
 
   #headers: Record<string, string>;
@@ -83,6 +86,8 @@ export class Workly {
     this.groups = new Groups(this);
     this.schedules = new Schedules(this);
     this.runs = new Runs(this);
+    this.workflows = new Workflows(this);
+    this.workflowRuns = new WorkflowRuns(this);
     this.alerts = new Alerts(this);
   }
 
