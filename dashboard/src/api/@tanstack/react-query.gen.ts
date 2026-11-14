@@ -99,6 +99,11 @@ export const listQueuesOptions = (options?: Options<ListQueuesData>) => queryOpt
 
 /**
  * Delete a queue and all its tasks
+ *
+ * Workly's own queues, `_workflows` and `_callbacks`, can't be deleted
+ * (`invalid_state`): their tasks are workflow steps and callbacks in
+ * flight.
+ *
  */
 export const deleteQueueMutation = (options?: Partial<Options<DeleteQueueData>>): UseMutationOptions<DeleteQueueResponse, DeleteQueueError, Options<DeleteQueueData>> => {
     const mutationOptions: UseMutationOptions<DeleteQueueResponse, DeleteQueueError, Options<DeleteQueueData>> = {

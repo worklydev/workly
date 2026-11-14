@@ -2125,6 +2125,10 @@ type ClientInterface interface {
 
 	// DeleteQueue Delete a queue and all its tasks
 	//
+	// Workly's own queues, `_workflows` and `_callbacks`, can't be deleted
+	// (`invalid_state`): their tasks are workflow steps and callbacks in
+	// flight.
+	//
 	// Corresponds with DELETE /v1/queues/{queue} (the `DeleteQueue` operationId).
 	DeleteQueue(ctx context.Context, queue QueueName, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -2842,6 +2846,10 @@ func (c *Client) ListQueues(ctx context.Context, reqEditors ...RequestEditorFn) 
 }
 
 // DeleteQueue Delete a queue and all its tasks
+//
+// Workly's own queues, `_workflows` and `_callbacks`, can't be deleted
+// (`invalid_state`): their tasks are workflow steps and callbacks in
+// flight.
 //
 // Corresponds with DELETE /v1/queues/{queue} (the `DeleteQueue` operationId).
 func (c *Client) DeleteQueue(ctx context.Context, queue QueueName, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -6364,6 +6372,10 @@ type ClientWithResponsesInterface interface {
 
 	// DeleteQueueWithResponse Delete a queue and all its tasks
 	//
+	// Workly's own queues, `_workflows` and `_callbacks`, can't be deleted
+	// (`invalid_state`): their tasks are workflow steps and callbacks in
+	// flight.
+	//
 	// Returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with DELETE /v1/queues/{queue} (the `DeleteQueue` operationId).
@@ -9655,6 +9667,10 @@ func (c *ClientWithResponses) ListQueuesWithResponse(ctx context.Context, reqEdi
 }
 
 // DeleteQueueWithResponse Delete a queue and all its tasks
+//
+// Workly's own queues, `_workflows` and `_callbacks`, can't be deleted
+// (`invalid_state`): their tasks are workflow steps and callbacks in
+// flight.
 //
 // Returns a wrapper object for the known response body format(s).
 //

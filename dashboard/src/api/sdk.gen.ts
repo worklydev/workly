@@ -43,6 +43,11 @@ export const listQueues = <ThrowOnError extends boolean = false>(options?: Optio
 
 /**
  * Delete a queue and all its tasks
+ *
+ * Workly's own queues, `_workflows` and `_callbacks`, can't be deleted
+ * (`invalid_state`): their tasks are workflow steps and callbacks in
+ * flight.
+ *
  */
 export const deleteQueue = <ThrowOnError extends boolean = false>(options: Options<DeleteQueueData, ThrowOnError>): RequestResult<DeleteQueueResponses, DeleteQueueErrors, ThrowOnError> => (options.client ?? client).delete<DeleteQueueResponses, DeleteQueueErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],

@@ -719,13 +719,15 @@ func taskAction(ctx context.Context, api apiClient, id, action string) (any, err
 }
 
 var deleteQueue = newTool("delete_queue", "Delete queue",
-	"Deletes a queue with its settings and its finished tasks. It can't be undone, and enqueueing to the name creates the queue again with default settings. Refuses (invalid_state) while the queue has tasks due, scheduled or running, so no work is lost: cancel_pending_tasks first if they should go. Returns tasks_deleted: how many succeeded, failed and cancelled tasks went with it, and their total; each count stops at 10,000, so 10000 means 10,000 or more. Workly's own queues (names starting with _) can't be deleted.",
+	"Deletes a queue with its settings and its finished tasks. It can't be undone, and enqueueing to the name creates the queue again with default settings. Refuses (invalid_state) while the queue has tasks due, scheduled or running, so no work is lost: cancel_pending_tasks first if they should go. Returns tasks_deleted: how many succeeded, failed and cancelled tasks went with it, and their total; each count stops at 10,000, so 10000 means 10,000 or more. Workly's own queues (_workflows, _callbacks) can't be deleted.",
 	object(map[string]any{"queue": queueProp}, "queue"),
 	annotations{DestructiveHint: true},
 	func(ctx context.Context, api apiClient, args struct {
 		Queue string `json:"queue"`
 	}) (any, error) {
-		if strings.HasPrefix(args.Queue, "_") {
+		// The API refuses too; refusing first says so even before the queue
+		// exists, rather than queue_not_found.
+		if args.Queue == "_workflows" || args.Queue == "_callbacks" {
 			return nil, &apiError{Status: http.StatusConflict, Code: "invalid_state", Message: "queue " + args.Queue + " is Workly's own and can't be deleted"}
 		}
 		var q struct {
