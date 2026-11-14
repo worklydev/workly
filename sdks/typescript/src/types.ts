@@ -418,6 +418,8 @@ export interface Run {
   retriedAt?: string;
   /** The callback task enqueued when the run last finished, if its schedule has `onComplete`. */
   callbackTaskId?: string;
+  /** That callback task's state: whether the callback has been delivered. */
+  callbackState?: TaskState;
   /** The workflow run it started, for a schedule that starts a workflow. */
   workflowRunId?: string;
   /** That workflow run's status: the run succeeds once it has started it. */

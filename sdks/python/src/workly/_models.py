@@ -549,6 +549,8 @@ class Run:
     """How long the latest finished attempt took."""
     callback_task_id: str | None = None
     """The callback task enqueued when the run last finished, if its schedule has `on_complete`."""
+    callback_state: TaskState | None = None
+    """That callback task's state: whether the callback has been delivered."""
     workflow_run_id: str | None = None
     """The workflow run it started, for a schedule that starts a workflow."""
     workflow_run_status: WorkflowRunStatus | None = None
@@ -581,6 +583,7 @@ class Run:
             started_at=_opt_time(d.get("started_at")),
             last_duration_ms=d.get("last_duration_ms"),
             callback_task_id=d.get("callback_task_id"),
+            callback_state=d.get("callback_state"),
             workflow_run_id=d.get("workflow_run_id"),
             workflow_run_status=d.get("workflow_run_status"),
         )

@@ -850,6 +850,7 @@ export type Run = {
      * The callback task enqueued when the run last finished, if its schedule has `on_complete`.
      */
     callback_task_id?: string;
+    callback_state?: TaskState;
 };
 
 /**

@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bell, RotateCcw } from 'lucide-react';
+import { Bell, CircleCheck, RotateCcw } from 'lucide-react';
 import { Link, useNavigate } from 'react-router';
 import { listAlertChannelsOptions, retryFailedTasksMutation } from '../api/@tanstack/react-query.gen';
+import { EmptyState } from '../components/EmptyState';
 import { ListPager } from '../components/ListControls';
 import { PageHeader } from '../components/PageHeader';
 import { ErrorText, Muted } from '../components/QueryState';
@@ -9,30 +10,61 @@ import { RelativeTime } from '../components/RelativeTime';
 import { Section } from '../components/Section';
 import { usePage } from '../hooks/usePage';
 import { errorMessage } from '../lib/api';
-import { useQueueFailureGroups, useRunFailureGroups, type QueueFailureGroup } from '../hooks/useFailureGroups';
+import {
+  useQueueFailureGroups,
+  useRunFailureGroups,
+  useWorkflowFailureGroups,
+  type QueueFailureGroup,
+} from '../hooks/useFailureGroups';
 import { formatCount, shortId } from '../lib/format';
 import { useFromHere } from '../lib/from';
 import { Button } from '../primitives/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../primitives/table';
 
 /**
- * What's broken, and how badly: failed tasks in every queue and failed runs
- * of every schedule, grouped by the error they ended with.
+ * What's broken, and how badly: failed tasks in every queue, and failed runs
+ * of every schedule and workflow, grouped by the error they ended with.
  */
 export function FailuresPage() {
+  const queues = useQueueFailureGroups();
+  const runs = useRunFailureGroups();
+  const workflows = useWorkflowFailureGroups();
+  const nothing =
+    !queues.isPending &&
+    !runs.runs.isPending &&
+    !workflows.runs.isPending &&
+    !queues.error &&
+    !runs.runs.error &&
+    !workflows.runs.error &&
+    queues.groups.length + runs.groups.length + workflows.groups.length === 0;
+
   return (
     <>
       <PageHeader title="Failures" description="Everything that failed, grouped by error.">
         <AlertsLink />
       </PageHeader>
-      <QueueFailures />
-      <ScheduleFailures />
+      {nothing ? (
+        // One answer for the page, not three empty sections.
+        <EmptyState
+          tone="success"
+          icon={CircleCheck}
+          title="Nothing failing"
+          hint="Failed tasks, schedule runs and workflow runs show up here, grouped by the error they ended with."
+          className="py-16"
+        />
+      ) : (
+        <>
+          <QueueFailures failures={queues} />
+          <ScheduleFailures failures={runs} />
+          <WorkflowFailures failures={workflows} />
+        </>
+      )}
     </>
   );
 }
 
-function QueueFailures() {
-  const { groups, error, isPending } = useQueueFailureGroups();
+function QueueFailures({ failures }: { failures: ReturnType<typeof useQueueFailureGroups> }) {
+  const { groups, error, isPending } = failures;
   const list = usePage(groups);
 
   return (
@@ -71,9 +103,9 @@ function QueueFailures() {
   );
 }
 
-function ScheduleFailures() {
+function ScheduleFailures({ failures }: { failures: ReturnType<typeof useRunFailureGroups> }) {
   const from = useFromHere();
-  const { groups, runs } = useRunFailureGroups();
+  const { groups, runs } = failures;
   const list = usePage(groups);
 
   return (
@@ -130,6 +162,75 @@ function ScheduleFailures() {
                   </TableCell>
                 </TableRow>
               ))}
+            </TableBody>
+          </Table>
+          <ListPager list={list} noun="errors" />
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function WorkflowFailures({ failures }: { failures: ReturnType<typeof useWorkflowFailureGroups> }) {
+  const { groups, runs } = failures;
+  const list = usePage(groups);
+
+  return (
+    <Section title="Workflows">
+      {runs.error ? (
+        <ErrorText error={runs.error} />
+      ) : runs.isPending ? (
+        <Muted>Loading…</Muted>
+      ) : groups.length === 0 ? (
+        <Muted>No failed workflow runs.</Muted>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Workflow</TableHead>
+                <TableHead className="text-right">Runs</TableHead>
+                <TableHead className="w-full">Error</TableHead>
+                <TableHead>Latest run</TableHead>
+                <TableHead>Last failed</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {list.items.map((g) => {
+                const workflow = `/workflows/${encodeURIComponent(g.workflow)}`;
+                return (
+                  <TableRow key={`${g.workflow}\n${g.error}`}>
+                    <TableCell className="font-medium">
+                      <Link to={workflow}>{g.workflow}</Link>
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs">
+                      <Link
+                        to={`${workflow}?status=failed`}
+                        className="text-destructive hover:underline"
+                        title="Show the failed runs"
+                      >
+                        {formatCount(g.count)}
+                        {g.more && '+'}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="max-w-0 min-w-48 truncate" title={g.error}>
+                      {g.error || <span className="text-faint">No error recorded</span>}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs whitespace-nowrap text-muted-foreground">
+                      <Link
+                        to={`/workflow-runs/${g.latest.id}`}
+                        title={`${g.latest.id}: open it to retry its failed steps`}
+                        className="hover:text-foreground hover:underline"
+                      >
+                        {shortId(g.latest.id)}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="text-xs whitespace-nowrap text-muted-foreground">
+                      <RelativeTime iso={g.latest.finished_at ?? g.latest.created_at} />
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
           <ListPager list={list} noun="errors" />

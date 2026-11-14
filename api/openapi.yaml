@@ -2397,6 +2397,12 @@ components:
         callback_task_id:
           type: string
           description: The callback task enqueued when the run last finished, if its schedule has `on_complete`.
+        callback_state:
+          $ref: "#/components/schemas/TaskState"
+          description: |
+            The state of the task in `callback_task_id`, now: whether the
+            callback has been delivered. Absent without a callback task, or
+            once retention has removed it.
     RunSummary:
       type: object
       description: The body of a schedule's callback.

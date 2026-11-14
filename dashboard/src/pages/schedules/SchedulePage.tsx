@@ -88,7 +88,10 @@ export function SchedulePage() {
               value: schedule.missed === 'skip' ? 'skip, record it' : 'catch up once',
               prose: true,
             },
-            ...(schedule.on_complete ? [{ label: 'Callback', value: schedule.on_complete.url }] : []),
+            {
+              label: 'Callback',
+              value: schedule.on_complete ? schedule.on_complete.url : <span className="text-faint">none</span>,
+            },
           ]}
         />
       </div>
@@ -97,7 +100,7 @@ export function SchedulePage() {
         <Request schedule={schedule} />
         <Upcoming schedule={schedule} />
       </div>
-      <Runs schedule={schedule.name} />
+      <Runs schedule={schedule.name} callback={schedule.on_complete !== undefined} />
     </>
   );
 }
@@ -274,7 +277,7 @@ function Request({ schedule: s }: { schedule: Schedule }) {
   );
 }
 
-function Runs({ schedule }: { schedule: string }) {
+function Runs({ schedule, callback }: { schedule: string; callback: boolean }) {
   const [params, setParams] = useSearchParams();
   const state = (params.get('state') ?? 'all') as RunState | 'all';
   const query: ListRunsData['query'] =
@@ -305,7 +308,7 @@ function Runs({ schedule }: { schedule: string }) {
           ))}
         </TabsList>
       </Tabs>
-      <RunTable pages={pages} empty={state === 'all' ? 'No runs yet.' : `No ${state} runs.`} />
+      <RunTable pages={pages} callback={callback} empty={state === 'all' ? 'No runs yet.' : `No ${state} runs.`} />
     </Section>
   );
 }

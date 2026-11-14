@@ -179,6 +179,9 @@ type Run struct {
 	// WorkflowRunStatus is that workflow run's status, filled in by GetRun
 	// and ListRuns.
 	WorkflowRunStatus WorkflowRunStatus
+	// CallbackState is the state of the task in CallbackTaskID, filled in
+	// by GetRun and ListRuns; empty once retention has removed it.
+	CallbackState TaskState
 }
 
 // RunCallbackBody is the body of a schedule's callback.

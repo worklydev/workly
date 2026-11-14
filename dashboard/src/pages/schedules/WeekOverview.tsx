@@ -7,15 +7,18 @@ import { RelativeTime } from '../../components/RelativeTime';
 import { RowHint } from '../../components/RowHint';
 import { useNow } from '../../hooks/useNow';
 import { describeCron } from '../../lib/cron';
-import { formatSeconds } from '../../lib/format';
+import { formatSeconds, sharedHost } from '../../lib/format';
 import { dayPlan, zonedWeek, type DayPlan } from '../../lib/week';
 import { ScheduleDot } from './ScheduleDot';
+import { ScheduleTarget } from './ScheduleTarget';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../primitives/table';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 // Hairlines between columns, so it reads as a timetable; today's column a whisper of the accent.
 const GRID = 'border-l border-border';
+// Day cells are tight, so seven of them leave the name and target room.
+const DAY = 'h-auto px-2 py-1.5';
 const TODAY = 'bg-primary/[0.035]';
 
 /**
@@ -30,6 +33,8 @@ export function WeekOverview({ schedules }: { schedules: Schedule[] }) {
   const now = useNow(3_600_000);
   const today = (new Date(now).getDay() + 6) % 7;
   const weeks = schedules.map((s) => zonedWeek(s.timezone, now));
+  // When every schedule calls the same host, the path is what differs.
+  const host = sharedHost(schedules.filter((s) => !s.workflow).map((s) => s.url));
   // The server is the authority on when an expression fires, daylight saving included.
   const previews = useQueries({
     queries: schedules.map((s, i) => ({
@@ -47,15 +52,15 @@ export function WeekOverview({ schedules }: { schedules: Schedule[] }) {
 
   return (
     // Fixed columns: the days share what's left equally and their text wraps, so a week fits the page.
-    <Table className="min-w-[56rem] table-fixed">
+    <Table className="min-w-[50rem] table-fixed">
       <TableHeader>
         <TableRow>
-          <TableHead className="w-[17%]">Schedule</TableHead>
-          <TableHead className={cn('w-[20%]', GRID)} title="Times are in each schedule's own timezone">
+          <TableHead className="w-[22%]">Schedule</TableHead>
+          <TableHead className={cn('w-[15%]', GRID)} title="Times are in each schedule's own timezone">
             When
           </TableHead>
           {DAYS.map((d, i) => (
-            <TableHead key={d} className={cn(GRID, i === today && TODAY, i === today && 'text-foreground')}>
+            <TableHead key={d} className={cn('px-2', GRID, i === today && TODAY, i === today && 'text-foreground')}>
               <span className="flex items-center gap-1.5">
                 {d}
                 {i === today && <span className="size-1.5 rounded-full bg-primary" title="Today" />}
@@ -85,32 +90,32 @@ export function WeekOverview({ schedules }: { schedules: Schedule[] }) {
                 <RowHint />
               </div>
               {/* Under the name, not the dot, so the names line up. */}
-              <div className="truncate pl-[1.125rem] text-xs text-faint">
+              <ScheduleTarget schedule={s} host={host} className="pl-[1.125rem]" />
+            </TableCell>
+            <TableCell className={cn('py-2', GRID)}>
+              {/* The days say when in words, so this keeps the expression and what's next. */}
+              <div className="truncate font-mono text-xs" title={describeCron(s.cron) ?? s.cron}>
+                {s.cron}
+              </div>
+              <div className="truncate text-xs text-faint" title={s.timezone}>
                 {s.next_run_at ? (
                   <>
                     next <RelativeTime iso={s.next_run_at} />
                   </>
                 ) : (
                   'not running'
-                )}
-              </div>
-            </TableCell>
-            <TableCell className={cn('py-2', GRID)}>
-              <div className="truncate font-mono text-xs" title={s.cron}>
-                {s.cron}
-              </div>
-              <div className="truncate text-xs text-faint" title={`${describeCron(s.cron) ?? s.cron} · ${s.timezone}`}>
-                {describeCron(s.cron) ?? 'Custom timetable'} · <span className="font-mono">{s.timezone}</span>
+                )}{' '}
+                · <span className="font-mono">{s.timezone}</span>
               </div>
             </TableCell>
             {byDate(s.cron) ? (
-              <TableCell colSpan={7} className={cn('text-xs text-muted-foreground', GRID)}>
+              <TableCell colSpan={7} className={cn('px-2 text-xs text-muted-foreground', GRID)}>
                 Runs by date, not weekday
                 {s.next_run_at && <span className="text-faint"> · next {zonedDate(s.next_run_at, s.timezone)}</span>}
               </TableCell>
             ) : (
               weeks[i].map((day, d) => (
-                <TableCell key={d} className={cn('align-middle', GRID, d === today && TODAY)}>
+                <TableCell key={d} className={cn(DAY, GRID, d === today && TODAY)}>
                   <Day plan={dayFrom(previews[i].data?.spans, day)} zone={s.timezone} />
                 </TableCell>
               ))
@@ -158,13 +163,13 @@ function zonedDate(iso: string, zone: string): string {
 
 /** One day: the times when there are a few, otherwise how often and, unless it's all day, between when. */
 function Day({ plan, zone }: { plan?: DayPlan; zone: string }) {
-  if (!plan) return <span className="text-xs text-faint">…</span>;
+  if (!plan) return <span className="text-[11px] text-faint">…</span>;
   switch (plan.kind) {
     case 'none':
-      return <span className="text-xs text-faint">—</span>;
+      return <span className="text-[11px] text-faint">—</span>;
     case 'times':
       return (
-        <span className="flex flex-col font-mono text-xs leading-4 tabular-nums">
+        <span className="flex flex-col font-mono text-[11px] leading-[14px] tabular-nums">
           {plan.times.map((t) => (
             <span key={t}>{clock(t, zone)}</span>
           ))}
@@ -172,7 +177,7 @@ function Day({ plan, zone }: { plan?: DayPlan; zone: string }) {
       );
     case 'every':
       return (
-        <span className="flex flex-col text-xs leading-4">
+        <span className="flex flex-col text-[11px] leading-[14px]">
           <span className="whitespace-nowrap">every {formatSeconds(plan.every / 1000)}</span>
           {!plan.allDay && (
             <span className="font-mono text-faint tabular-nums">
@@ -184,6 +189,6 @@ function Day({ plan, zone }: { plan?: DayPlan; zone: string }) {
         </span>
       );
     case 'many':
-      return <span className="text-xs whitespace-nowrap">{plan.count} runs</span>;
+      return <span className="text-[11px] whitespace-nowrap">{plan.count} runs</span>;
   }
 }

@@ -186,6 +186,19 @@ func testRunCallbacks(t *testing.T, open func() store.Store) {
 	if done.CallbackTaskID == "" {
 		t.Fatalf("CallbackTaskID not set")
 	}
+	// The run says whether its callback has been delivered yet.
+	if done.CallbackState != store.TaskPending {
+		t.Fatalf("CallbackState = %q, want pending", done.CallbackState)
+	}
+	listed, _, err := s.ListRuns(ctx, ws, store.RunFilter{Schedule: "nightly", Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	for _, l := range listed {
+		if l.ID == r.ID && l.CallbackState != store.TaskPending {
+			t.Fatalf("listed CallbackState = %q, want pending", l.CallbackState)
+		}
+	}
 
 	// Retried by hand, it calls back again.
 	if _, err := s.RetryRun(ctx, ws, r.ID); err != nil {

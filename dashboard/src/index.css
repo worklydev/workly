@@ -54,6 +54,22 @@
   --radius-xl: calc(var(--radius) * 1.4);
 }
 
+/* Highlighted code (CodeTabs), mapped to the tokens as on workly.run: keywords,
+   strings and functions in the chart hues, comments faint, punctuation muted. */
+:root {
+  --shiki-foreground: var(--foreground);
+  --shiki-background: transparent;
+  --shiki-token-comment: var(--faint);
+  --shiki-token-keyword: var(--chart-3);
+  --shiki-token-string: var(--success);
+  --shiki-token-string-expression: var(--success);
+  --shiki-token-constant: var(--primary);
+  --shiki-token-function: var(--chart-1);
+  --shiki-token-parameter: var(--foreground);
+  --shiki-token-punctuation: var(--muted-foreground);
+  --shiki-token-link: var(--chart-2);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

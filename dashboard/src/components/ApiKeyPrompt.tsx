@@ -15,7 +15,7 @@ export function ApiKeyPrompt({ retry }: { retry: () => void }) {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-6">
+    <div className="flex min-h-screen items-center justify-center bg-surface p-6">
       <form onSubmit={submit} className="flex w-full max-w-sm flex-col gap-4">
         <div className="flex flex-col gap-1">
           <h1 className="text-xl">API key required</h1>

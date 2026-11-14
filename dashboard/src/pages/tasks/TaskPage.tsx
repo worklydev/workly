@@ -21,6 +21,7 @@ import { InlineFields } from '../../components/InlineFields';
 import { PageHeader } from '../../components/PageHeader';
 import { ErrorText, Muted } from '../../components/QueryState';
 import { RelativeTime } from '../../components/RelativeTime';
+import { CallbackMark } from '../../components/CallbackMark';
 import { CallbackSection } from '../../components/CallbackSection';
 import { Section } from '../../components/Section';
 import { StatCard, StatStrip } from '../../components/StatCard';
@@ -33,6 +34,7 @@ import { displayState } from '../../lib/states';
 import { errorMessage, LIVE } from '../../lib/api';
 import { formatDate, formatDuration, prettyBody, shortId } from '../../lib/format';
 import { isSystemQueue } from '../../lib/queues';
+import { WORKFLOW_QUEUE } from '../../lib/workflows';
 import { Button } from '../../primitives/button';
 import { AttemptTable } from './AttemptTable';
 
@@ -73,17 +75,22 @@ export function TaskPage() {
         </PageHeader>
         <InlineFields
           items={[
-            {
-              label: 'Queue',
-              value: (
-                <Link
-                  to={`/queues/${task.queue}`}
-                  className="underline decoration-border underline-offset-4 hover:text-primary hover:decoration-primary"
-                >
-                  {task.queue}
-                </Link>
-              ),
-            },
+            // A step in Workly's own workflow queue is placed by its workflow step, below.
+            ...(task.workflow_step && task.queue === WORKFLOW_QUEUE
+              ? []
+              : [
+                  {
+                    label: 'Queue',
+                    value: (
+                      <Link
+                        to={`/queues/${task.queue}`}
+                        className="underline decoration-border underline-offset-4 hover:text-primary hover:decoration-primary"
+                      >
+                        {task.queue}
+                      </Link>
+                    ),
+                  },
+                ]),
             ...(task.workflow_step
               ? [{ label: 'Workflow step', value: <WorkflowStepLink step={task.workflow_step} /> }]
               : []),
@@ -91,6 +98,17 @@ export function TaskPage() {
             ...(task.workflow_step && !task.group_id
               ? []
               : [{ label: 'Group', value: task.group_id ? <GroupLink id={task.group_id} /> : <None /> }]),
+            {
+              label: 'Callback',
+              prose: true,
+              value: !task.on_complete ? (
+                <span className="text-faint">none</span>
+              ) : task.callback_task_id ? (
+                <CallbackMark taskId={task.callback_task_id} />
+              ) : (
+                <span className="text-xs text-muted-foreground">when it finishes</span>
+              ),
+            },
             { label: 'Created', value: <RelativeTime iso={task.created_at} /> },
             { label: 'First attempt', value: firstAttempt ? <RelativeTime iso={firstAttempt.started_at} /> : <None /> },
             { label: 'Timeout', value: `${task.timeout_seconds ?? queue?.timeout_seconds ?? '…'}s` },
@@ -299,7 +317,7 @@ function Notices({ task, queue, attempts }: { task: Task; queue?: Queue; attempt
             A step of workflow run{' '}
             <Link to={`/workflow-runs/${task.workflow_step.run_id}`} className={cn(LINK, 'font-mono text-xs')}>
               {shortId(task.workflow_step.run_id)}
-            </Link>
+            </Link>{' '}
             of {task.workflow_step.workflow}: retry the run to try again, once the cause is fixed.
           </span>
         )}

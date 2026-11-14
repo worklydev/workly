@@ -19,6 +19,7 @@ import { PageHeader } from '../../components/PageHeader';
 import { InlineFields } from '../../components/InlineFields';
 import { ErrorText, Muted } from '../../components/QueryState';
 import { RelativeTime } from '../../components/RelativeTime';
+import { CallbackMark } from '../../components/CallbackMark';
 import { CallbackSection } from '../../components/CallbackSection';
 import { Section } from '../../components/Section';
 import { StatCard, StatStrip } from '../../components/StatCard';
@@ -75,6 +76,17 @@ export function RunPage() {
             { label: 'Trigger', value: run.trigger === 'manual' ? 'run by hand' : 'timetable' },
             { label: 'Scheduled for', value: formatDate(run.scheduled_for) },
             { label: 'Created', value: <RelativeTime iso={run.created_at} /> },
+            {
+              label: 'Callback',
+              prose: true,
+              value: run.callback_task_id ? (
+                <CallbackMark taskId={run.callback_task_id} state={run.callback_state} />
+              ) : schedule?.on_complete && run.state !== 'skipped' ? (
+                <span className="text-xs text-muted-foreground">when the run finishes</span>
+              ) : (
+                <span className="text-faint">none</span>
+              ),
+            },
           ]}
         />
       </div>
