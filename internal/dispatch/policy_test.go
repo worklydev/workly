@@ -62,6 +62,7 @@ func TestDecide(t *testing.T) {
 		{"301 fails", retry4xx, 1, httpResult(301), store.TaskFailed},
 		{"timeout retries", q, 1, result{finished: finished, outcome: store.OutcomeTimeout}, store.TaskPending},
 		{"network error retries", q, 2, result{finished: finished, outcome: store.OutcomeNetworkError}, store.TaskPending},
+		{"refused connection fails", q, 1, result{finished: finished, outcome: store.OutcomeNetworkError, final: true}, store.TaskFailed},
 		{"lost retries", q, 1, result{finished: finished, outcome: store.OutcomeLost}, store.TaskPending},
 		{"lost on last attempt fails", q, 3, result{finished: finished, outcome: store.OutcomeLost}, store.TaskFailed},
 	}

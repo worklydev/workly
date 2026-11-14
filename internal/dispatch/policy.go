@@ -64,6 +64,9 @@ func (p retryPolicy) next(attempts int, r result, rnd func() float64) (ok bool, 
 }
 
 func retryable(p retryPolicy, r result) bool {
+	if r.final {
+		return false
+	}
 	switch r.outcome {
 	case store.OutcomeTimeout, store.OutcomeNetworkError, store.OutcomeLost:
 		return true

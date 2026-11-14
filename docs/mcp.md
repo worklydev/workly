@@ -104,7 +104,7 @@ Read tools (marked read-only, so clients can run them without asking):
 | `list_tasks` | Task summaries, newest first, by queue, state, group, idempotency key, last error and creation time. Each says when its first attempt started and how long the latest took, so queue wait and handler time can be told apart |
 | `get_task` | A task with its attempts: outcomes, status codes, errors, response bodies, durations |
 | `get_task_delivery` | The exact signed request for a task, with a curl command to replay it against a local handler |
-| `wait_for_task` | Waits for the first attempt since the task was enqueued or retried, and returns how it went |
+| `wait_for_task` | Waits for an attempt since the task was enqueued or retried, and returns how the latest went, with whether the task has finished or will be retried |
 | `list_groups` | [Task groups](groups.md), newest first, with their status and counts, by status and name |
 | `get_group` | One group: its counts, its most recently failed tasks and its callback task |
 | `list_schedules` | All [schedules](schedules.md) in summary: cron, timezone, URL, paused (and since when), next run and how the last one went |
@@ -112,7 +112,7 @@ Read tools (marked read-only, so clients can run them without asking):
 | `list_runs` | Runs of one schedule or of all of them, newest first, optionally by state |
 | `get_run` | A run with its attempts |
 | `get_run_delivery` | The exact signed request for a run, with a curl command |
-| `wait_for_run` | Waits for the first attempt of a run, and returns how it went |
+| `wait_for_run` | Waits for an attempt of a run, and returns how the latest went, with whether the run has finished |
 | `list_workflows` | All [workflows](workflows.md): their steps and how the last run went |
 | `get_workflow` | One workflow's definition: steps, dependencies, queues |
 | `list_workflow_runs` | Runs of one workflow or of all of them, newest first, optionally by status |

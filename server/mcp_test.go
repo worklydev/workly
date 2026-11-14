@@ -327,8 +327,18 @@ func TestMCPTools(t *testing.T) {
 		"headers": map[string]string{"X-Tenant": "acme"}, "idempotency_key": "k1",
 	})
 	id, _ := task["id"].(string)
-	if !strings.HasPrefix(id, "task_") || task["state"] != "pending" || task["payload"].(map[string]any)["user_id"] != 7.0 {
+	if !strings.HasPrefix(id, "task_") || task["state"] != "pending" || task["payload"].(map[string]any)["user_id"] != 7.0 ||
+		task["created"] != true || !nullKeys(task, "body", "on_complete", "timeout_seconds", "group_id") {
 		t.Fatalf("enqueue_task = %v", task)
+	}
+	// The same idempotency key returns the first task, and says so.
+	again := c.call("enqueue_task", map[string]any{"queue": "emails", "url": "http://api.test/other", "idempotency_key": "k1"})
+	if again["id"] != id || again["created"] != false || again["url"] != "http://api.test/send" {
+		t.Errorf("enqueue_task with a used idempotency key = %v", again)
+	}
+	// URLs come back as they are, not HTML-escaped.
+	if text, _ := c.callRaw("enqueue_task", map[string]any{"queue": "other", "url": "http://api.test/?a=1&b=2"}); !strings.Contains(text, "?a=1&b=2") {
+		t.Errorf("enqueue_task escapes the URL: %s", text)
 	}
 
 	// Errors the agent can fix come back as tool errors.
@@ -406,7 +416,7 @@ func TestMCPTools(t *testing.T) {
 	// limits, but not the retry policy.
 	c.call("update_queue_policy", map[string]any{"queue": "emails", "max_concurrency": 1, "rate_per_second": 1})
 	qs := c.call("list_queues", nil)["queues"].([]any)
-	if len(qs) != 1 {
+	if len(qs) != 2 {
 		t.Fatalf("list_queues = %v", qs)
 	}
 	overview := qs[0].(map[string]any)
@@ -421,7 +431,7 @@ func TestMCPTools(t *testing.T) {
 		}
 	}
 
-	if q := c.call("pause_queue", map[string]any{"queue": "emails"}); q["paused"] != true {
+	if q := c.call("pause_queue", map[string]any{"queue": "emails"}); q["paused"] != true || q["stats"] == nil || q["internal"] != false {
 		t.Errorf("pause_queue = %v", q)
 	}
 	if q := c.call("resume_queue", map[string]any{"queue": "emails"}); q["paused"] != false {
@@ -454,7 +464,7 @@ func TestMCPUpdateQueuePolicy(t *testing.T) {
 
 	// Creates a missing queue.
 	q := c.call("update_queue_policy", map[string]any{"queue": "q", "max_attempts": 3, "rate_per_second": 50, "max_concurrency": 4})
-	if q["max_attempts"] != 3.0 || q["rate_per_second"] != 50.0 || q["max_concurrency"] != 4.0 {
+	if q["max_attempts"] != 3.0 || q["rate_per_second"] != 50.0 || q["max_concurrency"] != 4.0 || q["stats"] == nil || q["internal"] != false {
 		t.Fatalf("create = %v", q)
 	}
 	// Only the settings given change.
@@ -464,7 +474,7 @@ func TestMCPUpdateQueuePolicy(t *testing.T) {
 	}
 	// null removes the rate limit.
 	q = c.call("update_queue_policy", map[string]any{"queue": "q", "rate_per_second": nil, "timeout_seconds": 5})
-	if q["rate_per_second"] != nil || q["max_concurrency"] != 4.0 || q["timeout_seconds"] != 5.0 || q["max_attempts"] != 3.0 {
+	if !nullKeys(q, "rate_per_second") || q["max_concurrency"] != 4.0 || q["timeout_seconds"] != 5.0 || q["max_attempts"] != 3.0 {
 		t.Fatalf("null = %v", q)
 	}
 	if text, isError := c.callRaw("update_queue_policy", map[string]any{"queue": "q", "max_attempts": 0}); !isError || !strings.Contains(text, "invalid_request") {
@@ -496,7 +506,9 @@ func TestMCPWaitForTask(t *testing.T) {
 	task := c.call("enqueue_task", map[string]any{"queue": "q", "url": target.URL})
 	got := c.call("wait_for_task", map[string]any{"id": task["id"], "timeout_seconds": 10})
 	attempt, _ := got["latest_attempt"].(map[string]any)
-	if got["done"] != true || attempt["status_code"] != 503.0 || !strings.Contains(attempt["response_body"].(string), "database is down") {
+	// Attempted, but not finished: it will be retried.
+	if got["attempted"] != true || got["finished"] != false || attempt["status_code"] != 503.0 ||
+		!strings.Contains(attempt["response_body"].(string), "database is down") || !nullKeys(attempt, "retried_at") {
 		t.Fatalf("wait_for_task = %v", got)
 	}
 	// The summary tells queue wait from handler time.
@@ -509,7 +521,7 @@ func TestMCPWaitForTask(t *testing.T) {
 	// The first attempt already happened, so waiting again returns at once
 	// rather than waiting a minute for the retry.
 	start := time.Now()
-	if got := c.call("wait_for_task", map[string]any{"id": task["id"], "timeout_seconds": 10}); got["done"] != true {
+	if got := c.call("wait_for_task", map[string]any{"id": task["id"], "timeout_seconds": 10}); got["attempted"] != true {
 		t.Fatalf("second wait = %v", got)
 	}
 	if time.Since(start) > time.Second {
@@ -518,8 +530,31 @@ func TestMCPWaitForTask(t *testing.T) {
 
 	// A task scheduled for later times out.
 	later := c.call("enqueue_task", map[string]any{"queue": "q", "url": target.URL, "delay_seconds": 3600})
-	if got := c.call("wait_for_task", map[string]any{"id": later["id"], "timeout_seconds": 1}); got["done"] != false {
+	if got := c.call("wait_for_task", map[string]any{"id": later["id"], "timeout_seconds": 1}); got["attempted"] != false || got["finished"] != false ||
+		got["reason"] == nil || !nullKeys(got, "latest_attempt") {
 		t.Errorf("wait for a scheduled task = %v", got)
+	}
+	// Cancelled before its first attempt: finished, never attempted.
+	c.call("cancel_task", map[string]any{"id": later["id"]})
+	if got := c.call("wait_for_task", map[string]any{"id": later["id"], "timeout_seconds": 1}); got["attempted"] != false || got["finished"] != true ||
+		!nullKeys(got, "latest_attempt") {
+		t.Errorf("wait for a cancelled task = %v", got)
+	}
+
+	// A network error: the attempt has status_code and response_body as
+	// null, and so does its failure group.
+	c.call("update_queue_policy", map[string]any{"queue": "down", "max_attempts": 1})
+	closed := httptest.NewServer(http.NotFoundHandler())
+	closed.Close()
+	refused := c.call("enqueue_task", map[string]any{"queue": "down", "url": closed.URL})
+	got = c.call("wait_for_task", map[string]any{"id": refused["id"], "timeout_seconds": 10})
+	if a, _ := got["latest_attempt"].(map[string]any); got["finished"] != true || a["outcome"] != "network_error" ||
+		!nullKeys(a, "status_code", "response_body") || !strings.Contains(a["error"].(string), "connection refused") {
+		t.Fatalf("wait for a refused connection = %v", got)
+	}
+	groups := c.call("get_queue", map[string]any{"queue": "down"})["failures"].([]any)
+	if g := groups[0].(map[string]any); len(groups) != 1 || g["count"] != 1.0 || !nullKeys(g, "status_code", "response_body") {
+		t.Errorf("get_queue failures = %v", groups)
 	}
 }
 
@@ -730,7 +765,7 @@ func TestMCPWaitForRun(t *testing.T) {
 	run := c.call("trigger_schedule", map[string]any{"schedule": "report"})
 	got := c.call("wait_for_run", map[string]any{"id": run["id"], "timeout_seconds": 10})
 	attempt, _ := got["latest_attempt"].(map[string]any)
-	if got["done"] != true || got["run"].(map[string]any)["state"] != "succeeded" || !strings.Contains(attempt["response_body"].(string), "42") {
+	if got["attempted"] != true || got["finished"] != true || got["run"].(map[string]any)["state"] != "succeeded" || !strings.Contains(attempt["response_body"].(string), "42") {
 		t.Fatalf("wait_for_run = %v", got)
 	}
 	if r := got["run"].(map[string]any); r["started_at"] == nil || r["last_duration_ms"] != attempt["duration_ms"] {

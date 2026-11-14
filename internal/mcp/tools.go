@@ -176,12 +176,17 @@ func (s *server) call(r *http.Request, t *tool, args json.RawMessage) map[string
 	s.opts.Logger.InfoContext(ctx, "mcp tool call", log...)
 
 	if err == nil {
-		b, err := json.MarshalIndent(out, "", "  ")
-		if err != nil {
+		// Without HTML escaping, so URLs and curl commands read as they are
+		// (& rather than \u0026).
+		var b strings.Builder
+		enc := json.NewEncoder(&b)
+		enc.SetEscapeHTML(false)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(out); err != nil {
 			s.opts.Logger.ErrorContext(ctx, "mcp result", "tool", t.Name, "err", err)
 			return toolError("internal error")
 		}
-		return map[string]any{"content": []any{textContent(string(b))}}
+		return map[string]any{"content": []any{textContent(strings.TrimSuffix(b.String(), "\n"))}}
 	}
 	if e, ok := errors.AsType[argumentError](err); ok {
 		return toolError(e.Error())
@@ -274,9 +279,7 @@ var listQueues = newTool("list_queues", "List queues",
 func queueOverview(q, lastDay map[string]any) map[string]any {
 	out := map[string]any{"last_24h": lastDay, "internal": internalQueue(q["name"])}
 	for _, k := range []string{"name", "paused", "rate_per_second", "max_concurrency", "stats"} {
-		if v, ok := q[k]; ok {
-			out[k] = v
-		}
+		out[k] = q[k]
 	}
 	return out
 }
@@ -328,8 +331,13 @@ var getQueue = newTool("get_queue", "Get queue",
 		if err != nil {
 			return nil, err
 		}
-		queue["internal"] = internalQueue(queue["name"])
-		return map[string]any{"queue": queue, "last_24h": day, "activity": activity, "failures": failures["groups"]}, nil
+		groups, _ := failures["groups"].([]any)
+		for _, g := range groups {
+			if g, ok := g.(map[string]any); ok {
+				withNulls(g, "outcome", "status_code", "response_body")
+			}
+		}
+		return map[string]any{"queue": queueView(queue), "last_24h": day, "activity": activity, "failures": groups}, nil
 	})
 
 // internalQueue reports whether a queue is one of Workly's own (_workflows,
@@ -407,17 +415,14 @@ var getTask = newTool("get_task", "Get task",
 		if err := api.do(ctx, "GET", apiPath("/v1/tasks/%s/attempts", args.ID), nil, nil, &attempts); err != nil {
 			return nil, err
 		}
-		truncateBody(task)
-		out := map[string]any{"task": withNulls(task, taskSummaryKeys...)}
+		out := map[string]any{"task": fullTask(task)}
 		list := attempts.Attempts
 		if omitted := len(list) - maxAttempts; omitted > 0 {
 			list = list[omitted:]
 			out["attempts_omitted"] = fmt.Sprintf("%d earlier attempts not shown", omitted)
 		}
 		for _, a := range list {
-			if body, ok := a["response_body"].(string); ok {
-				a["response_body"] = truncate(body, maxResponseBody)
-			}
+			attemptView(a)
 		}
 		out["attempts"] = list
 		return out, nil
@@ -449,7 +454,7 @@ var getTaskDelivery = newTool("get_task_delivery", "Get task delivery request",
 	})
 
 var waitForTask = newTool("wait_for_task", "Wait for task",
-	"Waits for the first delivery attempt since the task was enqueued or last retried by hand, then returns the task and its latest attempt: how the endpoint answered. Returns at once if that attempt already happened or the task has finished. Use it after enqueue_task or retry_task. Times out after timeout_seconds with done=false; a task scheduled for later (run_at) isn't attempted before then.",
+	"Waits until the task has had a delivery attempt since it was enqueued or last retried by hand, or has finished, then returns the task and latest_attempt: the latest attempt in that time, so not the first if the wait began after several (null if there was none, e.g. a task cancelled before delivery). attempted says whether there was such an attempt; finished whether the task is in a final state (succeeded, failed or cancelled). attempted with finished false means the task will be delivered again: it is waiting to retry, or a retry is in flight. Returns at once if either already holds. Use it after enqueue_task or retry_task. Times out after timeout_seconds with attempted and finished false and a reason; a task scheduled for later (run_at) isn't attempted before then.",
 	object(map[string]any{
 		"id":              taskIDProp,
 		"timeout_seconds": prop("number", "How long to wait (default 30).", "minimum", 1, "maximum", 60),
@@ -458,54 +463,49 @@ var waitForTask = newTool("wait_for_task", "Wait for task",
 		ID             string  `json:"id"`
 		TimeoutSeconds float64 `json:"timeout_seconds"`
 	}) (any, error) {
-		timeout := time.Duration(min(cmp.Or(args.TimeoutSeconds, 30), 60) * float64(time.Second))
-		ctx, cancel := context.WithTimeout(ctx, timeout)
-		defer cancel()
-		var task map[string]any
-		for {
-			err := api.do(ctx, "GET", apiPath("/v1/tasks/%s", args.ID), nil, nil, &task)
-			if err != nil && ctx.Err() == nil {
-				return nil, err
-			}
-			if err == nil && attempted(task) {
-				break
-			}
-			select {
-			case <-ctx.Done():
-				return map[string]any{
-					"done":   false,
-					"reason": fmt.Sprintf("no attempt completed within %v", timeout),
-					"task":   summary(task),
-				}, nil
-			case <-time.After(pollInterval):
-			}
-		}
-
-		out := map[string]any{"done": true, "task": summary(task)}
-		var attempts struct {
-			Attempts []map[string]any `json:"attempts"`
-		}
-		if err := api.do(context.WithoutCancel(ctx), "GET", apiPath("/v1/tasks/%s/attempts", args.ID), nil, nil, &attempts); err != nil {
-			return nil, err
-		}
-		if n := len(attempts.Attempts); n > 0 {
-			latest := attempts.Attempts[n-1]
-			if body, ok := latest["response_body"].(string); ok {
-				latest["response_body"] = truncate(body, maxResponseBody)
-			}
-			out["latest_attempt"] = latest
-		}
-		return out, nil
+		return waitFor(ctx, api, args.TimeoutSeconds, "task", apiPath("/v1/tasks/%s", args.ID), summary)
 	})
 
-// attempted reports whether a task has finished, or has had an attempt since
-// it was enqueued or last retried by hand. Comparing times rather than
-// counting attempts from when the wait began means a fast endpoint can't
-// answer before the wait starts and be missed.
-func attempted(task map[string]any) bool {
-	if finished(task) {
-		return true
+// waitFor polls a task or run at path until it has been attempted or has
+// finished, for wait_for_task and wait_for_run; kind names it in the result.
+func waitFor(ctx context.Context, api apiClient, timeoutSeconds float64, kind, path string, view func(map[string]any) map[string]any) (any, error) {
+	timeout := time.Duration(min(cmp.Or(timeoutSeconds, 30), 60) * float64(time.Second))
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	var v map[string]any
+	for {
+		err := api.do(ctx, "GET", path, nil, nil, &v)
+		if err != nil && ctx.Err() == nil {
+			return nil, err
+		}
+		if err == nil && (attempted(v) || finished(v)) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return map[string]any{
+				"attempted": false, "finished": false, kind: view(v), "latest_attempt": nil,
+				"reason": fmt.Sprintf("no attempt completed within %v", timeout),
+			}, nil
+		case <-time.After(pollInterval):
+		}
 	}
+	out := map[string]any{"attempted": attempted(v), "finished": finished(v), kind: view(v), "latest_attempt": nil}
+	if attempted(v) {
+		latest, err := latestAttempt(context.WithoutCancel(ctx), api, path+"/attempts")
+		if err != nil {
+			return nil, err
+		}
+		out["latest_attempt"] = latest
+	}
+	return out, nil
+}
+
+// attempted reports whether a task or run has had an attempt since it was
+// created or last retried by hand. Comparing times rather than counting
+// attempts from when the wait began means a fast endpoint can't answer
+// before the wait starts and be missed.
+func attempted(task map[string]any) bool {
 	last := timeField(task, "last_attempt_at")
 	return !last.IsZero() && !last.Before(timeField(task, "created_at")) && !last.Before(timeField(task, "retried_at"))
 }
@@ -519,7 +519,7 @@ func timeField(m map[string]any, key string) time.Time {
 // Write tools.
 
 var enqueueTask = newTool("enqueue_task", "Enqueue task",
-	"Enqueues a task: Workly will send an HTTP request to url and retry it with backoff until the endpoint answers 2xx or the queue's max_attempts run out. The queue is created with default settings if it doesn't exist. Returns the task; follow up with wait_for_task to see the first attempt.",
+	"Enqueues a task: Workly will send an HTTP request to url and retry it with backoff until the endpoint answers 2xx or the queue's max_attempts run out. The queue is created with default settings if it doesn't exist. Returns the task, with created false if a task in the queue already had idempotency_key: that task is returned as it is, and this request's url, payload and settings are ignored. Follow up with wait_for_task to see the first attempt.",
 	object(map[string]any{
 		"queue":           queueProp,
 		"url":             prop("string", "The http(s) URL to deliver to."),
@@ -530,7 +530,7 @@ var enqueueTask = newTool("enqueue_task", "Enqueue task",
 		"headers":         prop("object", "Headers sent with every delivery. Workly-* headers are reserved.", "additionalProperties", map[string]any{"type": "string"}),
 		"delay_seconds":   prop("number", "Deliver after this delay. Use this or run_at.", "minimum", 0),
 		"run_at":          timeProp("Deliver at this time. Use this or delay_seconds."),
-		"idempotency_key": prop("string", "If a task in the queue has this key, it is returned and nothing is enqueued."),
+		"idempotency_key": prop("string", "If a task in the queue has this key, it is returned (with created false) and nothing is enqueued."),
 		"max_attempts":    prop("integer", "Overrides the queue's max_attempts.", "minimum", 1, "maximum", 1000),
 		"timeout_seconds": prop("number", "Overrides the queue's response timeout.", "minimum", 1, "maximum", 1800),
 		"group_id":        prop("string", "Adds the task to this task group, which must be open."),
@@ -539,11 +539,13 @@ var enqueueTask = newTool("enqueue_task", "Enqueue task",
 	annotations{OpenWorldHint: true},
 	func(ctx context.Context, api apiClient, args enqueueArgs) (any, error) {
 		var task map[string]any
-		if err := api.do(ctx, "POST", apiPath("/v1/queues/%s/tasks", args.Queue), nil, args.enqueueRequest, &task); err != nil {
+		status, err := api.doStatus(ctx, "POST", apiPath("/v1/queues/%s/tasks", args.Queue), nil, args.enqueueRequest, &task)
+		if err != nil {
 			return nil, err
 		}
-		truncateBody(task)
-		return withNulls(task, taskSummaryKeys...), nil
+		out := fullTask(task)
+		out["created"] = status == http.StatusCreated
+		return out, nil
 	})
 
 type enqueueArgs struct {
@@ -581,7 +583,7 @@ func onCompleteProp(description string) map[string]any {
 }
 
 var retryTask = newTool("retry_task", "Retry task",
-	"Delivers a task again now. A pending task (e.g. waiting to retry) becomes due at once; a failed, succeeded or cancelled task is replayed with a fresh set of attempts. Returns the task; follow up with wait_for_task. Fails with invalid_state for a running task.",
+	"Delivers a task again now. A pending task (e.g. waiting to retry) becomes due at once; a failed, succeeded or cancelled task is replayed with a fresh set of attempts: up to max_attempts more. attempt_count and started_at still count from the first delivery, so attempt_count keeps climbing. Returns the task; follow up with wait_for_task. Fails with invalid_state for a running task.",
 	object(map[string]any{"id": taskIDProp}, "id"),
 	annotations{OpenWorldHint: true},
 	func(ctx context.Context, api apiClient, args struct {
@@ -637,7 +639,7 @@ var pauseQueue = newTool("pause_queue", "Pause queue",
 	func(ctx context.Context, api apiClient, args struct {
 		Queue string `json:"queue"`
 	}) (any, error) {
-		return queueAction(ctx, api, args.Queue, "pause")
+		return changeQueue(ctx, api, args.Queue, "pause")
 	})
 
 var resumeQueue = newTool("resume_queue", "Resume queue",
@@ -647,7 +649,7 @@ var resumeQueue = newTool("resume_queue", "Resume queue",
 	func(ctx context.Context, api apiClient, args struct {
 		Queue string `json:"queue"`
 	}) (any, error) {
-		return queueAction(ctx, api, args.Queue, "resume")
+		return changeQueue(ctx, api, args.Queue, "resume")
 	})
 
 var updateQueuePolicy = newTool("update_queue_policy", "Update queue policy",
@@ -697,11 +699,10 @@ var updateQueuePolicy = newTool("update_queue_policy", "Update queue policy",
 				config[k] = v
 			}
 		}
-		var queueOut map[string]any
-		if err := api.do(ctx, "PUT", apiPath("/v1/queues/%s", queue), nil, config, &queueOut); err != nil {
+		if err := api.do(ctx, "PUT", apiPath("/v1/queues/%s", queue), nil, config, nil); err != nil {
 			return nil, err
 		}
-		return queueOut, nil
+		return getQueueView(ctx, api, queue)
 	})
 
 var policyFields = []string{
@@ -754,6 +755,15 @@ func queueAction(ctx context.Context, api apiClient, queue, action string) (any,
 	return out, err
 }
 
+// changeQueue pauses or resumes a queue and returns it as get_queue does;
+// the API's answer has no stats.
+func changeQueue(ctx context.Context, api apiClient, queue, action string) (any, error) {
+	if _, err := queueAction(ctx, api, queue, action); err != nil {
+		return nil, err
+	}
+	return getQueueView(ctx, api, queue)
+}
+
 // Limits on what goes back to the model, which pays for every byte.
 const (
 	maxAttempts     = 20
@@ -772,6 +782,64 @@ var taskSummaryKeys = []string{
 	"last_attempt_at", "last_duration_ms", "retried_at", "callback_task_id",
 }
 
+// taskKeys are the fields of a full task (enqueue_task, get_task): the
+// summary's and its request and settings. Of payload and body, the one not in
+// use is null.
+var taskKeys = append(slices.Clone(taskSummaryKeys),
+	"headers", "payload", "body", "timeout_seconds", "on_complete", "workflow_step", "updated_at")
+
+// fullTask is a task as enqueue_task and get_task return it.
+func fullTask(t map[string]any) map[string]any {
+	truncateBody(t)
+	return withNulls(t, taskKeys...)
+}
+
+// attemptKeys are the fields of every attempt a tool returns, a task's or a
+// run's: a network error has no status_code, and an empty response no
+// response_body, but both are there as null.
+var attemptKeys = []string{
+	"id", "number", "started_at", "finished_at", "duration_ms", "outcome", "status_code", "error",
+	"response_headers", "response_body", "retried_at",
+}
+
+func attemptView(a map[string]any) map[string]any {
+	if body, ok := a["response_body"].(string); ok {
+		a["response_body"] = truncate(body, maxResponseBody)
+	}
+	return withNulls(a, attemptKeys...)
+}
+
+// latestAttempt is the latest of the attempts at path, or nil if there are
+// none.
+func latestAttempt(ctx context.Context, api apiClient, path string) (map[string]any, error) {
+	var attempts struct {
+		Attempts []map[string]any `json:"attempts"`
+	}
+	if err := api.do(ctx, "GET", path, nil, nil, &attempts); err != nil {
+		return nil, err
+	}
+	if n := len(attempts.Attempts); n > 0 {
+		return attemptView(attempts.Attempts[n-1]), nil
+	}
+	return nil, nil
+}
+
+// queueView is a queue as get_queue and the tools that change one return it:
+// its policy, internal and current work (stats), with no limit as null.
+func queueView(q map[string]any) map[string]any {
+	q["internal"] = internalQueue(q["name"])
+	return withNulls(q, "rate_per_second")
+}
+
+// getQueueView reads a queue, for tools whose API call returns less of it.
+func getQueueView(ctx context.Context, api apiClient, name string) (map[string]any, error) {
+	var q map[string]any
+	if err := api.do(ctx, "GET", apiPath("/v1/queues/%s", name), nil, nil, &q); err != nil {
+		return nil, err
+	}
+	return queueView(q), nil
+}
+
 // summary is a task without its payload, body and headers: what list views
 // need.
 func summary(t map[string]any) map[string]any {
@@ -785,9 +853,10 @@ func summary(t map[string]any) map[string]any {
 	return out
 }
 
+// finished reports whether a task or run is in a final state.
 func finished(t map[string]any) bool {
 	switch t["state"] {
-	case "succeeded", "failed", "cancelled":
+	case "succeeded", "failed", "cancelled", "skipped":
 		return true
 	}
 	return false
