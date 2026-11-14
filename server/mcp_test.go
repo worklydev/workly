@@ -781,8 +781,14 @@ func TestMCPWorkflows(t *testing.T) {
 	if fmt.Sprint(got["steps"].([]any)[1].(map[string]any)["blocked_by"]) != "[prices]" {
 		t.Fatalf("get_workflow_run = %v", got)
 	}
-	if got := c.call("get_workflow", map[string]any{"workflow": "refresh"}); len(got["recent_runs"].([]any)) != 1 {
+	got = c.call("get_workflow", map[string]any{"workflow": "refresh"})
+	if len(got["recent_runs"].([]any)) != 1 {
 		t.Fatalf("get_workflow = %v", got)
+	}
+	// A step's unset fields are there: depends_on empty, the rest null.
+	first := got["workflow"].(map[string]any)["steps"].([]any)[0].(map[string]any)
+	if fmt.Sprint(first["depends_on"]) != "[]" || !nullKeys(first, "headers", "payload", "body", "timeout_seconds") {
+		t.Errorf("get_workflow first step = %v", first)
 	}
 	if got := c.call("cancel_workflow_run", map[string]any{"id": id}); got["status"] != "cancelled" {
 		t.Fatalf("cancel_workflow_run = %v", got)
@@ -793,6 +799,21 @@ func TestMCPWorkflows(t *testing.T) {
 	if got := c.call("retry_workflow_run", map[string]any{"id": id}); got["status"] != "running" || got["attempt"] != float64(2) {
 		t.Fatalf("retry_workflow_run = %v", got)
 	}
+	// last_run is the same summary as the run's own.
+	runSummary := c.call("list_workflow_runs", map[string]any{"workflow": "refresh"})["workflow_runs"].([]any)[0].(map[string]any)
+	if runSummary["attempt"] != float64(2) || runSummary["version"] != float64(1) {
+		t.Fatalf("list_workflow_runs = %v", runSummary)
+	}
+	listed := c.call("list_workflows", map[string]any{})["workflows"].([]any)[0].(map[string]any)["last_run"]
+	detail := c.call("get_workflow", map[string]any{"workflow": "refresh"})["workflow"].(map[string]any)
+	for name, last := range map[string]any{"list_workflows": listed, "get_workflow": detail["last_run"]} {
+		last := last.(map[string]any)
+		for _, k := range []string{"id", "attempt", "version", "status", "retried_at", "idempotency_key"} {
+			if fmt.Sprint(last[k]) != fmt.Sprint(runSummary[k]) {
+				t.Errorf("%s last_run %s = %v, want %v", name, k, last[k], runSummary[k])
+			}
+		}
+	}
 
 	// update_schedule switches a schedule between calling a URL and
 	// starting a workflow.
@@ -801,14 +822,33 @@ func TestMCPWorkflows(t *testing.T) {
 		t.Fatalf("update_schedule = %v", s)
 	}
 	s = c.call("update_schedule", map[string]any{"schedule": "nightly", "workflow": "refresh"})
-	if s["workflow"] != "refresh" || s["url"] != "" {
+	// A workflow schedule has no url, and no request settings.
+	if s["workflow"] != "refresh" || !nullKeys(s, "url", "method", "headers", "timeout_seconds") {
 		t.Fatalf("update_schedule to a workflow = %v", s)
+	}
+	if got := c.call("list_schedules", nil)["schedules"].([]any)[0].(map[string]any); got["workflow"] != "refresh" || !nullKeys(got, "url") {
+		t.Fatalf("list_schedules of a workflow schedule = %v", got)
 	}
 	if s = c.call("update_schedule", map[string]any{"schedule": "nightly", "timezone": "Europe/Stockholm"}); s["workflow"] != "refresh" {
 		t.Fatalf("update_schedule of a workflow schedule = %v", s)
 	}
-	if s = c.call("update_schedule", map[string]any{"schedule": "nightly", "url": "https://example.test/y"}); s["url"] != "https://example.test/y" || s["workflow"] != nil {
+	if s = c.call("update_schedule", map[string]any{"schedule": "nightly", "url": "https://example.test/y"}); s["url"] != "https://example.test/y" ||
+		!nullKeys(s, "workflow") || s["method"] != "POST" {
 		t.Fatalf("update_schedule back to a url = %v", s)
+	}
+
+	// Workly's own queues are marked internal; the application's aren't.
+	c.call("enqueue_task", map[string]any{"queue": "emails", "url": "https://example.test/hook"})
+	internal := map[string]any{}
+	for _, q := range c.call("list_queues", nil)["queues"].([]any) {
+		q := q.(map[string]any)
+		internal[q["name"].(string)] = q["internal"]
+	}
+	if internal["_workflows"] != true || internal["emails"] != false {
+		t.Errorf("list_queues internal = %v", internal)
+	}
+	if q := c.call("get_queue", map[string]any{"queue": "_workflows"})["queue"].(map[string]any); q["internal"] != true {
+		t.Errorf("get_queue _workflows = %v", q)
 	}
 }
 

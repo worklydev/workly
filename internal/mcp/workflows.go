@@ -61,6 +61,15 @@ var getWorkflow = newTool("get_workflow", "Get workflow",
 			return nil, err
 		}
 		withNulls(w, "last_run")
+		steps, _ := w["steps"].([]any)
+		for _, s := range steps {
+			if s, ok := s.(map[string]any); ok {
+				if s["depends_on"] == nil {
+					s["depends_on"] = []any{}
+				}
+				withNulls(s, stepConfigKeys...)
+			}
+		}
 		var runs struct {
 			Runs []map[string]any `json:"workflow_runs"`
 		}
@@ -73,6 +82,10 @@ var getWorkflow = newTool("get_workflow", "Get workflow",
 		}
 		return map[string]any{"workflow": w, "recent_runs": runs.Runs}, nil
 	})
+
+// stepConfigKeys are the optional fields of a step's definition, which the
+// API leaves out when they aren't set.
+var stepConfigKeys = []string{"method", "headers", "payload", "body", "content_type", "queue", "timeout_seconds", "max_attempts"}
 
 var workflowRunKeys = []string{"id", "workflow", "version", "status", "error", "idempotency_key",
 	"schedule_run_id", "attempt", "retried_at", "created_at", "deadline_at", "finished_at", "duration_ms"}

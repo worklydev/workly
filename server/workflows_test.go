@@ -338,6 +338,18 @@ func TestScheduledWorkflow(t *testing.T) {
 	if run["status"] != "succeeded" || run["schedule_run_id"] != runID || fmt.Sprint(run["input"]) != "map[full:true]" {
 		t.Fatalf("workflow run = %v", run)
 	}
+	// The schedule run succeeded when it started the workflow run; it says
+	// how that run went.
+	if got := do(t, h, "GET", "/v1/runs/"+runID, "").json; got["workflow_run_status"] != "succeeded" {
+		t.Errorf("schedule run = %v", got)
+	}
+	if got := do(t, h, "GET", "/v1/runs?schedule=nightly", "").json["runs"].([]any)[0].(map[string]any); got["workflow_run_status"] != "succeeded" {
+		t.Errorf("listed schedule run = %v", got)
+	}
+	last := do(t, h, "GET", "/v1/schedules/nightly", "").json["last_run"].(map[string]any)
+	if last["workflow_run_id"] != wfRunID || last["workflow_run_status"] != "succeeded" {
+		t.Errorf("schedule last_run = %v", last)
+	}
 	// Its one step is a task, counted as the API counts a run it starts.
 	q.mu.Lock()
 	defer q.mu.Unlock()

@@ -838,6 +838,10 @@ type LastRun struct {
 
 	// Trigger `schedule` for a cron slot, `manual` for "run now".
 	Trigger RunTrigger `json:"trigger"`
+
+	// WorkflowRunId The workflow run it started, for a schedule that starts a workflow.
+	WorkflowRunId     *string            `json:"workflow_run_id,omitempty"`
+	WorkflowRunStatus *WorkflowRunStatus `json:"workflow_run_status,omitempty"`
 }
 
 // MissedPolicy What happens to slots missed while the server was down (a slot is
@@ -1084,7 +1088,8 @@ type Run struct {
 	Url       string     `json:"url"`
 
 	// WorkflowRunId The workflow run this run started, for a schedule that starts a workflow.
-	WorkflowRunId *string `json:"workflow_run_id,omitempty"`
+	WorkflowRunId     *string            `json:"workflow_run_id,omitempty"`
+	WorkflowRunStatus *WorkflowRunStatus `json:"workflow_run_status,omitempty"`
 }
 
 // RunList defines model for RunList.

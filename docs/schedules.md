@@ -96,7 +96,7 @@ The expression is read in the schedule's `timezone`, an IANA name such as `Europ
 | `missed` | `skip` | What to do about times missed while the server was down. |
 | `on_complete` | none | A [callback](callbacks.md), `{url, headers}`, called with a summary each time a run finishes. |
 
-A schedule with `workflow` sends no request of its own: each run starts a workflow run, using the schedule run's ID as its idempotency key, and succeeds once it has started (a workflow that doesn't exist yet is retried like a failed request). The schedule run links to the workflow run, which has its own status. For `overlap`, the schedule counts as still going until that workflow run finishes, so with `skip` a slow workflow never has two scheduled runs at once. `method`, `headers`, `body` and `content_type` don't apply.
+A schedule with `workflow` sends no request of its own: each run starts a workflow run, using the schedule run's ID as its idempotency key, and succeeds once it has started (a workflow that doesn't exist yet is retried like a failed request). The schedule run links to the workflow run (`workflow_run_id`), and `workflow_run_status` gives that run's status, so you can tell a schedule run that started a workflow still going from one whose workflow finished. For `overlap`, the schedule counts as still going until that workflow run finishes, so with `skip` a slow workflow never has two scheduled runs at once. `method`, `headers`, `body` and `content_type` don't apply.
 
 Retries are fewer and shorter than a queue's by default, so a failing run gives up well before a frequent schedule's next one.
 

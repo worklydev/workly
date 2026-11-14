@@ -757,6 +757,11 @@ export type LastRun = {
     finished_at?: string;
     last_status?: number;
     last_error?: string;
+    /**
+     * The workflow run it started, for a schedule that starts a workflow.
+     */
+    workflow_run_id?: string;
+    workflow_run_status?: WorkflowRunStatus;
 };
 
 export type ScheduleList = {
@@ -790,6 +795,7 @@ export type Run = {
      * The workflow run this run started, for a schedule that starts a workflow.
      */
     workflow_run_id?: string;
+    workflow_run_status?: WorkflowRunStatus;
     state: RunState;
     trigger: RunTrigger;
     /**

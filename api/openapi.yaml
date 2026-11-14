@@ -2284,6 +2284,12 @@ components:
           type: integer
         last_error:
           type: string
+        workflow_run_id:
+          type: string
+          description: The workflow run it started, for a schedule that starts a workflow.
+        workflow_run_status:
+          $ref: "#/components/schemas/WorkflowRunStatus"
+          description: That workflow run's status, now.
     ScheduleList:
       type: object
       required: [schedules]
@@ -2321,6 +2327,12 @@ components:
         workflow_run_id:
           type: string
           description: The workflow run this run started, for a schedule that starts a workflow.
+        workflow_run_status:
+          $ref: "#/components/schemas/WorkflowRunStatus"
+          description: |
+            The status of the workflow run in `workflow_run_id`, now. The run
+            itself succeeds once it has started the workflow run, so this says
+            whether the workflow is still going or how it ended.
         state:
           $ref: "#/components/schemas/RunState"
         trigger:

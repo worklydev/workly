@@ -105,6 +105,10 @@ type RunSummary struct {
 	FinishedAt   *time.Time
 	LastStatus   *int
 	LastError    string
+	// WorkflowRunID and WorkflowRunStatus are the workflow run it started,
+	// for a schedule that starts a workflow.
+	WorkflowRunID     string
+	WorkflowRunStatus WorkflowRunStatus
 }
 
 type RunState string
@@ -172,6 +176,9 @@ type Run struct {
 	// WorkflowRunID is the workflow run it started, for a schedule that
 	// starts a workflow.
 	WorkflowRunID string
+	// WorkflowRunStatus is that workflow run's status, filled in by GetRun
+	// and ListRuns.
+	WorkflowRunStatus WorkflowRunStatus
 }
 
 // RunCallbackBody is the body of a schedule's callback.
