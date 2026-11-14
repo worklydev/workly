@@ -204,9 +204,9 @@ func TestMCPModes(t *testing.T) {
 		{"", readTools}, // read-only by default
 		{server.MCPReadOnly, readTools},
 		{server.MCPFull, append(slices.Clone(readTools), "enqueue_task", "retry_task", "cancel_task",
-			"retry_failed_tasks", "cancel_pending_tasks", "pause_queue", "resume_queue", "update_queue_policy",
-			"update_schedule", "trigger_schedule", "pause_schedule", "resume_schedule", "retry_run", "cancel_run",
-			"trigger_workflow", "cancel_workflow_run", "retry_workflow_run")},
+			"retry_failed_tasks", "cancel_pending_tasks", "pause_queue", "resume_queue", "update_queue_policy", "delete_queue",
+			"update_schedule", "trigger_schedule", "pause_schedule", "resume_schedule", "retry_run", "cancel_run", "delete_schedule",
+			"trigger_workflow", "cancel_workflow_run", "retry_workflow_run", "delete_workflow")},
 	} {
 		t.Run(string(tc.mode), func(t *testing.T) {
 			c := mcpClient{t: t, h: newServer(t, server.Options{DisableDispatcher: true, MCP: tc.mode}).Handler()}
@@ -809,5 +809,42 @@ func TestMCPWorkflows(t *testing.T) {
 	}
 	if s = c.call("update_schedule", map[string]any{"schedule": "nightly", "url": "https://example.test/y"}); s["url"] != "https://example.test/y" || s["workflow"] != nil {
 		t.Fatalf("update_schedule back to a url = %v", s)
+	}
+}
+
+func TestMCPDelete(t *testing.T) {
+	h := newServer(t, server.Options{DisableDispatcher: true, MCP: server.MCPFull}).Handler()
+	c := mcpClient{t: t, h: h}
+
+	// A queue with work still to deliver isn't deleted.
+	c.call("enqueue_task", map[string]any{"queue": "emails", "url": "https://example.test/hook"})
+	if text, isError := c.callRaw("delete_queue", map[string]any{"queue": "emails"}); !isError || !strings.Contains(text, "invalid_state") || !strings.Contains(text, "still has tasks to deliver (1 due") {
+		t.Errorf("delete_queue with a pending task = %q", text)
+	}
+	c.call("cancel_pending_tasks", map[string]any{"queue": "emails"})
+	if got := c.call("delete_queue", map[string]any{"queue": "emails"}); got["deleted"] != true {
+		t.Errorf("delete_queue = %v", got)
+	}
+	if text, isError := c.callRaw("get_queue", map[string]any{"queue": "emails"}); !isError || !strings.Contains(text, "queue_not_found") {
+		t.Errorf("get_queue after delete = %q", text)
+	}
+	if text, isError := c.callRaw("delete_queue", map[string]any{"queue": "_workflows"}); !isError || !strings.Contains(text, "Workly's own") {
+		t.Errorf("delete_queue _workflows = %q", text)
+	}
+
+	c.call("update_schedule", map[string]any{"schedule": "nightly", "cron": "@daily", "url": "https://example.test/x"})
+	if got := c.call("delete_schedule", map[string]any{"schedule": "nightly"}); got["deleted"] != true {
+		t.Errorf("delete_schedule = %v", got)
+	}
+	if text, isError := c.callRaw("delete_schedule", map[string]any{"schedule": "nightly"}); !isError || !strings.Contains(text, "not_found") {
+		t.Errorf("delete_schedule again = %q", text)
+	}
+
+	doBody(t, h, "PUT", "/v1/workflows/refresh", "", `{"steps": [{"name": "prices", "url": "https://example.test/prices"}]}`)
+	if got := c.call("delete_workflow", map[string]any{"workflow": "refresh"}); got["deleted"] != true {
+		t.Errorf("delete_workflow = %v", got)
+	}
+	if got := c.call("list_workflows", map[string]any{}); len(got["workflows"].([]any)) != 0 {
+		t.Errorf("list_workflows after delete = %v", got)
 	}
 }

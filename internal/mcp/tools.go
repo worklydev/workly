@@ -240,9 +240,9 @@ func allTools() []*tool {
 		listSchedules, getSchedule, listRuns, getRun, getRunDelivery, waitForRun,
 		listWorkflows, getWorkflow, listWorkflowRuns, getWorkflowRun,
 		enqueueTask, retryTask, cancelTask, retryFailedTasks, cancelPendingTasks, pauseQueue, resumeQueue,
-		updateQueuePolicy,
-		updateSchedule, triggerSchedule, pauseSchedule, resumeSchedule, retryRun, cancelRun,
-		triggerWorkflow, cancelWorkflowRun, retryWorkflowRun,
+		updateQueuePolicy, deleteQueue,
+		updateSchedule, triggerSchedule, pauseSchedule, resumeSchedule, retryRun, cancelRun, deleteSchedule,
+		triggerWorkflow, cancelWorkflowRun, retryWorkflowRun, deleteWorkflow,
 	}
 }
 
@@ -708,6 +708,37 @@ func taskAction(ctx context.Context, api apiClient, id, action string) (any, err
 	}
 	return summary(task), nil
 }
+
+var deleteQueue = newTool("delete_queue", "Delete queue",
+	"Deletes a queue with its settings and its finished tasks. It can't be undone, and enqueueing to the name creates the queue again with default settings. Refuses (invalid_state) while the queue has tasks due, scheduled or running, so no work is lost: cancel_pending_tasks first if they should go. Workly's own queues (names starting with _) can't be deleted.",
+	object(map[string]any{"queue": queueProp}, "queue"),
+	annotations{DestructiveHint: true},
+	func(ctx context.Context, api apiClient, args struct {
+		Queue string `json:"queue"`
+	}) (any, error) {
+		if strings.HasPrefix(args.Queue, "_") {
+			return nil, &apiError{Status: http.StatusConflict, Code: "invalid_state", Message: "queue " + args.Queue + " is Workly's own and can't be deleted"}
+		}
+		var q struct {
+			Stats struct {
+				Due, Scheduled, Running, Failed int
+			} `json:"stats"`
+		}
+		if err := api.do(ctx, "GET", apiPath("/v1/queues/%s", args.Queue), nil, nil, &q); err != nil {
+			return nil, err
+		}
+		// Checked here rather than left to the API, which deletes the tasks
+		// too: an agent shouldn't lose work it may not know about.
+		if n := q.Stats.Due + q.Stats.Scheduled + q.Stats.Running; n > 0 {
+			return nil, &apiError{Status: http.StatusConflict, Code: "invalid_state", Message: fmt.Sprintf(
+				"queue %s still has tasks to deliver (%d due, %d scheduled, %d running); cancel_pending_tasks first, or wait for them to finish",
+				args.Queue, q.Stats.Due, q.Stats.Scheduled, q.Stats.Running)}
+		}
+		if err := api.do(ctx, "DELETE", apiPath("/v1/queues/%s", args.Queue), nil, nil, nil); err != nil {
+			return nil, err
+		}
+		return map[string]any{"queue": args.Queue, "deleted": true, "failed_tasks_deleted": q.Stats.Failed}, nil
+	})
 
 func queueAction(ctx context.Context, api apiClient, queue, action string) (any, error) {
 	var out map[string]any
