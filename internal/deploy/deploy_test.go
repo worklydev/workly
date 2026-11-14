@@ -75,7 +75,10 @@ func TestParseErrors(t *testing.T) {
 		{`queues: {}`, "workly.yaml:1: version: required: add version: 1"},
 		{`version: 2`, "workly.yaml:1: version: 2 isn't supported: this version of workly reads version 1"},
 		{"version: 1\nqueue: {}", "workly.yaml:2: queue: unknown field: did you mean queues?"},
-		{"version: 1\ndestructive: true", "workly.yaml:2: destructive: unknown field: workly deploy never deletes anything"},
+		{"version: 1\ndestructive: true", "workly.yaml:2: destructive: unknown field: use prune: true"},
+		{"version: 1\nprune: yes please", "workly.yaml:2: prune: must be true or false"},
+		{"version: 1\nprune: 'true'", "workly.yaml:2: prune: must be true or false"},
+		{"version: 1\nprnue: true", "workly.yaml:2: prnue: unknown field: did you mean prune?"},
 		{"version: 1\nqueues: [a]", "workly.yaml:2: queues: expected a mapping"},
 		{"version: 1\nqueues:\n  a: {max_attempts: '${MAX:-}'}", "workly.yaml:3: queues.a.max_attempts: must be a whole number"},
 		{"version: 1\nqueues:\n  a: {max_attempts: '${1X:-3}'}", "${1X:-3} isn't a valid environment variable reference"},
@@ -318,5 +321,64 @@ schedules:
 	plan, _ = parse(t, "version: 1\nqueues: {}").Plan(queues, nil, schedules)
 	if len(plan.Changes) != 0 || plan.Undeclared != nil {
 		t.Errorf("plan = %+v", plan)
+	}
+}
+
+func TestPlanPrune(t *testing.T) {
+	queues := []api.Queue{
+		{Name: "old", Stats: &api.QueueStats{Failed: 3}},
+		{Name: "idle"},
+		{Name: "_workflows"},
+		{Name: "_callbacks"},
+	}
+	workflows := []api.Workflow{{Name: "old-flow"}}
+	schedules := []api.Schedule{{Name: "old-job"}, {Name: "another-job"}}
+
+	plan, err := parse(t, "version: 1\nprune: true\nqueues:\n  keep: {}\nworkflows: {}\nschedules: {}").Plan(queues, workflows, schedules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, c := range plan.Changes {
+		got = append(got, fmt.Sprintf("%s %s %d %d", c.Kind, c.Name, c.Action, c.Failed))
+	}
+	// Deletes come last, schedules first, so nothing left points at what's gone.
+	want := []string{
+		"queue keep 1 0",
+		"schedule another-job 3 0",
+		"schedule old-job 3 0",
+		"workflow old-flow 3 0",
+		"queue idle 3 0",
+		"queue old 3 3",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("changes:\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	if plan.Undeclared != nil || plan.UndeclaredWorkflows != nil {
+		t.Errorf("undeclared = %v %v", plan.Undeclared, plan.UndeclaredWorkflows)
+	}
+
+	// A section left out isn't managed, prune or not.
+	plan, err = parse(t, "version: 1\nprune: true\nschedules: {}").Plan(nil, nil, schedules)
+	if err != nil || plan.Count(Delete) != 2 {
+		t.Errorf("schedules only: %d deletes, %v", plan.Count(Delete), err)
+	}
+	plan, _ = parse(t, "version: 1\nprune: true\nqueues:\n  keep: {}").Plan(queues, workflows, schedules)
+	if plan.Count(Delete) != 2 {
+		t.Errorf("queues only: %+v", plan.Changes)
+	}
+
+	// Without prune, nothing is deleted.
+	plan, _ = parse(t, "version: 1\nqueues: {}\nschedules: {}").Plan(queues, nil, schedules)
+	if plan.Count(Delete) != 0 || fmt.Sprint(plan.Undeclared) != "[another-job old-job]" {
+		t.Errorf("without prune: %+v", plan)
+	}
+
+	// Queues with tasks still to deliver stop the plan, all of them named.
+	busy := append(queues, api.Queue{Name: "emails", Stats: &api.QueueStats{Due: 2, Scheduled: 9, Running: 1}},
+		api.Queue{Name: "sms", Stats: &api.QueueStats{Scheduled: 1}})
+	_, err = parse(t, "version: 1\nprune: true\nqueues: {}").Plan(busy, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "emails (12 unfinished tasks), sms (1 unfinished task)") {
+		t.Errorf("busy queues: %v", err)
 	}
 }

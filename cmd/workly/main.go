@@ -175,8 +175,7 @@ func applyDev(ctx context.Context, f *deploy.File, port int) (string, error) {
 			return "", fmt.Errorf("%s %s: %w", ch.Kind, ch.Name, err)
 		}
 	}
-	return fmt.Sprintf("%s (%d created, %d updated, %d unchanged)", f.Path,
-		plan.Count(deploy.Create), plan.Count(deploy.Update), plan.Count(deploy.Unchanged)), nil
+	return fmt.Sprintf("%s (%s, %d unchanged)", f.Path, summary(plan, false), plan.Count(deploy.Unchanged)), nil
 }
 
 func serveCmd() *cobra.Command {

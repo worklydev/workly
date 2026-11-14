@@ -279,6 +279,19 @@ var cancelRun = newTool("cancel_run", "Cancel run",
 		return runAction(ctx, api, args.ID, "cancel")
 	})
 
+var deleteSchedule = newTool("delete_schedule", "Delete schedule",
+	"Deletes a schedule and all its runs. It can't be undone; pause_schedule stops it and keeps its history. A run being delivered finishes, but its result isn't recorded.",
+	object(map[string]any{"schedule": scheduleProp}, "schedule"),
+	annotations{DestructiveHint: true},
+	func(ctx context.Context, api apiClient, args struct {
+		Schedule string `json:"schedule"`
+	}) (any, error) {
+		if err := api.do(ctx, "DELETE", apiPath("/v1/schedules/%s", args.Schedule), nil, nil, nil); err != nil {
+			return nil, err
+		}
+		return map[string]any{"schedule": args.Schedule, "deleted": true}, nil
+	})
+
 var updateSchedule = newTool("update_schedule", "Create or update schedule",
 	"Creates a schedule, or changes an existing one's settings. For an existing schedule only the settings given change. A new one needs cron and url (or workflow). Returns the schedule with its next five slots (next_runs, or next_runs_if_resumed while it is paused), to check the cron expression.",
 	object(map[string]any{

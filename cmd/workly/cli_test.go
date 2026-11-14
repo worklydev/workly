@@ -451,3 +451,53 @@ func TestDevConfig(t *testing.T) {
 		t.Fatalf("dev with an invalid file: %v", r.err)
 	}
 }
+
+func TestDeployPrune(t *testing.T) {
+	newTestServer(t, "")
+	path := filepath.Join(t.TempDir(), "workly.yaml")
+	write := func(src string) {
+		if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(`version: 1
+queues:
+  keep: {}
+  old: {}
+workflows:
+  old-flow:
+    steps:
+      - {name: one, url: "https://example.com/one"}
+schedules:
+  keep: {cron: "@daily", url: "https://example.com/keep"}
+  old-job: {cron: "@daily", url: "https://example.com/old"}
+`)
+	mustRun(t, "deploy", "-f", path, "--yes")
+	mustRun(t, "tasks", "enqueue", "busy", "https://example.com/hook")
+
+	write(`version: 1
+prune: true
+queues:
+  keep: {}
+workflows: {}
+schedules:
+  keep: {cron: "@daily", url: "https://example.com/keep"}
+`)
+	// A queue with a task still to deliver stops the deploy before anything changes.
+	r := cli(t, "", "deploy", "-f", path, "--yes")
+	if r.err == nil || !strings.Contains(r.err.Error(), "busy (1 unfinished task)") {
+		t.Fatalf("deploy with a busy queue: %v", r.err)
+	}
+	contains(t, mustRun(t, "schedules", "ls"), "old-job")
+
+	mustRun(t, "queues", "cancel-pending", "busy", "--yes")
+	contains(t, mustRun(t, "plan", "-f", path), "- delete schedule old-job", "- delete workflow old-flow",
+		"- delete queue busy", "- delete queue old", "0 to create, 0 to update, 4 to delete, 2 unchanged.")
+	contains(t, mustRun(t, "deploy", "-f", path, "--yes"), "Deleted schedule old-job", "Deleted queue old",
+		"Deployed "+path+": 0 created, 0 updated, 4 deleted.")
+	out := mustRun(t, "queues", "ls")
+	if strings.Contains(out, "old") || strings.Contains(out, "busy") || !strings.Contains(out, "keep") {
+		t.Errorf("queues after prune:\n%s", out)
+	}
+	contains(t, mustRun(t, "deploy", "-f", path, "--yes"), "No changes: ")
+}

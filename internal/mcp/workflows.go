@@ -176,6 +176,19 @@ var triggerWorkflow = newTool("trigger_workflow", "Start workflow run",
 		return workflowRunDetail(r), nil
 	})
 
+var deleteWorkflow = newTool("delete_workflow", "Delete workflow",
+	"Deletes a workflow's definition, so it can't be triggered. Its runs are kept, and runs still going finish under the definition they started with. It can't be undone. A schedule that starts this workflow keeps going and its runs fail: delete or change it too.",
+	object(map[string]any{"workflow": workflowProp}, "workflow"),
+	annotations{DestructiveHint: true},
+	func(ctx context.Context, api apiClient, args struct {
+		Workflow string `json:"workflow"`
+	}) (any, error) {
+		if err := api.do(ctx, "DELETE", apiPath("/v1/workflows/%s", args.Workflow), nil, nil, nil); err != nil {
+			return nil, err
+		}
+		return map[string]any{"workflow": args.Workflow, "deleted": true}, nil
+	})
+
 var cancelWorkflowRun = newTool("cancel_workflow_run", "Cancel workflow run",
 	"Cancels a running workflow run: steps not yet started are skipped and their queued tasks cancelled. Requests already being delivered finish, but start nothing. It can't undo what steps already did. Returns the run.",
 	object(map[string]any{"id": workflowRunIDProp}, "id"),

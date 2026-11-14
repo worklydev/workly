@@ -129,15 +129,18 @@ Write tools (`WORKLY_MCP=full`):
 | `cancel_pending_tasks` | Cancels a queue's pending tasks; they stay in the history and can be retried |
 | `pause_queue`, `resume_queue` | Stops and restarts a queue's deliveries |
 | `update_queue_policy` | Changes some of a queue's settings, keeping the rest |
+| `delete_queue` | Deletes a queue and its finished tasks. Refuses while it has tasks due, scheduled or running, and for Workly's own queues |
 | `update_schedule` | Creates a schedule, or changes some of its settings, keeping the rest |
 | `trigger_schedule` | Runs a schedule now |
 | `pause_schedule`, `resume_schedule` | Stops and restarts a schedule |
 | `retry_run`, `cancel_run` | Delivers a run again, or cancels it |
+| `delete_schedule` | Deletes a schedule and its runs |
 | `trigger_workflow` | Starts a workflow run, with optional input and idempotency key |
 | `cancel_workflow_run` | Cancels a workflow run: steps not yet started are skipped |
 | `retry_workflow_run` | Reopens a failed or cancelled workflow run: its failed and skipped steps run again |
+| `delete_workflow` | Deletes a workflow's definition; its runs are kept |
 
-Write tools that change one task, run, queue or schedule return it as changed, so an agent can confirm the change without reading it again. Deleting queues isn't offered: it can't be undone, so it stays in the dashboard, CLI and API.
+Write tools that change one task, run, queue or schedule return it as changed, so an agent can confirm the change without reading it again. The delete tools can't be undone, so they're marked destructive, and clients that confirm destructive tools ask first. `delete_queue` won't delete a queue with work left in it, so an agent can't lose tasks it didn't know about; run `cancel_pending_tasks` first if they should go.
 
 Arguments are checked against each tool's schema before anything runs, and errors name the argument at fault (`limit must be an integer, not string`, `state must be one of …`), so an agent can correct its call.
 

@@ -32,6 +32,8 @@ type File struct {
 	Workflows                             []Workflow
 	Schedules                             []Schedule
 	HasQueues, HasWorkflows, HasSchedules bool
+	// Prune deletes what a managed section leaves out (prune: true).
+	Prune bool
 	// Defaults lists the ${NAME:-default} references that took their
 	// default, in file order, so plan can show them: a variable CI forgot
 	// to set would otherwise deploy a local default without a word.
@@ -133,17 +135,18 @@ func (p *parser) add(n *yaml.Node, field, format string, args ...any) {
 // hints answer keys people reach for that Workly spells differently or
 // doesn't have.
 var hints = map[string]string{
-	"concurrency": `use max_concurrency`,
-	"rate_limit":  `use rate_per_second`,
-	"rate":        `use rate_per_second`,
-	"retries":     `use max_attempts, which counts the first attempt too`,
-	"timeout":     `use timeout_seconds`,
-	"queue":       `schedules call their url directly; they don't use a queue`,
-	"needs":       `use depends_on`,
-	"after":       `use depends_on`,
-	"depends":     `use depends_on`,
-	"destructive": `workly deploy never deletes anything; remove queues, workflows and schedules with workly queues rm, workly workflows rm and workly schedules rm`,
-	"paused":      `deploying doesn't pause or resume; use workly queues pause or workly schedules pause`,
+	"concurrency":   `use max_concurrency`,
+	"rate_limit":    `use rate_per_second`,
+	"rate":          `use rate_per_second`,
+	"retries":       `use max_attempts, which counts the first attempt too`,
+	"timeout":       `use timeout_seconds`,
+	"queue":         `schedules call their url directly; they don't use a queue`,
+	"needs":         `use depends_on`,
+	"after":         `use depends_on`,
+	"depends":       `use depends_on`,
+	"destructive":   `use prune: true at the top of the file to delete what it leaves out`,
+	"authoritative": `use prune: true at the top of the file to delete what it leaves out`,
+	"paused":        `deploying doesn't pause or resume; use workly queues pause or workly schedules pause`,
 }
 
 func (p *parser) file(data []byte) *File {
@@ -170,6 +173,12 @@ func (p *parser) file(data []byte) *File {
 		switch key := kv[0].Value; key {
 		case "version":
 			version = kv[1]
+		case "prune":
+			if kv[1].Kind != yaml.ScalarNode || kv[1].Tag != "!!bool" {
+				p.add(kv[1], "prune", "must be true or false")
+				continue
+			}
+			_ = kv[1].Decode(&f.Prune)
 		case "queues":
 			f.HasQueues = true
 			p.queues(f, kv[1])
@@ -185,7 +194,7 @@ func (p *parser) file(data []byte) *File {
 			if strings.HasPrefix(key, "x-") {
 				continue
 			}
-			p.unknown(kv[0], key, []string{"version", "queues", "workflows", "schedules"})
+			p.unknown(kv[0], key, []string{"version", "prune", "queues", "workflows", "schedules"})
 		}
 	}
 	var v int
