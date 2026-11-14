@@ -29,6 +29,7 @@ func Run(t *testing.T, factory Factory) {
 		{"MigrateIsIdempotent", testMigrateIsIdempotent},
 		{"ConcurrentMigrate", testConcurrentMigrate},
 		{"Workspaces", testWorkspaces},
+		{"DeleteWorkspace", testDeleteWorkspace},
 		{"Queues", testQueues},
 		{"CreateTask", testCreateTask},
 		{"Idempotency", testIdempotency},
@@ -186,5 +187,57 @@ func testWorkspaces(t *testing.T, open func() store.Store) {
 	}
 	if got != again {
 		t.Fatalf("GetWorkspace = %+v, want %+v", got, again)
+	}
+}
+
+func testDeleteWorkspace(t *testing.T, open func() store.Store) {
+	s := seeded(t, open)
+	ctx := t.Context()
+
+	for _, ws := range []workspace.ID{workspace.Default, otherWorkspace} {
+		task := mustCreate(t, s, ws, store.NewTask{Queue: "emails"})
+		attempt(t, s, task, store.TaskFailed)
+		mustCreate(t, s, ws, store.NewTask{Queue: "emails"})
+		mustCreateGroup(t, s, ws, store.NewGroup{})
+		mustPutSchedule(t, s, ws, "nightly", now().Add(time.Hour))
+	}
+	running := claim(t, s, mustCreate(t, s, workspace.Default, store.NewTask{Queue: "reports"}))
+
+	if err := s.DeleteWorkspace(ctx, workspace.Default); err != nil {
+		t.Fatalf("DeleteWorkspace: %v", err)
+	}
+	if _, err := s.GetWorkspace(ctx, workspace.Default); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("GetWorkspace after delete: err = %v, want ErrNotFound", err)
+	}
+	if qs, err := s.ListQueues(ctx, workspace.Default); err != nil || len(qs) != 0 {
+		t.Fatalf("ListQueues after delete = %v, %v", qs, err)
+	}
+	if _, err := s.GetTask(ctx, workspace.Default, running.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("GetTask after delete: err = %v, want ErrNotFound", err)
+	}
+	if scs, err := s.ListSchedules(ctx, workspace.Default); err != nil || len(scs) != 0 {
+		t.Fatalf("ListSchedules after delete = %v, %v", scs, err)
+	}
+	// A delivery that was in flight finds its task gone.
+	_, err := s.FinishAttempt(ctx, workspace.Default, store.AttemptResult{
+		Attempt:   store.Attempt{TaskID: running.ID, Number: running.AttemptCount, StartedAt: now(), FinishedAt: now(), Outcome: store.OutcomeSuccess},
+		NextState: store.TaskSucceeded,
+	})
+	if !errors.Is(err, store.ErrLeaseLost) {
+		t.Fatalf("FinishAttempt after delete: err = %v, want ErrLeaseLost", err)
+	}
+	if err := s.DeleteWorkspace(ctx, workspace.Default); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("second DeleteWorkspace: err = %v, want ErrNotFound", err)
+	}
+
+	// The other workspace is untouched.
+	if qs, err := s.ListQueues(ctx, otherWorkspace); err != nil || len(qs) != 1 {
+		t.Fatalf("other workspace's queues = %v, %v", qs, err)
+	}
+	if tasks, _, err := s.ListTasks(ctx, otherWorkspace, store.TaskFilter{Queue: "emails", Limit: 10}); err != nil || len(tasks) != 2 {
+		t.Fatalf("other workspace's tasks = %d, %v", len(tasks), err)
+	}
+	if scs, err := s.ListSchedules(ctx, otherWorkspace); err != nil || len(scs) != 1 {
+		t.Fatalf("other workspace's schedules = %v, %v", scs, err)
 	}
 }

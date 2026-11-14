@@ -254,6 +254,20 @@ func (s *Store) GetWorkspace(ctx context.Context, id workspace.ID) (store.Worksp
 	return w, err
 }
 
+// DeleteWorkspace relies on every table cascading from workspaces, so a
+// table added later goes with it without changes here.
+func (s *Store) DeleteWorkspace(ctx context.Context, id workspace.ID) error {
+	res, err := s.exec(ctx, s.db, `DELETE FROM workspaces WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err == nil && n == 0 {
+		return store.ErrNotFound
+	}
+	return err
+}
+
 // Queues
 
 const queueColumns = `workspace_id, name, paused, max_attempts, min_backoff_ms, max_backoff_ms,
