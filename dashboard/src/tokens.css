@@ -1,7 +1,7 @@
 /* Tokens — see DESIGN.md. Flat surfaces, three text levels, one orange accent. */
 :root {
   /* Sidebar and header a step below the main content, so the page reads as one sheet. */
-  --background: oklch(0.975 0 0);
+  --background: oklch(0.985 0 0);
   --surface: oklch(0.993 0 0);
   --foreground: oklch(0.21 0 0);
   /* Darker than the sidebar, so inputs and code panels still show on it. */
@@ -13,7 +13,7 @@
   --primary-foreground: oklch(0.993 0 0);
   --secondary: oklch(0.96 0 0);
   --secondary-foreground: oklch(0.21 0 0);
-  --muted: oklch(0.94 0 0);
+  --muted: oklch(0.96 0 0);
   --muted-foreground: oklch(0.5 0 0);
   --faint: oklch(0.65 0 0);
   --accent: oklch(0.94 0 0);

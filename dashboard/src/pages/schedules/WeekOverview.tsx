@@ -18,7 +18,7 @@ const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 // Hairlines between columns, so it reads as a timetable; today's column a whisper of the accent.
 const GRID = 'border-l border-border';
 // Day cells are tight, so seven of them leave the name and target room.
-const DAY = 'h-auto px-2 py-1.5';
+const DAY = 'h-auto px-1.5 py-1';
 const TODAY = 'bg-primary/[0.035]';
 
 /**
@@ -60,7 +60,7 @@ export function WeekOverview({ schedules }: { schedules: Schedule[] }) {
             When
           </TableHead>
           {DAYS.map((d, i) => (
-            <TableHead key={d} className={cn('px-2', GRID, i === today && TODAY, i === today && 'text-foreground')}>
+            <TableHead key={d} className={cn('px-1.5', GRID, i === today && TODAY, i === today && 'text-foreground')}>
               <span className="flex items-center gap-1.5">
                 {d}
                 {i === today && <span className="size-1.5 rounded-full bg-primary" title="Today" />}
@@ -109,7 +109,7 @@ export function WeekOverview({ schedules }: { schedules: Schedule[] }) {
               </div>
             </TableCell>
             {byDate(s.cron) ? (
-              <TableCell colSpan={7} className={cn('px-2 text-xs text-muted-foreground', GRID)}>
+              <TableCell colSpan={7} className={cn('px-1.5 text-xs text-muted-foreground', GRID)}>
                 Runs by date, not weekday
                 {s.next_run_at && <span className="text-faint"> · next {zonedDate(s.next_run_at, s.timezone)}</span>}
               </TableCell>

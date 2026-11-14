@@ -9,8 +9,8 @@ import { useRange } from '../../hooks/useRange';
 import { axisTicks, BARS, niceCeil, RANGE_SECONDS, span, sum } from '../../lib/activity';
 import { formatCount } from '../../lib/format';
 
-// Succeeded recedes so failures, in red on top, are what the eye finds.
-const SUCCEEDED = 'bg-muted-foreground/35';
+// Succeeded in a soft green, so failures, in full red on top, are still what the eye finds.
+const SUCCEEDED = 'bg-success/70';
 const FAILED = 'bg-destructive';
 
 /**
@@ -27,7 +27,7 @@ export function DeliveriesChart({ fresh = false }: { fresh?: boolean }) {
   const succeeded = data?.buckets.reduce((n, b) => n + b.succeeded, 0) ?? 0;
   const failed = data?.buckets.reduce((n, b) => n + b.failed, 0) ?? 0;
   const total = succeeded + failed;
-  const scale = niceCeil(Math.max(5, ...(data?.buckets.map((b) => b.succeeded + b.failed) ?? [])));
+  const scale = niceCeil(Math.max(4, ...(data?.buckets.map((b) => b.succeeded + b.failed) ?? [])));
   const deleted = data?.retention_seconds !== undefined && data.retention_seconds < RANGE_SECONDS[range];
 
   return (
@@ -72,8 +72,8 @@ export function DeliveriesChart({ fresh = false }: { fresh?: boolean }) {
         </>
       ) : (
         <>
-          <Detail data={data} index={hovered} scale={scale} per={per} />
-          <ChartFrame onMouseLeave={() => setHovered(undefined)}>
+          <Detail data={data} index={hovered} />
+          <ChartFrame scale={scale} onMouseLeave={() => setHovered(undefined)}>
             {data.buckets.map((b, i) => {
               const n = b.succeeded + b.failed;
               return (
@@ -121,17 +121,9 @@ function Legend({ color, label, n, tone }: { color: string; label: string; n: nu
   );
 }
 
-/** The hovered bar's time and counts, or the scale, labelling the dashed line at the chart's top. */
-function Detail({ data, index, scale, per }: { data: Activity; index?: number; scale: number; per: string }) {
-  if (index === undefined) {
-    return (
-      <div className="flex h-5 items-end justify-end text-xs text-faint">
-        <span className="font-mono tabular-nums">
-          {formatCount(scale)} per {per}
-        </span>
-      </div>
-    );
-  }
+/** The hovered bar's time and counts. */
+function Detail({ data, index }: { data: Activity; index?: number }) {
+  if (index === undefined) return <div className="h-5" />;
   const b = data.buckets[index];
   const end = new Date(Date.parse(b.start) + data.bucket_seconds * 1000);
   return (

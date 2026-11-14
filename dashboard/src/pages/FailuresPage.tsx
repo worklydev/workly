@@ -29,10 +29,9 @@ export function FailuresPage() {
   const queues = useQueueFailureGroups();
   const runs = useRunFailureGroups();
   const workflows = useWorkflowFailureGroups();
+  // Wait for all three, so the page answers once: nothing failing, or the sections.
+  const loading = queues.isPending || runs.runs.isPending || workflows.runs.isPending;
   const nothing =
-    !queues.isPending &&
-    !runs.runs.isPending &&
-    !workflows.runs.isPending &&
     !queues.error &&
     !runs.runs.error &&
     !workflows.runs.error &&
@@ -43,7 +42,9 @@ export function FailuresPage() {
       <PageHeader title="Failures" description="Everything that failed, grouped by error.">
         <AlertsLink />
       </PageHeader>
-      {nothing ? (
+      {loading ? (
+        <FailuresSkeleton />
+      ) : nothing ? (
         // One answer for the page, not three empty sections.
         <EmptyState
           tone="success"
@@ -237,6 +238,17 @@ function WorkflowFailures({ failures }: { failures: ReturnType<typeof useWorkflo
         </div>
       )}
     </Section>
+  );
+}
+
+/** The page while its lists load: no section headings yet, since the answer may be that nothing is failing. */
+function FailuresSkeleton() {
+  return (
+    <div aria-hidden className="flex animate-pulse flex-col gap-3">
+      <div className="h-9 rounded-lg bg-muted/60" />
+      <div className="h-9 rounded-lg bg-muted/40" />
+      <div className="h-9 rounded-lg bg-muted/30" />
+    </div>
   );
 }
 
