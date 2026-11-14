@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"syscall"
@@ -40,6 +41,8 @@ type result struct {
 	body       string
 	headers    map[string]string
 	retryAfter time.Duration
+	// final: retrying would fail the same way (see Refused).
+	final bool
 }
 
 func (r result) attempt(t store.Task) store.Attempt {
@@ -229,6 +232,7 @@ func (d deliverer) send(ctx context.Context, method, url string, body []byte, ti
 	resp, err := d.client.Do(req)
 	if err != nil {
 		r.outcome, r.err = classifyError(reqCtx, ctx, err, timeout)
+		r.final = errors.As(err, new(refusedError))
 		r.finished = time.Now()
 		return r
 	}
@@ -272,9 +276,62 @@ func classifyError(reqCtx, parent context.Context, err error, timeout time.Durat
 	}
 	var netErr net.Error
 	if errors.As(err, &netErr) && netErr.Timeout() {
-		return store.OutcomeTimeout, unwrapURLError(err)
+		return store.OutcomeTimeout, describeError(err)
 	}
-	return store.OutcomeNetworkError, unwrapURLError(err)
+	return store.OutcomeNetworkError, describeError(err)
+}
+
+// Refused marks an error from a DialControl as final: the connection would
+// be refused again on a retry (a private address on a server that delivers
+// only to the public internet, say), so the attempt fails its task or run
+// at once rather than being retried.
+func Refused(err error) error { return refusedError{err} }
+
+type refusedError struct{ err error }
+
+func (e refusedError) Error() string { return e.err.Error() }
+func (e refusedError) Unwrap() error { return e.err }
+
+// describeError is a delivery error as its attempt records it. It leaves out
+// what Go's errors carry that the user can't act on, and shouldn't see on a
+// shared server: the request's URL (it's on the task), our own addresses (a
+// connection's local end, the DNS resolver) and syscall names. Tasks that
+// failed the same way on the same host get the same error, so get_queue and
+// the dashboard group them together.
+func describeError(err error) string {
+	var refused refusedError
+	if errors.As(err, &refused) {
+		return refused.Error()
+	}
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		reason := dnsErr.Err
+		if dnsErr.IsTimeout {
+			reason = "timed out"
+		}
+		return fmt.Sprintf("DNS lookup for %s failed: %s", dnsErr.Name, reason)
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) && opErr.Err != nil {
+		reason := opErr.Err.Error()
+		if sysErr, ok := errors.AsType[*os.SyscallError](opErr.Err); ok {
+			reason = sysErr.Err.Error() // "connection refused", not "connect: connection refused"
+		}
+		addr := "the server"
+		if opErr.Addr != nil {
+			addr = opErr.Addr.String()
+		}
+		switch opErr.Op {
+		case "dial":
+			return fmt.Sprintf("connecting to %s: %s", addr, reason)
+		case "read":
+			return fmt.Sprintf("reading the response from %s: %s", addr, reason)
+		case "write":
+			return fmt.Sprintf("sending the request to %s: %s", addr, reason)
+		}
+		return fmt.Sprintf("%s %s: %s", opErr.Op, addr, reason)
+	}
+	return unwrapURLError(err)
 }
 
 // unwrapURLError drops the `Post "http://…":` prefix; the URL is on the task.

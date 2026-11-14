@@ -26,11 +26,19 @@ type apiError struct {
 func (e *apiError) Error() string { return e.Code + ": " + e.Message }
 
 func (c apiClient) do(ctx context.Context, method, path string, query url.Values, body any, out any) error {
+	_, err := c.doStatus(ctx, method, path, query, body, out)
+	return err
+}
+
+// doStatus is do, also returning the response's status, for endpoints whose
+// status says something the body doesn't (201 Created against 200 for a
+// task deduplicated by its idempotency key).
+func (c apiClient) doStatus(ctx context.Context, method, path string, query url.Values, body any, out any) (int, error) {
 	var r io.Reader = http.NoBody
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		r = bytes.NewReader(b)
 	}
@@ -40,7 +48,7 @@ func (c apiClient) do(ctx context.Context, method, path string, query url.Values
 	}
 	req, err := http.NewRequestWithContext(ctx, method, target, r)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -57,17 +65,17 @@ func (c apiClient) do(ctx context.Context, method, path string, query url.Values
 			} `json:"error"`
 		}
 		if json.Unmarshal(rec.body.Bytes(), &e) != nil || e.Error.Code == "" {
-			return &apiError{Status: rec.status, Code: "unknown", Message: rec.body.String()}
+			return rec.status, &apiError{Status: rec.status, Code: "unknown", Message: rec.body.String()}
 		}
-		return &apiError{Status: rec.status, Code: e.Error.Code, Message: e.Error.Message}
+		return rec.status, &apiError{Status: rec.status, Code: e.Error.Code, Message: e.Error.Message}
 	}
 	if out == nil || rec.body.Len() == 0 {
-		return nil
+		return rec.status, nil
 	}
 	if err := json.Unmarshal(rec.body.Bytes(), out); err != nil {
-		return fmt.Errorf("%s %s: decoding response: %w", method, path, err)
+		return rec.status, fmt.Errorf("%s %s: decoding response: %w", method, path, err)
 	}
-	return nil
+	return rec.status, nil
 }
 
 // recorder is a minimal in-memory http.ResponseWriter.

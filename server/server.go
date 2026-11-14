@@ -53,6 +53,12 @@ var ErrNotFound = store.ErrNotFound
 // the sender address from, e.g. "Workly <alerts@example.com>".
 func SMTPMailer(url, from string) (Mailer, error) { return alert.NewSMTP(url, from) }
 
+// DeliveryRefused wraps an error from DeliveryDialControl to say that the
+// connection would be refused again, e.g. to a private address: the attempt
+// fails its task or run at once instead of being retried, with err's message
+// as its error.
+func DeliveryRefused(err error) error { return dispatch.Refused(err) }
+
 // LimitError refuses a request from an Admission: the client gets status,
 // code and message in the API's error shape, e.g. 403 "quota_exceeded". Use
 // 429 only when retrying soon will work: the SDKs retry every 429.
@@ -188,8 +194,9 @@ type Options struct {
 	DevEndpoints bool
 	// DeliveryDialControl, if set, is called with the resolved address of
 	// each connection a delivery makes, before connecting (see
-	// net.Dialer.Control); an error fails the attempt with it. A server
-	// open to untrusted users can refuse private networks with it. Proxy
+	// net.Dialer.Control); an error fails the attempt with it, and one
+	// wrapped in DeliveryRefused fails the task or run without retries. A
+	// server open to untrusted users can refuse private networks with it. Proxy
 	// settings from the environment are ignored while it's set, since a
 	// proxy would connect on Workly's behalf.
 	DeliveryDialControl func(network, address string, c syscall.RawConn) error

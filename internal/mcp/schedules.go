@@ -10,7 +10,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // Schedules are separate from queues: a schedule calls its URL on a cron
@@ -163,9 +162,7 @@ var getRun = newTool("get_run", "Get run",
 			out["attempts_omitted"] = fmt.Sprintf("%d earlier attempts not shown", omitted)
 		}
 		for _, a := range list {
-			if body, ok := a["response_body"].(string); ok {
-				a["response_body"] = truncate(body, maxResponseBody)
-			}
+			attemptView(a)
 		}
 		out["attempts"] = list
 		return out, nil
@@ -197,7 +194,7 @@ var getRunDelivery = newTool("get_run_delivery", "Get run delivery request",
 	})
 
 var waitForRun = newTool("wait_for_run", "Wait for run",
-	"Waits for the first delivery attempt since the run was created or last retried by hand, then returns the run and its latest attempt. Returns at once if that attempt already happened or the run has finished. Use it after trigger_schedule or retry_run. Times out after timeout_seconds with done=false. For a schedule that starts a workflow, it returns once the workflow run has started, not finished: follow workflow_run_id with get_workflow_run.",
+	"Waits until the run has had a delivery attempt since it was created or last retried by hand, or has finished, then returns the run and latest_attempt, the latest attempt in that time (null if there was none, e.g. a skipped run). attempted says whether there was such an attempt; finished whether the run is in a final state (succeeded, failed, cancelled or skipped). attempted with finished false means it will be delivered again. Returns at once if either already holds. Use it after trigger_schedule or retry_run. Times out after timeout_seconds with attempted and finished false and a reason. For a schedule that starts a workflow, it returns once the workflow run has started, not finished: follow workflow_run_id with get_workflow_run.",
 	object(map[string]any{
 		"id":              runIDProp,
 		"timeout_seconds": prop("number", "How long to wait (default 30).", "minimum", 1, "maximum", 60),
@@ -206,43 +203,7 @@ var waitForRun = newTool("wait_for_run", "Wait for run",
 		ID             string  `json:"id"`
 		TimeoutSeconds float64 `json:"timeout_seconds"`
 	}) (any, error) {
-		timeout := time.Duration(min(cmp.Or(args.TimeoutSeconds, 30), 60) * float64(time.Second))
-		ctx, cancel := context.WithTimeout(ctx, timeout)
-		defer cancel()
-		var run map[string]any
-		for {
-			err := api.do(ctx, "GET", apiPath("/v1/runs/%s", args.ID), nil, nil, &run)
-			if err != nil && ctx.Err() == nil {
-				return nil, err
-			}
-			if err == nil && (run["state"] == "skipped" || attempted(run)) {
-				break
-			}
-			select {
-			case <-ctx.Done():
-				return map[string]any{
-					"done":   false,
-					"reason": fmt.Sprintf("no attempt completed within %v", timeout),
-					"run":    runSummary(run),
-				}, nil
-			case <-time.After(pollInterval):
-			}
-		}
-		out := map[string]any{"done": true, "run": runSummary(run)}
-		var attempts struct {
-			Attempts []map[string]any `json:"attempts"`
-		}
-		if err := api.do(context.WithoutCancel(ctx), "GET", apiPath("/v1/runs/%s/attempts", args.ID), nil, nil, &attempts); err != nil {
-			return nil, err
-		}
-		if n := len(attempts.Attempts); n > 0 {
-			latest := attempts.Attempts[n-1]
-			if body, ok := latest["response_body"].(string); ok {
-				latest["response_body"] = truncate(body, maxResponseBody)
-			}
-			out["latest_attempt"] = latest
-		}
-		return out, nil
+		return waitFor(ctx, api, args.TimeoutSeconds, "run", apiPath("/v1/runs/%s", args.ID), runSummary)
 	})
 
 // Write tools.
