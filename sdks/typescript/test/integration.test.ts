@@ -350,6 +350,27 @@ describe('integration', { skip: server ? false : 'set WORKLY_BIN or install Go' 
     assert.equal(members.length, 3);
   });
 
+  test('groups.enqueue is safe to retry', async () => {
+    const echo = `${url}/_dev/echo`;
+    const tasks = Array.from({ length: 250 }, (_, i) => ({ url: echo, payload: { i } }));
+    const key = `prices-${randomUUID().slice(0, 8)}`;
+    // The process dies after the first batch went in, before the group closed.
+    async function* crashing() {
+      yield* tasks.slice(0, 150);
+      throw new Error('crashed');
+    }
+    await assert.rejects(workly.groups.enqueue(queue, crashing(), { name: key, idempotencyKey: key }), /crashed/);
+    const page = await workly.groups.listPage({ name: key });
+    assert.deepEqual([page.groups[0]?.status, page.groups[0]?.total], ['open', 100]);
+
+    const group = await workly.groups.enqueue(queue, tasks, { name: key, idempotencyKey: key });
+    assert.equal(group.id, page.groups[0]?.id);
+    assert.ok(['running', 'succeeded'].includes(group.status));
+    assert.equal(group.total, 250);
+    const again = await workly.groups.enqueue(queue, tasks, { name: key, idempotencyKey: key });
+    assert.deepEqual([again.id, again.total], [group.id, 250]);
+  });
+
   test('workflows', async () => {
     const name = `wf-${randomUUID().slice(0, 8)}`;
     const echo = `${url}/_dev/echo`;

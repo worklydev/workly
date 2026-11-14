@@ -44,10 +44,20 @@ func main() {
 	}()
 
 	if err := rootCmd().ExecuteContext(ctx); err != nil {
+		var code exitCode
+		if errors.As(err, &code) {
+			os.Exit(int(code))
+		}
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
 }
+
+// exitCode ends the CLI with that status and nothing on stderr: the command
+// has already said what it means, as plan --detailed-exitcode does.
+type exitCode int
+
+func (c exitCode) Error() string { return fmt.Sprintf("exit status %d", int(c)) }
 
 func rootCmd() *cobra.Command {
 	root := &cobra.Command{
@@ -55,7 +65,11 @@ func rootCmd() *cobra.Command {
 		Short:         "Workly: a simple, reliable HTTP task queue",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		// --version, as well as the version command: it's the first thing
+		// people and agents try.
+		Version: version,
 	}
+	root.SetVersionTemplate("{{.Version}}\n")
 	root.AddCommand(devCmd(), serveCmd(), migrateCmd(), healthcheckCmd(), queuesCmd(), tasksCmd(), groupsCmd(), workflowsCmd(), schedulesCmd(), runsCmd(), validateCmd(), planCmd(), deployCmd(), versionCmd())
 	return root
 }
@@ -269,7 +283,7 @@ func versionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print the version",
 		Run: func(cmd *cobra.Command, _ []string) {
-			fmt.Println(version)
+			fmt.Fprintln(cmd.OutOrStdout(), version)
 		},
 	}
 }

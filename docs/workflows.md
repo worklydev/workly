@@ -120,21 +120,13 @@ def start_price_update():
     # The same on every delivery of this step in this run attempt: a redelivered
     # request reuses its group, and a retried run starts a fresh one.
     key = f'{request.headers["Workly-Workflow-Step-Id"]}-{request.headers["Workly-Workflow-Run-Attempt"]}'
-    group = workly.groups.create(name="daily-stock-prices", idempotency_key=key)
-    if group.status == "open":
-        workly.tasks.enqueue_many(
-            "stock-prices",
-            [
-                {
-                    "url": f"{API}/jobs/update-stock-price",
-                    "payload": {"symbol": s},
-                    "idempotency_key": f"{key}-{s}",
-                    "group_id": group.id,
-                }
-                for s in SYMBOLS
-            ],
-        )
-        workly.groups.close(group.id)
+    # Creates the group, enqueues the tasks into it and closes it; safe to retry.
+    group = workly.groups.enqueue(
+        "stock-prices",
+        ({"url": f"{API}/jobs/update-stock-price", "payload": {"symbol": s}} for s in SYMBOLS),
+        name="daily-stock-prices",
+        idempotency_key=key,
+    )
     return "", 202, {"Workly-Wait-For": f"group/{group.id}"}
 ```
 

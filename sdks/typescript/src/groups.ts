@@ -1,6 +1,10 @@
 import type { RequestOptions, Workly } from './client.ts';
+import type { EnqueueOptions } from './tasks.ts';
 import { seg } from './util.ts';
-import type { Group, GroupPage, GroupSpec, GroupStatus } from './types.ts';
+import type { Group, GroupPage, GroupSpec, GroupStatus, TaskSpec } from './types.ts';
+
+/** The most tasks one batch enqueue takes. */
+const MAX_BATCH = 100;
 
 export interface GroupsOptions extends RequestOptions {
   status?: GroupStatus | undefined;
@@ -45,6 +49,41 @@ export class Groups {
       idempotent: spec.idempotencyKey !== undefined,
       signal: options.signal,
     });
+  }
+
+  /**
+   * Creates a group, enqueues `tasks` into it and closes it: the whole job in
+   * one call. Tasks go in batches of 100, each joining the group. Resolves to
+   * the closed group, which completes (and enqueues `onComplete`) once its
+   * tasks have finished.
+   *
+   * Safe to retry with the same `idempotencyKey` and tasks: the group is found
+   * again instead of created, a task without its own `idempotencyKey` gets one
+   * from the group and its position so none is enqueued twice, and a group
+   * that is already closed is returned as it is. Without `idempotencyKey`, a
+   * retry starts a second group.
+   */
+  async enqueue(
+    queue: string,
+    tasks: Iterable<TaskSpec> | AsyncIterable<TaskSpec>,
+    spec: GroupSpec = {},
+    options: EnqueueOptions = {},
+  ): Promise<Group> {
+    const group = await this.create(spec, options);
+    if (group.status !== 'open') return group;
+    let batch: TaskSpec[] = [];
+    let i = 0;
+    for await (const task of tasks) {
+      const idempotencyKey = task.idempotencyKey ?? `${group.id}:${i}`;
+      i++;
+      batch.push({ ...task, idempotencyKey, groupId: group.id });
+      if (batch.length === MAX_BATCH) {
+        await this.#client.tasks.enqueueMany(queue, batch, options);
+        batch = [];
+      }
+    }
+    if (batch.length > 0) await this.#client.tasks.enqueueMany(queue, batch, options);
+    return this.close(group.id, options);
   }
 
   async get(id: string, options: RequestOptions = {}): Promise<Group> {

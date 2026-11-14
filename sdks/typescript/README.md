@@ -169,21 +169,23 @@ Runs are delivered with `Workly-Run-Id`, `Workly-Schedule` and `Workly-Scheduled
 
 A group tracks a set of tasks and enqueues a callback task once it's closed and they've all finished: a `POST` of the group's status and counts. See [Task groups](https://workly.run/docs/groups/). Like every callback, it goes to Workly's `_callbacks` queue.
 
-```ts
-const group = await workly.groups.create({
-  name: 'daily-stock-prices',
-  idempotencyKey: 'stock-prices-2026-10-19', // creating it again returns this group
-  onComplete: { url: 'https://api.example.com/jobs/refresh-views' },
-});
-for (const company of companies) {
-  await workly.tasks.enqueue('stock-prices', {
-    url: 'https://api.example.com/jobs/update-stock-price',
-    payload: { symbol: company.symbol },
-    groupId: group.id,
-  });
-}
-await workly.groups.close(group.id); // no more tasks; it completes once they've finished
+`groups.enqueue` does the whole job in one call: it creates the group, enqueues the tasks into it in batches of 100 and closes it, and it's safe to retry with the same `idempotencyKey`.
 
+```ts
+const group = await workly.groups.enqueue(
+  'stock-prices',
+  companies.map((c) => ({ url: 'https://api.example.com/jobs/update-stock-price', payload: { symbol: c.symbol } })),
+  {
+    name: 'daily-stock-prices',
+    idempotencyKey: 'stock-prices-2026-10-19', // a retry finishes this group rather than start another
+    onComplete: { url: 'https://api.example.com/jobs/refresh-views' },
+  },
+);
+```
+
+Or step by step: `workly.groups.create(...)`, then `workly.tasks.enqueue(..., { groupId: group.id })` or `enqueueMany` for each task, then `workly.groups.close(group.id)`, after which it completes once its tasks have finished.
+
+```ts
 const g = await workly.groups.get(group.id);
 console.log(g.status, g.total, g.succeeded, g.failed, g.remaining);
 for await (const task of workly.tasks.list({ groupId: group.id, state: 'failed' })) {

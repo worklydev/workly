@@ -97,6 +97,10 @@ func NewHandler(opts Options) http.Handler {
 			writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		},
 		ResponseErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
+			if clientGone(r) {
+				w.WriteHeader(statusClientClosed)
+				return
+			}
 			if writeHandlerError(w, err) {
 				opts.Logger.ErrorContext(r.Context(), "handler error", "path", r.URL.Path, "err", err)
 			}
@@ -164,6 +168,10 @@ func authorize(resolver workspace.Resolver, next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid API key")
 			return
 		} else if err != nil {
+			if clientGone(r) {
+				w.WriteHeader(statusClientClosed)
+				return
+			}
 			writeError(w, http.StatusInternalServerError, "internal", "could not resolve workspace")
 			return
 		}
@@ -192,6 +200,10 @@ func resolveWorkspace(resolver workspace.Resolver, resourceMetadata string, next
 			return
 		}
 		if err != nil {
+			if clientGone(r) {
+				w.WriteHeader(statusClientClosed)
+				return
+			}
 			writeError(w, http.StatusInternalServerError, "internal", "could not resolve workspace")
 			return
 		}

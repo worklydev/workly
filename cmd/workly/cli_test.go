@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http/httptest"
@@ -500,4 +501,80 @@ schedules:
 		t.Errorf("queues after prune:\n%s", out)
 	}
 	contains(t, mustRun(t, "deploy", "-f", path, "--yes"), "No changes: ")
+}
+
+func TestVersionFlag(t *testing.T) {
+	if got := mustRun(t, "--version"); got != version+"\n" {
+		t.Errorf("--version = %q, want %q", got, version+"\n")
+	}
+	if got := mustRun(t, "version"); got != version+"\n" {
+		t.Errorf("version = %q", got)
+	}
+}
+
+func TestPlanForCI(t *testing.T) {
+	url := newTestServer(t, "")
+	path := filepath.Join(t.TempDir(), "workly.yaml")
+	write := func(src string) {
+		if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exit := func(args ...string) (int, string) {
+		t.Helper()
+		r := cli(t, "", args...)
+		var code exitCode
+		switch {
+		case r.err == nil:
+			return 0, r.stdout
+		case errors.As(r.err, &code):
+			return int(code), r.stdout
+		}
+		t.Fatalf("workly %v: %v", args, r.err)
+		return 0, ""
+	}
+
+	write("version: 1\nqueues:\n  emails: {max_attempts: 3}\n  old: {}\n")
+	if code, out := exit("plan", "-f", path, "--detailed-exitcode"); code != 2 || !strings.Contains(out, "+ create queue emails") {
+		t.Fatalf("plan with creates = %d\n%s", code, out)
+	}
+	mustRun(t, "deploy", "-f", path, "--yes")
+	if code, out := exit("plan", "-f", path, "--detailed-exitcode", "--format", "markdown"); code != 0 ||
+		!strings.Contains(out, "No changes: `"+url+"` matches") {
+		t.Fatalf("plan without changes = %d\n%s", code, out)
+	}
+	// Without the flag, a plan with changes still exits 0, as before.
+	write("version: 1\nprune: true\nqueues:\n  emails: {max_attempts: 5}\n")
+	if code, _ := exit("plan", "-f", path); code != 0 {
+		t.Fatalf("plan without --detailed-exitcode = %d", code)
+	}
+
+	code, out := exit("plan", "-f", path, "--detailed-exitcode", "--format", "markdown")
+	if code != 3 {
+		t.Fatalf("plan with a delete = %d", code)
+	}
+	contains(t, out, "### Workly plan",
+		"`"+path+"` on `"+url+"`: 0 to create, 1 to update, 1 to delete, 0 unchanged.",
+		"> [!WARNING]", "> - queue `old`",
+		"- **update** queue `emails`", "  - max_attempts: `3` → `5`",
+		"- **delete** queue `old`")
+	if strings.Contains(out, "  ~ update") {
+		t.Errorf("markdown has the text format in it:\n%s", out)
+	}
+	if r := cli(t, "", "plan", "-f", path, "--format", "html"); r.err == nil || !strings.Contains(r.err.Error(), "text or markdown") {
+		t.Errorf("--format html = %v", r.err)
+	}
+}
+
+func TestMDCode(t *testing.T) {
+	for in, want := range map[string]string{
+		"emails": "`emails`",
+		"a`b":    "``a`b``",
+		"`edge":  "`` `edge ``",
+		"3 → 5":  "`3 → 5`",
+	} {
+		if got := mdCode(in); got != want {
+			t.Errorf("mdCode(%q) = %q, want %q", in, got, want)
+		}
+	}
 }

@@ -166,24 +166,27 @@ Runs are delivered with `Workly-Run-Id`, `Workly-Schedule` and `Workly-Scheduled
 
 A group tracks a set of tasks and enqueues a callback task once it's closed and they've all finished: a `POST` of the group's status and counts. See [Task groups](https://workly.run/docs/groups/). Like every callback, it goes to Workly's `_callbacks` queue.
 
+`groups.enqueue` does the whole job in one call: it creates the group, enqueues the tasks into it in batches of 100 and closes it, and it's safe to retry with the same `idempotency_key`.
+
 ```python
 from workly import Callback
 
-group = client.groups.create(
+group = client.groups.enqueue(
+    "stock-prices",
+    (
+        {"url": "https://api.example.com/jobs/update-stock-price", "payload": {"symbol": c.symbol}}
+        for c in companies
+    ),
     name="daily-stock-prices",
-    idempotency_key="stock-prices-2026-10-19",  # creating it again returns this group
+    idempotency_key="stock-prices-2026-10-19",  # a retry finishes this group rather than start another
     # or a dict: {"url": "https://api.example.com/jobs/refresh-views"}
     on_complete=Callback(url="https://api.example.com/jobs/refresh-views"),
 )
-for company in companies:
-    client.tasks.enqueue(
-        "stock-prices",
-        url="https://api.example.com/jobs/update-stock-price",
-        payload={"symbol": company.symbol},
-        group_id=group.id,
-    )
-client.groups.close(group.id)  # no more tasks; it completes once they've finished
+```
 
+Or step by step: `client.groups.create(...)`, then `client.tasks.enqueue(..., group_id=group.id)` or `enqueue_many` for each task, then `client.groups.close(group.id)`, after which it completes once its tasks have finished.
+
+```python
 group = client.groups.get(group.id)
 print(group.status, group.total, group.succeeded, group.failed, group.remaining)
 for task in client.tasks.list(group_id=group.id, state="failed"):

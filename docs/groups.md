@@ -36,27 +36,15 @@ def verified() -> dict:
 def start_price_update():
     verified()
     day = request.headers["Workly-Scheduled-For"][:10]
-    # The idempotency key makes a retried run reuse its group rather than start another.
-    group = workly.groups.create(
+    # Creates the group, enqueues the tasks into it in batches and closes it. The
+    # idempotency key makes a retried run finish the same group rather than start another.
+    workly.groups.enqueue(
+        "stock-prices",
+        ({"url": f"{API}/jobs/update-stock-price", "payload": {"symbol": s}} for s in SYMBOLS),
         name="daily-stock-prices",
         idempotency_key=f"stock-prices-{day}",
         on_complete=Callback(url=f"{API}/jobs/refresh-views"),
     )
-    if group.status == "open":
-        for start in range(0, len(SYMBOLS), 100):
-            workly.tasks.enqueue_many(
-                "stock-prices",
-                [
-                    {
-                        "url": f"{API}/jobs/update-stock-price",
-                        "payload": {"symbol": symbol},
-                        "idempotency_key": f"{day}-{symbol}",
-                        "group_id": group.id,
-                    }
-                    for symbol in SYMBOLS[start : start + 100]
-                ],
-            )
-        workly.groups.close(group.id)
     return "", 204
 
 
@@ -88,26 +76,19 @@ const workly = new Workly();
 const API = 'https://api.example.com';
 
 export async function startPriceUpdate(day: string, symbols: string[]) {
-  const group = await workly.groups.create({
-    name: 'daily-stock-prices',
-    idempotencyKey: `stock-prices-${day}`,
-    onComplete: { url: `${API}/jobs/refresh-views` },
-  });
-  if (group.status !== 'open') return; // already started
-  for (let i = 0; i < symbols.length; i += 100) {
-    await workly.tasks.enqueueMany(
-      'stock-prices',
-      symbols.slice(i, i + 100).map((symbol) => ({
-        url: `${API}/jobs/update-stock-price`,
-        payload: { symbol },
-        idempotencyKey: `${day}-${symbol}`,
-        groupId: group.id,
-      })),
-    );
-  }
-  await workly.groups.close(group.id);
+  await workly.groups.enqueue(
+    'stock-prices',
+    symbols.map((symbol) => ({ url: `${API}/jobs/update-stock-price`, payload: { symbol } })),
+    {
+      name: 'daily-stock-prices',
+      idempotencyKey: `stock-prices-${day}`,
+      onComplete: { url: `${API}/jobs/refresh-views` },
+    },
+  );
 }
 ```
+
+`groups.enqueue` is the three steps in one call: create the group, enqueue the tasks into it (in batches of 100, the most one request takes) and close it. With the group's `idempotency_key` it's safe to retry: the group is found again rather than created, a task without its own `idempotency_key` gets one from the group and its position so none is counted twice, and if the group was already closed, it's returned as it is. It needs SDK 0.4.3 or later; with an older SDK, or over HTTP, do the three steps yourself, as below.
 
 Over HTTP:
 
@@ -200,7 +181,7 @@ The body carries counts, not the tasks' results. To see which tasks failed, list
 
 Enqueueing into a group checks that it's open in the same transaction as the enqueue, so a task can't slip in after the group is closed and be missed. Enqueueing into a closed or completed group fails with `group_closed` (409), and into a missing one with `group_not_found` (404). In a batch, all the tasks are enqueued or none.
 
-Make it safe to retry:
+Make it safe to retry (`groups.enqueue` in the SDKs does all of this):
 
 - Give tasks an `idempotency_key`. A task enqueued again with the same key isn't counted twice, so you can resend a batch after a timeout.
 - Give the group an `idempotency_key`. Creating it again returns the same group, so a retried request (or a retried schedule run, as in the example) continues the same group rather than starting a second.

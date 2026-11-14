@@ -7,7 +7,7 @@ send it and decode the response, so the two stay in step.
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version
@@ -529,3 +529,26 @@ def cancel_workflow_run(run_id: str) -> Request:
 def retry_workflow_run(run_id: str) -> Request:
     # Not idempotent: once it is running again, retrying is invalid_state.
     return Request("POST", f"/v1/workflow-runs/{_q(run_id)}/retry")
+
+
+# The most tasks one batch enqueue takes.
+MAX_BATCH = 100
+
+
+def group_batches(group_id: str, specs: Iterable[TaskSpec]) -> Iterator[list[TaskSpec]]:
+    """Split a group's tasks into batches, each task joining the group.
+
+    A task without an idempotency key gets one from the group and its
+    position, so enqueueing the same tasks again (a retry) adds none twice.
+    """
+    batch: list[TaskSpec] = []
+    for i, spec in enumerate(specs):
+        task = TaskSpec(**spec)
+        task["group_id"] = group_id
+        task.setdefault("idempotency_key", f"{group_id}:{i}")
+        batch.append(task)
+        if len(batch) == MAX_BATCH:
+            yield batch
+            batch = []
+    if batch:
+        yield batch
