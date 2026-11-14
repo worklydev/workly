@@ -64,6 +64,11 @@ type Store interface {
 	// EnsureWorkspace creates the workspace if it doesn't exist and returns it.
 	EnsureWorkspace(ctx context.Context, id workspace.ID, name string) (Workspace, error)
 	GetWorkspace(ctx context.Context, id workspace.ID) (Workspace, error)
+	// DeleteWorkspace deletes the workspace with everything in it: queues,
+	// tasks, groups, schedules, runs, workflows, alert channels and their
+	// attempts. Attempts in flight finish with ErrLeaseLost. It returns
+	// ErrNotFound if the workspace doesn't exist.
+	DeleteWorkspace(ctx context.Context, id workspace.ID) error
 
 	// PutQueue creates the queue or replaces its configuration. created
 	// reports whether it was new.

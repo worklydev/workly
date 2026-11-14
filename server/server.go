@@ -44,6 +44,10 @@ type (
 	Email             = alert.Email
 )
 
+// ErrNotFound is returned by Store methods for a record that doesn't exist,
+// such as Store.DeleteWorkspace for a workspace that's gone already.
+var ErrNotFound = store.ErrNotFound
+
 // SMTPMailer sends alert emails through an SMTP server, given as
 // smtp://user:pass@host:587 (STARTTLS) or smtps://user:pass@host:465, from
 // the sender address from, e.g. "Workly <alerts@example.com>".
