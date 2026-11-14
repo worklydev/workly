@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link, useNavigate } from 'react-router';
 import { getSchedule } from '../../api';
-import { putScheduleMutation } from '../../api/@tanstack/react-query.gen';
+import { listWorkflowsOptions, putScheduleMutation } from '../../api/@tanstack/react-query.gen';
 import type { HttpMethod, MissedPolicy, OverlapPolicy, Schedule, ScheduleConfig } from '../../api';
 import { FormGroup, FormRow, Unit } from '../../components/FormRows';
 import { errorMessage } from '../../lib/api';
@@ -144,8 +144,8 @@ export function EditSchedule({ schedule, open, onClose }: { schedule?: Schedule;
 
 const METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 const TARGETS = [
-  { value: 'url', label: 'Calls a URL' },
-  { value: 'workflow', label: 'Starts a workflow' },
+  { value: 'url', label: 'HTTP request' },
+  { value: 'workflow', label: 'Workflow' },
 ];
 const OVERLAP = [
   { value: 'skip', label: 'Skip the slot' },
@@ -202,7 +202,7 @@ function ScheduleForm({ schedule, onClose }: { schedule?: Schedule; onClose: () 
           <DialogTitle className="text-base font-medium">{creating ? 'New schedule' : 'Edit schedule'}</DialogTitle>
           <p className="text-xs text-muted-foreground">
             {creating ? (
-              'Calls a URL on a cron timetable, with retries and a history of every run. Empty retry settings take the defaults.'
+              'Makes a request or starts a workflow run on a cron timetable, with retries and a history of every run. Empty retry settings take the defaults.'
             ) : (
               <>
                 Replaces the settings of <span className="font-mono">{schedule.name}</span>. Saving doesn't pause or
@@ -266,8 +266,8 @@ function ScheduleForm({ schedule, onClose }: { schedule?: Schedule; onClose: () 
           </FormRow>
         </FormGroup>
 
-        <FormGroup title="Request">
-          <FormRow label="Each run">
+        <FormGroup title="Action">
+          <FormRow label="Type">
             <Choice
               items={TARGETS}
               value={form.target}
@@ -276,8 +276,11 @@ function ScheduleForm({ schedule, onClose }: { schedule?: Schedule; onClose: () 
           </FormRow>
           {form.target === 'workflow' ? (
             <>
-              <FormRow label="Workflow" hint="Its name, as in workly.yaml.">
-                <Input value={form.workflow} onChange={set('workflow')} className="font-mono" />
+              <FormRow
+                label="Workflow"
+                hint="A run succeeds once it has started the workflow run, which then goes on by itself."
+              >
+                <WorkflowChoice value={form.workflow} onChange={(workflow) => setForm({ ...form, workflow })} />
               </FormRow>
               <FormRow label="Input" hint="JSON, the run's input: sent to every step without a body of its own.">
                 <Textarea
@@ -325,7 +328,7 @@ function ScheduleForm({ schedule, onClose }: { schedule?: Schedule; onClose: () 
           )}
         </FormGroup>
 
-        <FormGroup title="Retries">
+        <FormGroup title={form.target === 'workflow' ? 'Retries (starting the workflow run)' : 'Retries'}>
           <FormRow label="Max attempts" hint="Including the first.">
             <Input
               placeholder={creating ? 'default' : undefined}
@@ -392,7 +395,11 @@ function ScheduleForm({ schedule, onClose }: { schedule?: Schedule; onClose: () 
         <FormGroup title="Callback">
           <FormRow
             label="URL"
-            hint="Optional. Workly POSTs a summary of each run here when it succeeds, fails or is cancelled."
+            hint={
+              form.target === 'workflow'
+                ? 'Optional. Workly POSTs a summary of each run here once it has started the workflow run (or failed to), not when the workflow finishes.'
+                : 'Optional. Workly POSTs a summary of each run here when it succeeds, fails or is cancelled.'
+            }
           >
             <Input
               value={form.callback_url}
@@ -417,21 +424,54 @@ function ScheduleForm({ schedule, onClose }: { schedule?: Schedule; onClose: () 
   );
 }
 
+/**
+ * The workspace's workflows to pick from. A schedule's workflow that no
+ * longer exists stays listed, so saving other changes doesn't drop it
+ * silently.
+ */
+function WorkflowChoice({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const { data, isPending, error } = useQuery(listWorkflowsOptions());
+  if (isPending) return <span className="text-xs text-faint">Loading workflows…</span>;
+  if (error) return <span className="text-xs text-destructive">{errorMessage(error)}</span>;
+  const names = data.workflows.map((w) => w.name);
+  if (value && !names.includes(value)) names.unshift(value);
+  if (names.length === 0)
+    return (
+      <span className="text-xs text-muted-foreground">
+        No workflows yet.{' '}
+        <Link to="/workflows" className="underline underline-offset-4 hover:text-foreground">
+          How to define one
+        </Link>
+      </span>
+    );
+  return (
+    <Choice
+      items={names.map((n) => ({ value: n, label: n }))}
+      value={value}
+      onChange={onChange}
+      placeholder="Pick a workflow"
+      className="w-64 font-mono"
+    />
+  );
+}
+
 function Choice({
   items,
   value,
   onChange,
   className = 'w-48',
+  placeholder,
 }: {
   items: { value: string; label: string }[];
   value: string;
   onChange: (value: string) => void;
   className?: string;
+  placeholder?: string;
 }) {
   return (
-    <Select items={items} value={value} onValueChange={(v) => onChange(String(v))}>
+    <Select items={items} value={value || null} onValueChange={(v) => onChange(String(v ?? ''))}>
       <SelectTrigger className={className}>
-        <SelectValue />
+        <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent>
         {items.map((i) => (

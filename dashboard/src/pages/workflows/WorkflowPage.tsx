@@ -41,7 +41,8 @@ export function WorkflowPage() {
 
   if (isPending) return <Muted>Loading…</Muted>;
   if (error) return <ErrorText error={error} />;
-  const queues = [...new Set(workflow.steps.map((s) => s.queue ?? WORKFLOW_QUEUE))];
+  // Steps go to Workly's own queue unless they name one; only the named ones are worth a mention.
+  const queues = [...new Set(workflow.steps.map((s) => s.queue ?? WORKFLOW_QUEUE))].filter((q) => q !== WORKFLOW_QUEUE);
 
   return (
     <>
@@ -63,17 +64,21 @@ export function WorkflowPage() {
         <InlineFields
           items={[
             { label: 'Max duration', value: formatSeconds(workflow.max_duration_seconds) },
-            {
-              label: queues.length === 1 ? 'Queue' : 'Queues',
-              value: queues.map((q, i) => (
-                <span key={q}>
-                  {i > 0 && ', '}
-                  <Link to={`/queues/${encodeURIComponent(q)}`} className="hover:underline">
-                    {q}
-                  </Link>
-                </span>
-              )),
-            },
+            ...(queues.length === 0
+              ? []
+              : [
+                  {
+                    label: queues.length === 1 ? 'Step queue' : 'Step queues',
+                    value: queues.map((q, i) => (
+                      <span key={q}>
+                        {i > 0 && ', '}
+                        <Link to={`/queues/${encodeURIComponent(q)}`} className="hover:underline">
+                          {q}
+                        </Link>
+                      </span>
+                    )),
+                  },
+                ]),
             { label: 'Updated', value: <RelativeTime iso={workflow.updated_at} /> },
           ]}
         />

@@ -357,45 +357,56 @@ func (s *Store) getRun(ctx context.Context, q querier, ws workspace.ID, id strin
 		return r, err
 	}
 	runs := []store.Run{r}
-	err = s.workflowRunStatuses(ctx, q, ws, runs)
+	err = s.linkedStates(ctx, q, ws, runs)
 	return runs[0], err
 }
 
-// workflowRunStatuses fills in the status of the workflow runs that runs
-// started. It's a separate query rather than part of runColumns so the
-// dispatcher's queries for runs don't pay for it.
-func (s *Store) workflowRunStatuses(ctx context.Context, q querier, ws workspace.ID, runs []store.Run) error {
-	var ids []any
-	for _, r := range runs {
-		if r.WorkflowRunID != "" {
-			ids = append(ids, r.WorkflowRunID)
-		}
-	}
-	if len(ids) == 0 {
-		return nil
-	}
-	rows, err := s.query(ctx, q, `SELECT id, status FROM workflow_runs WHERE workspace_id = ? AND id IN (?`+
-		strings.Repeat(", ?", len(ids)-1)+`)`, append([]any{ws}, ids...)...)
+// linkedStates fills in the state of what runs link to: the workflow run
+// each started and its callback task. It's separate queries rather than part
+// of runColumns so the dispatcher's queries for runs don't pay for them.
+func (s *Store) linkedStates(ctx context.Context, q querier, ws workspace.ID, runs []store.Run) error {
+	workflows, err := s.statesByID(ctx, q, ws, "workflow_runs", "status", runs, func(r store.Run) string { return r.WorkflowRunID })
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
-	status := map[string]store.WorkflowRunStatus{}
-	for rows.Next() {
-		var id string
-		var st store.WorkflowRunStatus
-		if err := rows.Scan(&id, &st); err != nil {
-			return err
-		}
-		status[id] = st
-	}
-	if err := rows.Err(); err != nil {
+	callbacks, err := s.statesByID(ctx, q, ws, "tasks", "state", runs, func(r store.Run) string { return r.CallbackTaskID })
+	if err != nil {
 		return err
 	}
 	for i := range runs {
-		runs[i].WorkflowRunStatus = status[runs[i].WorkflowRunID]
+		runs[i].WorkflowRunStatus = store.WorkflowRunStatus(workflows[runs[i].WorkflowRunID])
+		runs[i].CallbackState = store.TaskState(callbacks[runs[i].CallbackTaskID])
 	}
 	return nil
+}
+
+// statesByID reads column for the rows of table whose IDs id picks out of runs.
+func (s *Store) statesByID(ctx context.Context, q querier, ws workspace.ID, table, column string, runs []store.Run,
+	id func(store.Run) string) (map[string]string, error) {
+	var ids []any
+	for _, r := range runs {
+		if v := id(r); v != "" {
+			ids = append(ids, v)
+		}
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	rows, err := s.query(ctx, q, `SELECT id, `+column+` FROM `+table+` WHERE workspace_id = ? AND id IN (?`+
+		strings.Repeat(", ?", len(ids)-1)+`)`, append([]any{ws}, ids...)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	states := map[string]string{}
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, err
+		}
+		states[k] = v
+	}
+	return states, rows.Err()
 }
 
 func (s *Store) ListRuns(ctx context.Context, ws workspace.ID, f store.RunFilter) ([]store.Run, string, error) {
@@ -425,7 +436,7 @@ func (s *Store) ListRuns(ctx context.Context, ws workspace.ID, f store.RunFilter
 		runs = runs[:f.Limit]
 		cursor = runs[len(runs)-1].ID
 	}
-	return runs, cursor, s.workflowRunStatuses(ctx, s.db, ws, runs)
+	return runs, cursor, s.linkedStates(ctx, s.db, ws, runs)
 }
 
 func (s *Store) listRuns(ctx context.Context, q querier, query string, args ...any) ([]store.Run, error) {

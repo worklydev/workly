@@ -1,15 +1,17 @@
 /* Tokens — see DESIGN.md. Flat surfaces, three text levels, one orange accent. */
 :root {
-  --background: oklch(0.99 0 0);
-  --surface: oklch(0.99 0 0);
+  /* Sidebar and header a step below the main content, so the page reads as one sheet. */
+  --background: oklch(0.975 0 0);
+  --surface: oklch(0.993 0 0);
   --foreground: oklch(0.21 0 0);
-  --card: oklch(0.97 0 0);
+  /* Darker than the sidebar, so inputs and code panels still show on it. */
+  --card: oklch(0.96 0 0);
   --card-foreground: oklch(0.21 0 0);
-  --popover: oklch(0.99 0 0);
+  --popover: oklch(0.993 0 0);
   --popover-foreground: oklch(0.21 0 0);
   --primary: oklch(0.64 0.19 45);
-  --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.97 0 0);
+  --primary-foreground: oklch(0.993 0 0);
+  --secondary: oklch(0.96 0 0);
   --secondary-foreground: oklch(0.21 0 0);
   --muted: oklch(0.94 0 0);
   --muted-foreground: oklch(0.5 0 0);
@@ -38,8 +40,8 @@
 /* Starlight (the docs) marks dark mode with data-theme on <html>, not a class. */
 .dark,
 :root[data-theme='dark'] {
-  --background: oklch(0.205 0 0);
-  --surface: oklch(0.232 0.0015 17);
+  --background: oklch(0.19 0 0);
+  --surface: oklch(0.235 0.0015 17);
   --foreground: oklch(0.93 0 0);
   --card: oklch(0.26 0 0);
   --card-foreground: oklch(0.93 0 0);

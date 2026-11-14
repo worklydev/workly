@@ -104,7 +104,7 @@ The callback is enqueued in the same database transaction that finishes the task
 
 ## The `_callbacks` queue
 
-Every callback is a task in `_callbacks`, a queue Workly creates when it first needs one. Only Workly enqueues into it, so everything in it is a callback, and callbacks never have callbacks of their own. From there a callback is an ordinary task: signed, retried with the queue's backoff, and recorded with every attempt. The task, run or group links to it (`callback_task_id`, the latest one), and the dashboard shows it next to them.
+Every callback is a task in `_callbacks`, a queue Workly creates when it first needs one. Only Workly enqueues into it, so everything in it is a callback, and callbacks never have callbacks of their own. From there a callback is an ordinary task: signed, retried with the queue's backoff, and recorded with every attempt. The task, run or group links to it (`callback_task_id`, the latest one), and the dashboard shows it next to them. A schedule's runs also carry that task's state (`callback_state`), so a list of runs says which callbacks were delivered without fetching each one.
 
 `_callbacks` has the default settings. To give callbacks more retries or a longer timeout, configure it like any queue, e.g. in [`workly.yaml`](deploy.md):
 

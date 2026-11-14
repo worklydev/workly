@@ -1,6 +1,7 @@
 import type { Queue, Schedule, Workflow } from '../api';
 import type { QueueFailureGroup, RunFailureGroup } from '../hooks/useFailureGroups';
 import { lastFailed } from '../hooks/useFailureGroups';
+import { WORKFLOW_QUEUE } from './workflows';
 import { COUNT_LIMIT, formatCount, formatDuration } from './format';
 
 /** Something about one queue, schedule or workflow that someone should look at. */
@@ -79,7 +80,8 @@ export function workspaceStatus({
 
   for (const q of [...queues].sort((a, b) => (b.stats?.failed ?? 0) - (a.stats?.failed ?? 0))) {
     const failed = q.stats?.failed ?? 0;
-    if (failed === 0) continue;
+    // Failed steps in Workly's own workflow queue show as their workflow's failed run, below.
+    if (failed === 0 || q.name === WORKFLOW_QUEUE) continue;
     const groups = queueFailures.filter((g) => g.queue === q.name);
     issues.push({
       key: `failed\n${q.name}`,

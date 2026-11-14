@@ -4,6 +4,7 @@ import { ChartAxis, ChartEmpty, ChartSkeleton } from '../components/Chart';
 import { EmptyState } from '../components/EmptyState';
 import { Status } from './home/Status';
 import { CodePanel } from '../components/CodePanel';
+import { CodeTabs } from '../components/CodeTabs';
 import { ConfirmButton } from '../components/ConfirmButton';
 import { OutcomeBadge, StatusCode, TaskStateBadge } from '../components/states';
 import { StatCard } from '../components/StatCard';
@@ -51,7 +52,7 @@ function Swatch({ token }: { token: string }) {
 /** Live reference for DESIGN.md, at /design. */
 export function DesignPage() {
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="min-h-screen bg-surface text-foreground">
       <div className="mx-auto flex max-w-4xl flex-col gap-10 px-6 py-12">
         <header className="flex items-center justify-between">
           <div>
@@ -288,6 +289,20 @@ export function DesignPage() {
           <CodePanel title={<span className="font-mono">POST https://api.example.com/send-email</span>}>
             {'Content-Type: application/json\n\n{\n  "to": "ada@example.com"\n}'}
           </CodePanel>
+          <CodeTabs
+            tabs={[
+              {
+                label: 'Python',
+                lang: 'python',
+                code: 'from workly import verify_signature\n\n# Raises if the request is not from Workly.\nverify_signature(raw_body, headers)',
+              },
+              {
+                label: 'TypeScript',
+                lang: 'typescript',
+                code: "import { verifySignature } from '@worklydev/sdk';\n\n// Throws if the request is not from Workly.\nawait verifySignature(rawBody, headers);",
+              },
+            ]}
+          />
         </Section>
       </div>
     </div>

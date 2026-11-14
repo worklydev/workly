@@ -6,7 +6,7 @@ Live reference: **`/design`** in the dashboard (`src/pages/DesignPage.tsx`). Tok
 
 **Flat like Modal, with contrast like Linear.**
 
-- Two surface levels: sidebar and header on `background`, the main content on a slightly lighter `surface`. Beyond that, depth comes from small fills and 1px hairlines, not shadows or nested panels.
+- Two surface levels: sidebar and header on `background`, the main content on a slightly lighter `surface`, in both themes. Beyond that, depth comes from small fills and 1px hairlines, not shadows or nested panels.
 - Low contrast by default. Things stand out through weight, color level, and a single accent, not through borders and boxes.
 
 ## Principles
@@ -22,20 +22,20 @@ Live reference: **`/design`** in the dashboard (`src/pages/DesignPage.tsx`). Tok
 
 ## Tokens
 
-| token                                 | dark                   | light           | use                                           |
-| ------------------------------------- | ---------------------- | --------------- | --------------------------------------------- |
-| `background`                          | oklch(0.205 0 0)       | oklch(0.99 0 0) | sidebar, header                               |
-| `surface`                             | oklch(0.232 0.0015 17) | 0.99            | main content area                             |
-| `card`                                | 0.26                   | 0.97            | cards, inputs, secondary buttons, code panels |
-| `muted`                               | 0.295                  | 0.94            | hover, active nav, neutral badge              |
-| `border`                              | white 7%               | black 8%        | hairlines                                     |
-| `input`                               | white 10%              | black 12%       | control borders                               |
-| `foreground`                          | 0.93                   | 0.21            | primary text                                  |
-| `muted-foreground`                    | 0.65                   | 0.5             | secondary text, table headers                 |
-| `faint`                               | 0.5                    | 0.65            | meta, placeholders, icons                     |
-| `primary`                             | orange                 | orange (darker) | accent                                        |
-| `success` / `warning` / `destructive` | green / yellow / red   |                 | status tints                                  |
-| `warning-fill`                        | = warning              | brighter yellow | warning as a solid mark (run bars)            |
+| token                                 | dark                   | light            | use                                           |
+| ------------------------------------- | ---------------------- | ---------------- | --------------------------------------------- |
+| `background`                          | oklch(0.19 0 0)        | oklch(0.975 0 0) | sidebar, header                               |
+| `surface`                             | oklch(0.235 0.0015 17) | 0.993            | main content area                             |
+| `card`                                | 0.26                   | 0.96             | cards, inputs, secondary buttons, code panels |
+| `muted`                               | 0.295                  | 0.94             | hover, active nav, neutral badge              |
+| `border`                              | white 7%               | black 8%         | hairlines                                     |
+| `input`                               | white 10%              | black 12%        | control borders                               |
+| `foreground`                          | 0.93                   | 0.21             | primary text                                  |
+| `muted-foreground`                    | 0.65                   | 0.5              | secondary text, table headers                 |
+| `faint`                               | 0.5                    | 0.65             | meta, placeholders, icons                     |
+| `primary`                             | orange                 | orange (darker)  | accent                                        |
+| `success` / `warning` / `destructive` | green / yellow / red   |                  | status tints                                  |
+| `warning-fill`                        | = warning              | brighter yellow  | warning as a solid mark (run bars)            |
 
 ## Type scale
 
@@ -74,6 +74,7 @@ Nav: an icon plus a label. Inactive items are `text-muted-foreground`. The activ
 - **Attempt outcomes:** `success` success; `http_error`, `timeout` and `network_error` danger; `lost` warning (the result is unknown).
 - **Attempts:** a table, newest first. Manual retries are divider rows (`bg-muted/40`). The Response column previews the error or body; a row opens the full response in a dialog, where ↑/↓ move between attempts.
 - **Code panels** (request body, headers, response): `bg-card` with a hairline, `font-mono text-xs`, JSON pretty-printed.
+- **Code in several languages** (`CodeTabs`): one panel with a tab per language in its title bar and a copy button, never two languages in one block. It's highlighted by Shiki, loaded on first use, with the token colours workly.run uses (`--shiki-*` in `index.css`). The tab chosen is remembered for every panel.
 - **Destructive actions** (cancel pending, cancel) use `ConfirmButton`: a second click confirms. In table rows it is an icon (`size="icon"`) that widens to its confirm label. In a page header they go in the `MoreActions` "⋯" menu as `ConfirmItem`s, which ask twice the same way and, when they can't act, stay listed with the reason underneath.
 - **Sorting:** time and count columns sort by clicking their header (`SortableTableHead`): the active column's arrow is orange, others show a faint arrow on hover. Next to the list's filters, `SortSummary` says what the order is and whether it's the default, with Reset once changed. The sort lives in the URL. Pending tasks default to Next run, soonest first, the order they're delivered in; everything else to newest first.
 - **Task tables** have a checkbox column and per-row Retry and Cancel. The bulk bar above stays visible, with its buttons disabled until tasks are selected, and each bulk action applies only to the selected tasks it can act on.

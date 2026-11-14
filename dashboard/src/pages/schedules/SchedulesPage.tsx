@@ -13,12 +13,13 @@ import { TaskStateBadge } from '../../components/states';
 import { useListPage } from '../../hooks/useListPage';
 import { LIVE } from '../../lib/api';
 import { describeCron } from '../../lib/cron';
-import { formatTarget, sharedHost } from '../../lib/format';
+import { sharedHost } from '../../lib/format';
 import { Badge } from '../../primitives/badge';
 import { Button } from '../../primitives/button';
 import { EditSchedule } from './EditSchedule';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../primitives/table';
 import { RecentRuns } from './RecentRuns';
+import { ScheduleTarget } from './ScheduleTarget';
 import { WeekOverview } from './WeekOverview';
 import { Tabs, TabsList, TabsTab } from '../../primitives/tabs';
 import { SchedulesGettingStarted } from './GettingStarted';
@@ -34,7 +35,7 @@ export function SchedulesPage() {
 
   return (
     <>
-      <PageHeader title="Schedules" description="Endpoints called on a cron timetable.">
+      <PageHeader title="Schedules" description="Requests and workflow runs on a cron timetable.">
         <Button onClick={() => setCreating(true)}>
           <Plus />
           New schedule
@@ -157,11 +158,8 @@ function ScheduleTable({ schedules }: { schedules: Schedule[] }) {
             <TableCell>
               <RecentRuns runs={recent.get(s.name)} phoneSlots={8} />
             </TableCell>
-            <TableCell
-              className="hidden max-w-56 truncate font-mono text-xs text-faint lg:table-cell"
-              title={s.workflow ? `Starts a run of workflow ${s.workflow}` : s.url}
-            >
-              {s.workflow ? `workflow ${s.workflow}` : formatTarget(s.method, s.url, host)}
+            <TableCell className="hidden max-w-56 lg:table-cell">
+              <ScheduleTarget schedule={s} host={host} />
             </TableCell>
           </TableRow>
         ))}

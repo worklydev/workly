@@ -1016,6 +1016,10 @@ type Run struct {
 	// Body The body, when it is not JSON.
 	Body *string `json:"body,omitempty"`
 
+	// CallbackState A `pending` task with `run_at` in the future is scheduled. A `failed`
+	// task has exhausted its attempts or got a non-retryable response.
+	CallbackState *TaskState `json:"callback_state,omitempty"`
+
 	// CallbackTaskId The callback task enqueued when the run last finished, if its schedule has `on_complete`.
 	CallbackTaskId *string   `json:"callback_task_id,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`

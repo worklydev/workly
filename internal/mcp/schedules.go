@@ -429,7 +429,7 @@ func runAction(ctx context.Context, api apiClient, id, action string) (any, erro
 var runSummaryKeys = []string{
 	"id", "schedule", "state", "trigger", "scheduled_for", "skip_reason", "run_at", "attempt_count",
 	"last_status", "last_outcome", "last_error", "created_at", "started_at", "finished_at", "last_attempt_at",
-	"last_duration_ms", "retried_at", "callback_task_id", "workflow_run_id", "workflow_run_status",
+	"last_duration_ms", "retried_at", "callback_task_id", "callback_state", "workflow_run_id", "workflow_run_status",
 }
 
 // runSummary is a run without its request: what list views need.

@@ -215,6 +215,10 @@ func toRun(r store.Run) Run {
 		RetriedAt:     r.RetriedAt,
 	}
 	out.CallbackTaskId = optional(r.CallbackTaskID)
+	if r.CallbackState != "" {
+		state := TaskState(r.CallbackState)
+		out.CallbackState = &state
+	}
 	out.WorkflowRunId = optional(r.WorkflowRunID)
 	if r.WorkflowRunStatus != "" {
 		status := WorkflowRunStatus(r.WorkflowRunStatus)

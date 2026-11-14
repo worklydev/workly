@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router';
 import { cancelRunMutation, retryRunMutation } from '../../api/@tanstack/react-query.gen';
 import type { Run } from '../../api';
 import { runFinished, type RunPages } from '../../lib/runs';
+import { CallbackMark } from '../../components/CallbackMark';
 import { ConfirmButton } from '../../components/ConfirmButton';
 import { CursorPager } from '../../components/ListControls';
 import { useCursorPages } from '../../hooks/useCursorPages';
@@ -20,7 +21,16 @@ import { displayState } from '../../lib/states';
 import { Button } from '../../primitives/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../primitives/table';
 
-export function RunTable({ pages, empty }: { pages: RunPages; empty: string }) {
+export function RunTable({
+  pages,
+  empty,
+  callback,
+}: {
+  pages: RunPages;
+  empty: string;
+  /** Whether the schedule has a callback, so each run says whether it went out. */
+  callback?: boolean;
+}) {
   const navigate = useNavigate();
   const from = useFromHere();
   const now = useNow(5_000);
@@ -29,6 +39,8 @@ export function RunTable({ pages, empty }: { pages: RunPages; empty: string }) {
   if (pages.error) return <ErrorText error={pages.error} />;
   const runs = page.items;
   if (runs.length === 0) return <Muted>{empty}</Muted>;
+  // Runs from before a callback was removed still have theirs.
+  const callbacks = callback || runs.some((r) => r.callback_task_id);
 
   return (
     <div className="flex flex-col gap-3">
@@ -41,6 +53,7 @@ export function RunTable({ pages, empty }: { pages: RunPages; empty: string }) {
             <TableHead className="text-right">Attempts</TableHead>
             <TableHead>Last result</TableHead>
             <TableHead>Finished</TableHead>
+            {callbacks && <TableHead title="Whether the callback for the run was delivered">Callback</TableHead>}
             <TableHead className="w-0">
               <span className="sr-only">Actions</span>
             </TableHead>
@@ -73,6 +86,15 @@ export function RunTable({ pages, empty }: { pages: RunPages; empty: string }) {
               <TableCell className="text-xs text-muted-foreground">
                 {r.finished_at ? <RelativeTime iso={r.finished_at} /> : <span className="text-faint">—</span>}
               </TableCell>
+              {callbacks && (
+                <TableCell>
+                  {r.callback_task_id ? (
+                    <CallbackMark taskId={r.callback_task_id} state={r.callback_state} />
+                  ) : (
+                    <span className="text-xs text-faint">—</span>
+                  )}
+                </TableCell>
+              )}
               <TableCell className="py-0" onClick={(e) => e.stopPropagation()}>
                 <RowActions run={r} />
               </TableCell>

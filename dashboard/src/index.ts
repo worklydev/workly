@@ -5,6 +5,7 @@ export { apiKeyAuth, type Auth } from './auth';
 export type { GettingStarted, NavItem } from './context';
 export { PageHeader } from './components/PageHeader';
 export { CodePanel } from './components/CodePanel';
+export { CodeTabs, type CodeTab } from './components/CodeTabs';
 export { ConfirmButton } from './components/ConfirmButton';
 export { CopyButton } from './components/CopyButton';
 export { DisabledReason } from './components/DisabledReason';
