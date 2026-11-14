@@ -180,6 +180,11 @@ func (h Handlers) GetQueueActivity(ctx context.Context, req GetQueueActivityRequ
 }
 
 func (h Handlers) DeleteQueue(ctx context.Context, req DeleteQueueRequestObject) (DeleteQueueResponseObject, error) {
+	// Deleting one would drop the workflow steps or callbacks in it, and
+	// fail every workflow whose step was still to finish.
+	if SystemQueue(req.Queue) {
+		return nil, invalidState("queue %q is Workly's own and can't be deleted", req.Queue)
+	}
 	err := h.Store.DeleteQueue(ctx, workspaceID(ctx), req.Queue)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, queueNotFound(req.Queue)

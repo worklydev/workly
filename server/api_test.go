@@ -57,6 +57,16 @@ func TestQueues(t *testing.T) {
 			t.Fatalf("%s deleted queue = %d %s", method, res.status, res.body)
 		}
 	}
+	// Workly's own queues can't be deleted, even once they exist.
+	doBody(t, h, "PUT", "/v1/queues/_callbacks", "", `{}`)
+	for _, q := range []string{"_workflows", "_callbacks"} {
+		if res = do(t, h, "DELETE", "/v1/queues/"+q, ""); res.status != 409 || errorCode(res) != "invalid_state" {
+			t.Errorf("DELETE %s = %d %s", q, res.status, res.body)
+		}
+	}
+	if res = do(t, h, "GET", "/v1/queues/_callbacks", ""); res.status != 200 {
+		t.Errorf("GET _callbacks after a refused delete = %d %s", res.status, res.body)
+	}
 
 	for name, body := range map[string]string{
 		"max_attempts 0":        `{"max_attempts": 0}`,

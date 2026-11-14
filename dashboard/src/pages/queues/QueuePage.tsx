@@ -272,6 +272,11 @@ function QueueActions({ queue }: { queue: Queue }) {
           title="Delete the queue and every task in it, history included. This can't be undone."
           confirmLabel="Delete queue and all its tasks?"
           onConfirm={() => remove.mutate(path)}
+          disabledReason={
+            isSystemQueue(queue.name)
+              ? "A system queue can't be deleted: Workly delivers workflow steps and callbacks through it."
+              : undefined
+          }
         >
           Delete queue
         </ConfirmItem>
