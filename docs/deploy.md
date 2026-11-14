@@ -186,6 +186,29 @@ Deploy the file with your app. With GitHub Actions:
     JOBS_TOKEN: ${{ secrets.JOBS_TOKEN }}
 ```
 
+Run it once the app it calls is live, not before: a new schedule or workflow step can be delivered as soon as it's deployed, and if its endpoint isn't out yet, those deliveries fail and retry. A step after your app's deploy step in the same job does this. If your host deploys on its own and reports the deployment to GitHub, as Vercel does, run it on the `deployment_status` event instead, once the production deployment has succeeded:
+
+```yaml
+on: deployment_status
+
+jobs:
+  workly:
+    if: github.event.deployment_status.state == 'success' && github.event.deployment.environment == 'Production'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4   # the deployed commit
+      - name: Deploy Workly configuration
+        run: |
+          curl -fsSL "https://raw.githubusercontent.com/worklydev/workly/$WORKLY_VERSION/install.sh" | sh
+          workly deploy --yes
+        env:
+          WORKLY_VERSION: v0.4.0
+          WORKLY_URL: https://api.workly.run
+          WORKLY_API_KEY: ${{ secrets.WORKLY_API_KEY }}
+```
+
+The environment's name is whatever your host calls it (Vercel's is `Production`).
+
 In a Python project, `workly-cli==0.4.0` in your dev or CI requirements installs the same pinned binary with `pip` (it's what `workly[cli]` pulls in).
 
 Run `workly validate` in pull requests to catch mistakes before they merge; it needs no server or API key, only the environment variables the file uses.
