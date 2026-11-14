@@ -25,8 +25,12 @@ var (
 // recentRuns is how many runs get_schedule shows.
 const recentRuns = 10
 
+// workflowScheduleNote explains runs of a schedule that starts a workflow,
+// which look finished long before the workflow is.
+const workflowScheduleNote = `A schedule with workflow (url null) sends no HTTP request: each run only starts a workflow run, so the run succeeds as soon as the workflow run has started, last_status is null, and last_duration_ms is the time it took to start it. Its workflow_run_status says whether the workflow run (workflow_run_id; get_workflow_run shows it) is still running or how it ended. With overlap "skip", a slot is skipped while the workflow run started by the previous one is still running.`
+
 var listSchedules = newTool("list_schedules", "List schedules",
-	"All schedules, in summary: cron expression and timezone, the URL each calls, whether it is paused (and since when, paused_at, null while it runs), when it next runs (next_run_at, null while paused) and how its latest run went (last_run, null before the first). Use get_schedule for a schedule's request, retry policy and recent runs. Schedules are separate from queues; their calls are runs, not tasks.",
+	"All schedules, in summary: cron expression and timezone, what each runs (url, or workflow for a schedule that starts a workflow run; the other is null), whether it is paused (and since when, paused_at, null while it runs), when it next runs (next_run_at, null while paused) and how its latest run went (last_run, null before the first; for a workflow schedule, its workflow_run_status says how the workflow run it started is going). Use get_schedule for a schedule's request, retry policy and recent runs. Schedules are separate from queues; their calls are runs, not tasks.",
 	object(map[string]any{}), readOnly,
 	func(ctx context.Context, api apiClient, _ struct{}) (any, error) {
 		var out struct {
@@ -43,6 +47,7 @@ var listSchedules = newTool("list_schedules", "List schedules",
 
 // scheduleOverview is what list_schedules shows of a schedule.
 func scheduleOverview(s map[string]any) map[string]any {
+	scheduleTarget(s)
 	out := map[string]any{}
 	for _, k := range []string{"name", "cron", "timezone", "url", "workflow", "paused", "paused_at", "next_run_at", "last_run"} {
 		out[k] = s[k]
@@ -53,11 +58,28 @@ func scheduleOverview(s map[string]any) map[string]any {
 // scheduleDetail is a schedule as the tools that return one show it.
 func scheduleDetail(s map[string]any) map[string]any {
 	truncateBody(s)
-	return withNulls(s, "paused_at", "next_run_at", "last_run")
+	scheduleTarget(s)
+	return withNulls(s, "paused_at", "next_run_at", "last_run", "payload", "body", "on_complete")
+}
+
+// scheduleTarget gives a schedule one target: url or workflow, the other
+// null. A workflow schedule sends no request, so the request's settings are
+// null too; the API returns them with their defaults.
+func scheduleTarget(s map[string]any) {
+	if w, _ := s["workflow"].(string); w != "" {
+		for _, k := range []string{"url", "method", "headers", "body", "content_type", "timeout_seconds"} {
+			s[k] = nil
+		}
+	} else {
+		s["workflow"] = nil
+	}
+	if last, ok := s["last_run"].(map[string]any); ok {
+		withNulls(last, "finished_at", "last_status", "last_error", "workflow_run_id", "workflow_run_status")
+	}
 }
 
 var getSchedule = newTool("get_schedule", "Get schedule",
-	`A schedule's settings, its next five slots (next_runs) and its most recent runs, newest first. A paused schedule has paused_at (when it was paused; null while it runs), next_run_at null and empty next_runs; next_runs_if_resumed are the slots it would run at if resumed now. A "skipped" run was not delivered: skip_reason "overlap" means the previous run was still going, "missed" that the server was down at that time. Start here to find out why a scheduled job didn't run or failed.`,
+	`A schedule's settings, its next five slots (next_runs) and its most recent runs, newest first. A paused schedule has paused_at (when it was paused; null while it runs), next_run_at null and empty next_runs; next_runs_if_resumed are the slots it would run at if resumed now. A "skipped" run was not delivered: skip_reason "overlap" means the previous run was still going, "missed" that the server was down at that time. `+workflowScheduleNote+` Start here to find out why a scheduled job didn't run or failed.`,
 	object(map[string]any{"schedule": scheduleProp}, "schedule"), readOnly,
 	func(ctx context.Context, api apiClient, args struct {
 		Schedule string `json:"schedule"`
@@ -81,7 +103,7 @@ var getSchedule = newTool("get_schedule", "Get schedule",
 	})
 
 var listRuns = newTool("list_runs", "List runs",
-	`Runs, newest first: one schedule's, or every schedule's if schedule is left out (e.g. state "failed" for failed runs anywhere), optionally only those in one state. Returns summaries, each with its schedule and the same fields, null where there is no value; use get_run for attempts. started_at is when the first attempt started and last_duration_ms how long the latest took; both are null before the first attempt, and last_duration_ms while it is still running. Pass next_cursor as cursor for the next page.`,
+	`Runs, newest first: one schedule's, or every schedule's if schedule is left out (e.g. state "failed" for failed runs anywhere), optionally only those in one state. Returns summaries, each with its schedule and the same fields, null where there is no value; use get_run for attempts. started_at is when the first attempt started and last_duration_ms how long the latest took; both are null before the first attempt, and last_duration_ms while it is still running. `+workflowScheduleNote+` Pass next_cursor as cursor for the next page.`,
 	object(map[string]any{
 		"schedule": prop("string", "Only this schedule's runs. Leave out for every schedule's."),
 		"state":    prop("string", "Only runs in this state.", "enum", runStates),
@@ -118,7 +140,7 @@ var listRuns = newTool("list_runs", "List runs",
 	})
 
 var getRun = newTool("get_run", "Get run",
-	"A schedule run with its delivery attempts, oldest first: each attempt's outcome, status code, error, response headers, the start of the response body and its duration. Large bodies are truncated.",
+	"A schedule run with its delivery attempts, oldest first: each attempt's outcome, status code, error, response headers, the start of the response body and its duration. Large bodies are truncated. For a schedule that starts a workflow, an attempt starts the workflow run rather than sending a request, and workflow_run_status says how that workflow run is going.",
 	object(map[string]any{"id": runIDProp}, "id"), readOnly,
 	func(ctx context.Context, api apiClient, args struct {
 		ID string `json:"id"`
@@ -175,7 +197,7 @@ var getRunDelivery = newTool("get_run_delivery", "Get run delivery request",
 	})
 
 var waitForRun = newTool("wait_for_run", "Wait for run",
-	"Waits for the first delivery attempt since the run was created or last retried by hand, then returns the run and its latest attempt. Returns at once if that attempt already happened or the run has finished. Use it after trigger_schedule or retry_run. Times out after timeout_seconds with done=false.",
+	"Waits for the first delivery attempt since the run was created or last retried by hand, then returns the run and its latest attempt. Returns at once if that attempt already happened or the run has finished. Use it after trigger_schedule or retry_run. Times out after timeout_seconds with done=false. For a schedule that starts a workflow, it returns once the workflow run has started, not finished: follow workflow_run_id with get_workflow_run.",
 	object(map[string]any{
 		"id":              runIDProp,
 		"timeout_seconds": prop("number", "How long to wait (default 30).", "minimum", 1, "maximum", 60),
@@ -299,7 +321,7 @@ var updateSchedule = newTool("update_schedule", "Create or update schedule",
 		"cron":                prop("string", `Five fields (minute hour day-of-month month day-of-week), e.g. "0 3 * * *" or "*/15 * * * mon-fri", or @hourly, @daily, @weekly, @monthly, @yearly.`),
 		"timezone":            prop("string", "IANA timezone the cron expression is read in (default UTC), e.g. Europe/Stockholm."),
 		"url":                 prop("string", "The http(s) URL to call. Use this or workflow."),
-		"workflow":            prop("string", "A workflow to start a run of instead of calling a URL; payload, if any, is the run's input. Use this or url."),
+		"workflow":            prop("string", "A workflow to start a run of instead of calling a URL; payload, if any, is the run's input, and method, headers, body, content_type and timeout_seconds don't apply. Use this or url."),
 		"method":              prop("string", "HTTP method (default POST).", "enum", []string{"GET", "POST", "PUT", "PATCH", "DELETE"}),
 		"headers":             prop("object", "Headers sent with every run. Workly-* headers are reserved.", "additionalProperties", map[string]any{"type": "string"}),
 		"payload":             map[string]any{"description": "A JSON body (any JSON value). Use this or body."},
@@ -407,7 +429,7 @@ func runAction(ctx context.Context, api apiClient, id, action string) (any, erro
 var runSummaryKeys = []string{
 	"id", "schedule", "state", "trigger", "scheduled_for", "skip_reason", "run_at", "attempt_count",
 	"last_status", "last_outcome", "last_error", "created_at", "started_at", "finished_at", "last_attempt_at",
-	"last_duration_ms", "retried_at", "callback_task_id", "workflow_run_id",
+	"last_duration_ms", "retried_at", "callback_task_id", "workflow_run_id", "workflow_run_status",
 }
 
 // runSummary is a run without its request: what list views need.

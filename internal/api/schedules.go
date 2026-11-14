@@ -184,6 +184,11 @@ func toSchedule(sc store.Schedule, now time.Time) Schedule {
 			LastStatus:   l.LastStatus,
 			LastError:    optional(l.LastError),
 		}
+		out.LastRun.WorkflowRunId = optional(l.WorkflowRunID)
+		if l.WorkflowRunStatus != "" {
+			status := WorkflowRunStatus(l.WorkflowRunStatus)
+			out.LastRun.WorkflowRunStatus = &status
+		}
 	}
 	return out
 }
@@ -211,6 +216,10 @@ func toRun(r store.Run) Run {
 	}
 	out.CallbackTaskId = optional(r.CallbackTaskID)
 	out.WorkflowRunId = optional(r.WorkflowRunID)
+	if r.WorkflowRunStatus != "" {
+		status := WorkflowRunStatus(r.WorkflowRunStatus)
+		out.WorkflowRunStatus = &status
+	}
 	out.LastDurationMs = durationMillis(r.LastDuration)
 	out.Payload, out.Body = bodyFields(r.Headers, r.Body)
 	if r.SkipReason != "" {

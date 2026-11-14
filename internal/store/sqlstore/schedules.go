@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/worklydev/workly/internal/id"
@@ -163,10 +164,11 @@ func (s *Store) lastRuns(ctx context.Context, ws workspace.ID, name string) (map
 	// From the schedules, one index lookup each for its latest run, rather
 	// than from every run in the workspace.
 	query := `SELECT r.schedule, r.id, r.state, r.trigger_type, r.scheduled_for, r.finished_at,
-			r.last_status, r.last_error
+			r.last_status, r.last_error, r.workflow_run_id, w.status
 		FROM schedules sc
 			JOIN runs r ON r.id = (SELECT max(l.id) FROM runs l
 				WHERE l.workspace_id = sc.workspace_id AND l.schedule = sc.name)
+			LEFT JOIN workflow_runs w ON w.workspace_id = r.workspace_id AND w.id = r.workflow_run_id
 		WHERE sc.workspace_id = ?`
 	args := []any{ws}
 	if name != "" {
@@ -181,16 +183,18 @@ func (s *Store) lastRuns(ctx context.Context, ws workspace.ID, name string) (map
 	out := map[string]*store.RunSummary{}
 	for rows.Next() {
 		var (
-			schedule      string
-			r             store.RunSummary
-			slot, fin     dbTime
-			status        sql.NullInt64
-			lastErrorText sql.NullString
+			schedule        string
+			r               store.RunSummary
+			slot, fin       dbTime
+			status          sql.NullInt64
+			lastErrorText   sql.NullString
+			wfRun, wfStatus sql.NullString
 		)
-		if err := rows.Scan(&schedule, &r.ID, &r.State, &r.Trigger, &slot, &fin, &status, &lastErrorText); err != nil {
+		if err := rows.Scan(&schedule, &r.ID, &r.State, &r.Trigger, &slot, &fin, &status, &lastErrorText, &wfRun, &wfStatus); err != nil {
 			return nil, err
 		}
 		r.ScheduledFor, r.FinishedAt, r.LastError = slot.Time, fin.ptr(), lastErrorText.String
+		r.WorkflowRunID, r.WorkflowRunStatus = wfRun.String, store.WorkflowRunStatus(wfStatus.String)
 		if status.Valid {
 			n := int(status.Int64)
 			r.LastStatus = &n
@@ -349,7 +353,49 @@ func (s *Store) getRun(ctx context.Context, q querier, ws workspace.ID, id strin
 	if errors.Is(err, sql.ErrNoRows) {
 		return store.Run{}, store.ErrNotFound
 	}
-	return r, err
+	if err != nil {
+		return r, err
+	}
+	runs := []store.Run{r}
+	err = s.workflowRunStatuses(ctx, q, ws, runs)
+	return runs[0], err
+}
+
+// workflowRunStatuses fills in the status of the workflow runs that runs
+// started. It's a separate query rather than part of runColumns so the
+// dispatcher's queries for runs don't pay for it.
+func (s *Store) workflowRunStatuses(ctx context.Context, q querier, ws workspace.ID, runs []store.Run) error {
+	var ids []any
+	for _, r := range runs {
+		if r.WorkflowRunID != "" {
+			ids = append(ids, r.WorkflowRunID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := s.query(ctx, q, `SELECT id, status FROM workflow_runs WHERE workspace_id = ? AND id IN (?`+
+		strings.Repeat(", ?", len(ids)-1)+`)`, append([]any{ws}, ids...)...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	status := map[string]store.WorkflowRunStatus{}
+	for rows.Next() {
+		var id string
+		var st store.WorkflowRunStatus
+		if err := rows.Scan(&id, &st); err != nil {
+			return err
+		}
+		status[id] = st
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for i := range runs {
+		runs[i].WorkflowRunStatus = status[runs[i].WorkflowRunID]
+	}
+	return nil
 }
 
 func (s *Store) ListRuns(ctx context.Context, ws workspace.ID, f store.RunFilter) ([]store.Run, string, error) {
@@ -379,7 +425,7 @@ func (s *Store) ListRuns(ctx context.Context, ws workspace.ID, f store.RunFilter
 		runs = runs[:f.Limit]
 		cursor = runs[len(runs)-1].ID
 	}
-	return runs, cursor, nil
+	return runs, cursor, s.workflowRunStatuses(ctx, s.db, ws, runs)
 }
 
 func (s *Store) listRuns(ctx context.Context, q querier, query string, args ...any) ([]store.Run, error) {

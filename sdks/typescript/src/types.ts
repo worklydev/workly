@@ -345,6 +345,10 @@ export interface LastRun {
   finishedAt?: string;
   lastStatus?: number;
   lastError?: string;
+  /** The workflow run it started, for a schedule that starts a workflow. */
+  workflowRunId?: string;
+  /** That workflow run's status: the run succeeds once it has started it. */
+  workflowRunStatus?: WorkflowRunStatus;
 }
 
 /** A cron schedule that calls `url`. Separate from queues: its calls are runs. */
@@ -416,6 +420,8 @@ export interface Run {
   callbackTaskId?: string;
   /** The workflow run it started, for a schedule that starts a workflow. */
   workflowRunId?: string;
+  /** That workflow run's status: the run succeeds once it has started it. */
+  workflowRunStatus?: WorkflowRunStatus;
 }
 
 export interface RunPage {

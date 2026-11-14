@@ -249,7 +249,7 @@ func allTools() []*tool {
 // Read tools.
 
 var listQueues = newTool("list_queues", "List queues",
-	"All queues, each with whether it is paused, its limits (rate_per_second, max_concurrency), its current work (stats: due now, scheduled for later including retries, running and failed task counts, and oldest_due_at, how far behind the queue is) and the last 24 hours (last_24h: tasks succeeded, failed and cancelled, and the median and 95th percentile duration of their latest attempt, p50_duration_ms and p95_duration_ms, taken over duration_samples attempts; with few samples they say little, and with none they are null). Use get_queue for the rest of the delivery policy and failures.",
+	"All queues, each with whether it is paused, its limits (rate_per_second, max_concurrency), its current work (stats: due now, scheduled for later including retries, running and failed task counts, and oldest_due_at, how far behind the queue is) and the last 24 hours (last_24h: tasks succeeded, failed and cancelled, and the median and 95th percentile duration of their latest attempt, p50_duration_ms and p95_duration_ms, taken over duration_samples attempts; with few samples they say little, and with none they are null). internal is true for Workly's own queues (_workflows delivers workflow steps, _callbacks callbacks); they fill up from workflows and on_complete rather than enqueue_task, can't be deleted, and pausing one holds up every workflow or callback. Use get_queue for the rest of the delivery policy and failures.",
 	object(map[string]any{}), readOnly,
 	func(ctx context.Context, api apiClient, _ struct{}) (any, error) {
 		var out struct {
@@ -272,7 +272,7 @@ var listQueues = newTool("list_queues", "List queues",
 // queueOverview is what list_queues shows of a queue: enough to tell whether
 // it is healthy, without the retry policy.
 func queueOverview(q, lastDay map[string]any) map[string]any {
-	out := map[string]any{"last_24h": lastDay}
+	out := map[string]any{"last_24h": lastDay, "internal": internalQueue(q["name"])}
 	for _, k := range []string{"name", "paused", "rate_per_second", "max_concurrency", "stats"} {
 		if v, ok := q[k]; ok {
 			out[k] = v
@@ -328,8 +328,16 @@ var getQueue = newTool("get_queue", "Get queue",
 		if err != nil {
 			return nil, err
 		}
+		queue["internal"] = internalQueue(queue["name"])
 		return map[string]any{"queue": queue, "last_24h": day, "activity": activity, "failures": failures["groups"]}, nil
 	})
+
+// internalQueue reports whether a queue is one of Workly's own (_workflows,
+// _callbacks), as api.Reserved does; that package imports this one.
+func internalQueue(name any) bool {
+	n, _ := name.(string)
+	return strings.HasPrefix(n, "_")
+}
 
 var listTasks = newTool("list_tasks", "List tasks",
 	`Tasks, newest first unless sorted otherwise, filtered by any of queue, state, group, idempotency key, last error and creation time. To see what runs next, list pending tasks sorted by run_at. Returns summaries (state, URL, attempts, last status and error), each with the same fields, null where there is no value; use get_task for payloads and attempt details. started_at is when the first attempt started, so started_at minus created_at is time spent waiting in the queue; last_duration_ms is how long the latest attempt took in the handler. Both are null before the first attempt. Pass next_cursor as cursor for the next page. A "pending" task whose run_at is in the future is scheduled or waiting to retry.`,
@@ -623,7 +631,7 @@ var cancelPendingTasks = newTool("cancel_pending_tasks", "Cancel pending tasks",
 	})
 
 var pauseQueue = newTool("pause_queue", "Pause queue",
-	"Stops delivering a queue's tasks. Deliveries in flight finish, and enqueueing still works; tasks wait until the queue is resumed. Returns the queue.",
+	"Stops delivering a queue's tasks. Deliveries in flight finish, and enqueueing still works; tasks wait until the queue is resumed. Pausing one of Workly's own queues (_workflows, _callbacks) holds up every workflow step or callback delivered from it. Returns the queue.",
 	object(map[string]any{"queue": queueProp}, "queue"),
 	annotations{IdempotentHint: true},
 	func(ctx context.Context, api apiClient, args struct {

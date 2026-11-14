@@ -135,8 +135,8 @@ func (s *Store) ListWorkflows(ctx context.Context, ws workspace.ID) ([]store.Wor
 
 // lastWorkflowRuns returns the latest run of the named workflow, or of
 // every workflow in the workspace if name is empty, by workflow.
-func (s *Store) lastWorkflowRuns(ctx context.Context, ws workspace.ID, name string) (map[string]*store.WorkflowRunSummary, error) {
-	query := `SELECT r.workflow, r.id, r.status, r.created_at, r.finished_at, r.error FROM workflow_runs r
+func (s *Store) lastWorkflowRuns(ctx context.Context, ws workspace.ID, name string) (map[string]*store.WorkflowRun, error) {
+	query := `SELECT ` + workflowRunColumns + ` FROM workflow_runs r
 		WHERE r.workspace_id = ? AND r.id = (SELECT max(l.id) FROM workflow_runs l
 			WHERE l.workspace_id = r.workspace_id AND l.workflow = r.workflow)`
 	args := []any{ws}
@@ -149,19 +149,13 @@ func (s *Store) lastWorkflowRuns(ctx context.Context, ws workspace.ID, name stri
 		return nil, err
 	}
 	defer rows.Close()
-	out := map[string]*store.WorkflowRunSummary{}
+	out := map[string]*store.WorkflowRun{}
 	for rows.Next() {
-		var (
-			workflow          string
-			r                 store.WorkflowRunSummary
-			created, finished dbTime
-			errText           sql.NullString
-		)
-		if err := rows.Scan(&workflow, &r.ID, &r.Status, &created, &finished, &errText); err != nil {
+		r, err := scanWorkflowRun(rows)
+		if err != nil {
 			return nil, err
 		}
-		r.CreatedAt, r.FinishedAt, r.Error = created.Time, finished.ptr(), errText.String
-		out[workflow] = &r
+		out[r.Workflow] = &r
 	}
 	return out, rows.Err()
 }

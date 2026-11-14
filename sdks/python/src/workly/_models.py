@@ -419,6 +419,10 @@ class LastRun:
     finished_at: datetime | None
     last_status: int | None
     last_error: str | None
+    workflow_run_id: str | None = None
+    """The workflow run it started, for a schedule that starts a workflow."""
+    workflow_run_status: WorkflowRunStatus | None = None
+    """That workflow run's status: the run succeeds once it has started it."""
 
     @classmethod
     def _from_json(cls, d: dict[str, Any]) -> LastRun:
@@ -430,6 +434,8 @@ class LastRun:
             finished_at=_opt_time(d.get("finished_at")),
             last_status=d.get("last_status"),
             last_error=d.get("last_error"),
+            workflow_run_id=d.get("workflow_run_id"),
+            workflow_run_status=d.get("workflow_run_status"),
         )
 
 
@@ -545,6 +551,8 @@ class Run:
     """The callback task enqueued when the run last finished, if its schedule has `on_complete`."""
     workflow_run_id: str | None = None
     """The workflow run it started, for a schedule that starts a workflow."""
+    workflow_run_status: WorkflowRunStatus | None = None
+    """That workflow run's status: the run succeeds once it has started it."""
 
     @classmethod
     def _from_json(cls, d: dict[str, Any]) -> Run:
@@ -574,6 +582,7 @@ class Run:
             last_duration_ms=d.get("last_duration_ms"),
             callback_task_id=d.get("callback_task_id"),
             workflow_run_id=d.get("workflow_run_id"),
+            workflow_run_status=d.get("workflow_run_status"),
         )
 
 

@@ -183,11 +183,9 @@ func toWorkflow(w store.Workflow) Workflow {
 	for i, sc := range w.Steps {
 		out.Steps[i] = toWorkflowStepConfig(sc)
 	}
-	if r := w.LastRun; r != nil {
-		out.LastRun = &WorkflowRunSummary{
-			Id: r.ID, Workflow: w.Name, Status: WorkflowRunStatus(r.Status), Error: optional(r.Error),
-			CreatedAt: r.CreatedAt, FinishedAt: r.FinishedAt, DurationMs: runDuration(r.CreatedAt, r.FinishedAt),
-		}
+	if w.LastRun != nil {
+		last := toWorkflowRunSummary(*w.LastRun)
+		out.LastRun = &last
 	}
 	return out
 }

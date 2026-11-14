@@ -112,8 +112,9 @@ type Workflow struct {
 	Name        string
 	WorkflowConfig
 	// Version counts the changes to the definition, from 1.
-	Version   int
-	LastRun   *WorkflowRunSummary
+	Version int
+	// LastRun is the latest run, without its steps, or nil before the first.
+	LastRun   *WorkflowRun
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -128,15 +129,6 @@ const (
 )
 
 func (s WorkflowRunStatus) Finished() bool { return s != WorkflowRunning }
-
-// WorkflowRunSummary describes a workflow's latest run.
-type WorkflowRunSummary struct {
-	ID         string
-	Status     WorkflowRunStatus
-	CreatedAt  time.Time
-	FinishedAt *time.Time
-	Error      string
-}
 
 type NewWorkflowRun struct {
 	Input          json.RawMessage
