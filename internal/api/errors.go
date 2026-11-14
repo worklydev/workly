@@ -71,6 +71,16 @@ func payloadTooLarge(limit int64) error {
 }
 
 // writeHandlerError renders err, hiding details of unexpected errors.
+// statusClientClosed is nginx's 499: the client went away before the
+// response. Nobody receives it; it's what the request log records instead of
+// a 500, since a request the client cancelled isn't the server failing.
+const statusClientClosed = 499
+
+// clientGone reports whether the request failed because its client went
+// away, as a browser does when it navigates mid-request: its context is
+// done, so the store gives up with context.Canceled.
+func clientGone(r *http.Request) bool { return r.Context().Err() != nil }
+
 func writeHandlerError(w http.ResponseWriter, err error) (unexpected bool) {
 	var apiErr *apiError
 	if errors.As(err, &apiErr) {
