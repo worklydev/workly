@@ -719,7 +719,7 @@ func taskAction(ctx context.Context, api apiClient, id, action string) (any, err
 }
 
 var deleteQueue = newTool("delete_queue", "Delete queue",
-	"Deletes a queue with its settings and its finished tasks. It can't be undone, and enqueueing to the name creates the queue again with default settings. Refuses (invalid_state) while the queue has tasks due, scheduled or running, so no work is lost: cancel_pending_tasks first if they should go. Workly's own queues (names starting with _) can't be deleted.",
+	"Deletes a queue with its settings and its finished tasks. It can't be undone, and enqueueing to the name creates the queue again with default settings. Refuses (invalid_state) while the queue has tasks due, scheduled or running, so no work is lost: cancel_pending_tasks first if they should go. Returns tasks_deleted: how many succeeded, failed and cancelled tasks went with it, and their total; each count stops at 10,000, so 10000 means 10,000 or more. Workly's own queues (names starting with _) can't be deleted.",
 	object(map[string]any{"queue": queueProp}, "queue"),
 	annotations{DestructiveHint: true},
 	func(ctx context.Context, api apiClient, args struct {
@@ -743,10 +743,21 @@ var deleteQueue = newTool("delete_queue", "Delete queue",
 				"queue %s still has tasks to deliver (%d due, %d scheduled, %d running); cancel_pending_tasks first, or wait for them to finish",
 				args.Queue, q.Stats.Due, q.Stats.Scheduled, q.Stats.Running)}
 		}
+		// With nothing left to deliver, every task left is finished, so the
+		// activity since the start counts them all, by state. The API
+		// doesn't report what it deleted.
+		var a struct{ Succeeded, Failed, Cancelled int }
+		since := url.Values{"since": {time.Unix(0, 0).UTC().Format(time.RFC3339)}}
+		if err := api.do(ctx, "GET", apiPath("/v1/queues/%s/activity", args.Queue), since, nil, &a); err != nil {
+			return nil, err
+		}
 		if err := api.do(ctx, "DELETE", apiPath("/v1/queues/%s", args.Queue), nil, nil, nil); err != nil {
 			return nil, err
 		}
-		return map[string]any{"queue": args.Queue, "deleted": true, "failed_tasks_deleted": q.Stats.Failed}, nil
+		return map[string]any{"queue": args.Queue, "deleted": true, "tasks_deleted": map[string]any{
+			"succeeded": a.Succeeded, "failed": a.Failed, "cancelled": a.Cancelled,
+			"total": a.Succeeded + a.Failed + a.Cancelled,
+		}}, nil
 	})
 
 func queueAction(ctx context.Context, api apiClient, queue, action string) (any, error) {

@@ -896,8 +896,11 @@ func TestMCPDelete(t *testing.T) {
 	if text, isError := c.callRaw("delete_queue", map[string]any{"queue": "emails"}); !isError || !strings.Contains(text, "invalid_state") || !strings.Contains(text, "still has tasks to deliver (1 due") {
 		t.Errorf("delete_queue with a pending task = %q", text)
 	}
+	c.call("enqueue_task", map[string]any{"queue": "emails", "url": "https://example.test/hook"})
 	c.call("cancel_pending_tasks", map[string]any{"queue": "emails"})
-	if got := c.call("delete_queue", map[string]any{"queue": "emails"}); got["deleted"] != true {
+	// It reports what went with it, by state.
+	if got := c.call("delete_queue", map[string]any{"queue": "emails"}); got["deleted"] != true ||
+		fmt.Sprint(got["tasks_deleted"]) != "map[cancelled:2 failed:0 succeeded:0 total:2]" {
 		t.Errorf("delete_queue = %v", got)
 	}
 	if text, isError := c.callRaw("get_queue", map[string]any{"queue": "emails"}); !isError || !strings.Contains(text, "queue_not_found") {
