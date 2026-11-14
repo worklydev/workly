@@ -173,7 +173,10 @@ from workly import Callback
 
 group = client.groups.enqueue(
     "stock-prices",
-    ({"url": "https://api.example.com/jobs/update-stock-price", "payload": {"symbol": c.symbol}} for c in companies),
+    (
+        {"url": "https://api.example.com/jobs/update-stock-price", "payload": {"symbol": c.symbol}}
+        for c in companies
+    ),
     name="daily-stock-prices",
     idempotency_key="stock-prices-2026-10-19",  # a retry finishes this group rather than start another
     # or a dict: {"url": "https://api.example.com/jobs/refresh-views"}
