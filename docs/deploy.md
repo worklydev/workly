@@ -77,7 +77,7 @@ Deployed workly.yaml: 2 created, 2 updated.
 | Command | |
 |---|---|
 | `workly validate` | Checks the file without contacting the server: field names and types, cron expressions, timezones, URLs, headers, and that every `${NAME}` is set. It runs the server's own validation, so a file that passes is one the server accepts. |
-| `workly plan` | Shows what `deploy` would create and update, setting by setting, and which `${NAME:-default}` values took their default. Changes nothing. |
+| `workly plan` | Shows what `deploy` would create, update and (with [`prune`](#pruning)) delete, setting by setting, and which `${NAME:-default}` values took their default. Changes nothing. |
 | `workly deploy` | Shows the plan, asks, and applies it. `--yes` (`-y`) skips the question, as CI needs; without a terminal to ask on, it's required. |
 
 All three read `workly.yaml` in the current directory, or the file given with `--file` (`-f`). `plan` and `deploy` connect like the other commands: `--url` or `WORKLY_URL`, and `--api-key` or `WORKLY_API_KEY`. They exit with a non-zero status on an invalid file or a failed change; a deploy that fails partway reports what it had applied, and running it again finishes the job.
@@ -87,6 +87,7 @@ All three read `workly.yaml` in the current directory, or the file given with `-
 | Key | |
 |---|---|
 | `version` | Required. `1`. |
+| `prune` | `true` to delete what the file leaves out. See [Pruning](#pruning). Default `false`. |
 | `queues` | Queue names to their settings. |
 | `workflows` | Workflow names to their `steps` (a list) and `max_duration_seconds`. |
 | `schedules` | Schedule names to their settings. |
@@ -142,9 +143,31 @@ queues:
 ## What deploying changes, and what it doesn't
 
 - It **creates** queues, workflows and schedules the file declares that the server doesn't have, and **updates** those whose settings differ. Workflows go before schedules, so a schedule can start one declared in the same file. A workflow run already going keeps the definition it started with. One whose settings already match isn't touched, so its `updated_at` stays put.
-- It **never deletes** anything. A queue or schedule the file doesn't declare is left alone; the plan lists the workflows and schedules on the server that aren't in the file, so you notice the ones you meant to remove. Remove those with `workly schedules rm NAME` or `workly workflows rm NAME`. Queues aren't listed: enqueueing a task creates its queue, so most queues have never been in a file.
+- It **doesn't delete** anything unless the file sets [`prune: true`](#pruning). A queue or schedule the file doesn't declare is left alone; the plan lists the workflows and schedules on the server that aren't in the file, so you notice the ones you meant to remove. Remove those with `workly schedules rm NAME` or `workly workflows rm NAME`. Queues aren't listed: enqueueing a task creates its queue, so most queues have never been in a file.
 - It **never pauses or resumes**. Pausing is something you do during an incident, and a deploy shouldn't undo it: a paused queue or schedule stays paused, and the plan says so.
-- A section left out of the file isn't managed by it: a file without `schedules` doesn't look at schedules at all. An empty one (`schedules: {}`) declares none, which only changes what the plan lists.
+- A section left out of the file isn't managed by it: a file without `schedules` doesn't look at schedules at all. An empty one (`schedules: {}`) declares none, which only changes what the plan lists, or with `prune`, deletes every schedule.
+
+### Pruning
+
+With `prune: true` at the top of the file, the file is the whole truth for each section it has: deploying also deletes the queues, workflows and schedules on the server that the section leaves out, whoever created them. The plan lists them:
+
+```
+Plan for workly.yaml on https://api.workly.run:
+
+  - delete schedule old-report
+  - delete workflow old-refresh
+  - delete queue old-emails (and its 3 failed tasks)
+
+0 to create, 0 to update, 3 to delete, 4 unchanged.
+```
+
+- A section left out of the file is still not managed: a file with `prune: true` but no `schedules` leaves every schedule alone.
+- Deleting a schedule deletes its runs. Deleting a workflow keeps its runs, and those still going finish.
+- Deleting a queue deletes its tasks, so a queue the file leaves out must have nothing left to deliver: if one has tasks pending, scheduled or running, the plan fails and names it, and nothing is deployed. Add it under `queues`, or let its tasks finish (or cancel them with `workly queues cancel-pending NAME`). Its failed tasks are deleted with it, and the plan says how many. Workly's own queues (`_workflows`, `_callbacks`) are never deleted.
+- Since enqueueing creates a queue, every queue your app enqueues to must be in the file, or the next deploy fails while it has work and deletes it when it hasn't.
+- Deletes happen after the creates and updates: schedules first, then workflows, then queues, so nothing left points at something gone.
+
+In CI, `deploy --yes` deletes without asking, so a queue or schedule removed from the file in a pull request is gone once it merges. Run `workly plan` on pull requests to see the deletes in review.
 
 ## In CI
 

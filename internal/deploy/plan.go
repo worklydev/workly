@@ -21,6 +21,8 @@ const (
 	Unchanged Action = iota
 	Create
 	Update
+	// Delete is planned only with prune: true, for what the file leaves out.
+	Delete
 )
 
 // Change is what deploying does to one declared queue, workflow or
@@ -35,8 +37,10 @@ type Change struct {
 	// Deploying leaves it paused.
 	Paused bool
 	// Body is the PUT request body: an api.QueueConfig, api.WorkflowConfig
-	// or api.ScheduleConfig.
+	// or api.ScheduleConfig. Deletes have none.
 	Body any
+	// Failed counts the failed tasks a queue's delete takes with it.
+	Failed int
 }
 
 // Diff is one changed setting. Change reads "old → new", or for header
@@ -51,12 +55,14 @@ type Plan struct {
 	// Changes has every declared queue, then every declared workflow, then
 	// every declared schedule, in file order, unchanged ones included. That
 	// is the order they are applied in, so a schedule's workflow exists by
-	// the time the schedule is put.
+	// the time the schedule is put. With prune, the deletes follow, in the
+	// reverse order (schedules, workflows, queues), so nothing is deleted
+	// while something left on the server still points at it.
 	Changes []Change
 	// Undeclared lists the schedules on the server the file doesn't
-	// declare, if it has a schedules section. Deploying leaves them alone.
-	// Queues aren't listed: enqueueing creates them, so most aren't in a
-	// file.
+	// declare, if it has a schedules section and doesn't prune. Deploying
+	// leaves them alone. Queues aren't listed: enqueueing creates them, so
+	// most aren't in a file.
 	Undeclared []string
 	// UndeclaredWorkflows does the same for workflows.
 	UndeclaredWorkflows []string
@@ -73,7 +79,9 @@ func (p Plan) Count(a Action) int {
 }
 
 // Plan compares the file with the queues, workflows and schedules on the
-// server.
+// server. With prune, it fails if a queue it would delete still has tasks
+// to deliver: those tasks would be lost, and the next enqueue would bring
+// the queue back anyway.
 func (f *File) Plan(queues []api.Queue, workflows []api.Workflow, schedules []api.Schedule) (Plan, error) {
 	var plan Plan
 	current := map[string]api.Queue{}
@@ -89,6 +97,7 @@ func (f *File) Plan(queues []api.Queue, workflows []api.Workflow, schedules []ap
 			}
 			c.Diffs = queueDiffs(settings, q.settings)
 			c.Action, c.Paused = action(c.Diffs), cur.Paused
+			delete(current, q.Name)
 		} else if api.Reserved(q.Name) && !api.SystemQueue(q.Name) {
 			return plan, fmt.Errorf("queue %s: names starting with '_' are reserved for Workly's own queues", q.Name)
 		}
@@ -112,7 +121,7 @@ func (f *File) Plan(queues []api.Queue, workflows []api.Workflow, schedules []ap
 		}
 		plan.Changes = append(plan.Changes, c)
 	}
-	if f.HasWorkflows {
+	if f.HasWorkflows && !f.Prune {
 		plan.UndeclaredWorkflows = slices.Sorted(maps.Keys(workflowsByName))
 	}
 
@@ -134,10 +143,51 @@ func (f *File) Plan(queues []api.Queue, workflows []api.Workflow, schedules []ap
 		}
 		plan.Changes = append(plan.Changes, c)
 	}
-	if f.HasSchedules {
+	if f.HasSchedules && !f.Prune {
 		plan.Undeclared = slices.Sorted(maps.Keys(byName))
 	}
+	if !f.Prune {
+		return plan, nil
+	}
+
+	if f.HasSchedules {
+		for _, name := range slices.Sorted(maps.Keys(byName)) {
+			plan.Changes = append(plan.Changes, Change{Kind: "schedule", Name: name, Action: Delete})
+		}
+	}
+	if f.HasWorkflows {
+		for _, name := range slices.Sorted(maps.Keys(workflowsByName)) {
+			plan.Changes = append(plan.Changes, Change{Kind: "workflow", Name: name, Action: Delete})
+		}
+	}
+	if f.HasQueues {
+		var busy []string
+		for _, name := range slices.Sorted(maps.Keys(current)) {
+			if api.Reserved(name) {
+				continue
+			}
+			var stats api.QueueStats
+			if s := current[name].Stats; s != nil {
+				stats = *s
+			}
+			if n := stats.Due + stats.Scheduled + stats.Running; n > 0 {
+				busy = append(busy, fmt.Sprintf("%s (%s)", name, plural(n, "unfinished task")))
+				continue
+			}
+			plan.Changes = append(plan.Changes, Change{Kind: "queue", Name: name, Action: Delete, Failed: stats.Failed})
+		}
+		if len(busy) > 0 {
+			return plan, fmt.Errorf("prune would delete queues that still have tasks to deliver: %s; add them under queues, or let their tasks finish first", strings.Join(busy, ", "))
+		}
+	}
 	return plan, nil
+}
+
+func plural(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }
 
 func action(diffs []Diff) Action {

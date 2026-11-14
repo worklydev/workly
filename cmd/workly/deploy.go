@@ -94,9 +94,11 @@ func deployCmd() *cobra.Command {
 		Short: "Create and update the queues, workflows and schedules in workly.yaml",
 		Long: `Create and update the queues, workflows and schedules in workly.yaml, so
 the server matches it. Shows the plan and asks first; --yes skips the
-question, as CI needs. Running it again changes nothing. It never deletes,
-pauses or resumes anything, and leaves what the file doesn't declare alone.
-Workflow runs already going keep the definition they started with.`,
+question, as CI needs. Running it again changes nothing. It never pauses or
+resumes anything, and leaves what the file doesn't declare alone, unless
+the file sets prune: true: then it deletes the queues, workflows and
+schedules a section of the file leaves out. Workflow runs already going
+keep the definition they started with.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			f, c, plan, err := makePlan(cmd)
@@ -105,7 +107,7 @@ Workflow runs already going keep the definition they started with.`,
 			}
 			w := cmd.OutOrStdout()
 			printPlan(w, cmd, f, plan)
-			todo := plan.Count(deploy.Create) + plan.Count(deploy.Update)
+			todo := plan.Count(deploy.Create) + plan.Count(deploy.Update) + plan.Count(deploy.Delete)
 			if todo == 0 {
 				return nil
 			}
@@ -122,13 +124,10 @@ Workflow runs already going keep the definition they started with.`,
 					return fmt.Errorf("%s %s: %w\n%d of %d changes applied", ch.Kind, ch.Name, err, done, todo)
 				}
 				done++
-				verb := "Created"
-				if ch.Action == deploy.Update {
-					verb = "Updated"
-				}
+				verb := map[deploy.Action]string{deploy.Create: "Created", deploy.Update: "Updated", deploy.Delete: "Deleted"}[ch.Action]
 				fmt.Fprintf(w, "%s %s %s\n", verb, ch.Kind, ch.Name)
 			}
-			fmt.Fprintf(w, "\nDeployed %s: %d created, %d updated.\n", f.Path, plan.Count(deploy.Create), plan.Count(deploy.Update))
+			fmt.Fprintf(w, "\nDeployed %s: %s.\n", f.Path, summary(plan, false))
 			return nil
 		},
 	}
@@ -188,8 +187,9 @@ func planWith(ctx context.Context, c *client.ClientWithResponses, f *deploy.File
 }
 
 func printPlan(w io.Writer, cmd *cobra.Command, f *deploy.File, plan deploy.Plan) {
-	creates, updates, same := plan.Count(deploy.Create), plan.Count(deploy.Update), plan.Count(deploy.Unchanged)
-	if creates+updates == 0 {
+	creates, updates, deletes := plan.Count(deploy.Create), plan.Count(deploy.Update), plan.Count(deploy.Delete)
+	if creates+updates+deletes == 0 {
+		same := plan.Count(deploy.Unchanged)
 		fmt.Fprintf(w, "No changes: %s matches %s (%d unchanged).\n", serverURL(cmd), f.Path, same)
 	} else {
 		fmt.Fprintf(w, "Plan for %s on %s:\n\n", f.Path, serverURL(cmd))
@@ -206,9 +206,15 @@ func printPlan(w io.Writer, cmd *cobra.Command, f *deploy.File, plan deploy.Plan
 				for _, d := range ch.Diffs {
 					fmt.Fprintf(w, "      %s: %s\n", d.Field, d.Change)
 				}
+			case deploy.Delete:
+				failed := ""
+				if ch.Failed > 0 {
+					failed = fmt.Sprintf(" (and its %d failed %s)", ch.Failed, plural(ch.Failed, "task"))
+				}
+				fmt.Fprintf(w, "  - delete %s %s%s\n", ch.Kind, ch.Name, failed)
 			}
 		}
-		fmt.Fprintf(w, "\n%d to create, %d to update, %d unchanged.\n", creates, updates, same)
+		fmt.Fprintf(w, "\n%s.\n", summary(plan, true))
 	}
 	printDefaults(w, f)
 	if len(plan.UndeclaredWorkflows) > 0 {
@@ -221,7 +227,47 @@ func printPlan(w io.Writer, cmd *cobra.Command, f *deploy.File, plan deploy.Plan
 	}
 }
 
+// summary counts a plan's changes: "1 to create, 2 to update, 3 unchanged"
+// before applying it, "1 created, 2 updated" after. Deletes are left out
+// unless the plan has some, so files without prune read as they always have.
+func summary(plan deploy.Plan, planned bool) string {
+	type count struct {
+		a             deploy.Action
+		before, after string
+	}
+	var parts []string
+	for _, c := range []count{
+		{deploy.Create, "to create", "created"},
+		{deploy.Update, "to update", "updated"},
+		{deploy.Delete, "to delete", "deleted"},
+		{deploy.Unchanged, "unchanged", "unchanged"},
+	} {
+		n := plan.Count(c.a)
+		if c.a == deploy.Delete && n == 0 || c.a == deploy.Unchanged && !planned {
+			continue
+		}
+		word := c.after
+		if planned {
+			word = c.before
+		}
+		parts = append(parts, fmt.Sprintf("%d %s", n, word))
+	}
+	return strings.Join(parts, ", ")
+}
+
 func apply(ctx context.Context, c *client.ClientWithResponses, ch deploy.Change) error {
+	if ch.Action == deploy.Delete {
+		switch ch.Kind {
+		case "queue":
+			res, err := c.DeleteQueueWithResponse(ctx, ch.Name)
+			return check(res, err)
+		case "workflow":
+			res, err := c.DeleteWorkflowWithResponse(ctx, ch.Name)
+			return check(res, err)
+		}
+		res, err := c.DeleteScheduleWithResponse(ctx, ch.Name)
+		return check(res, err)
+	}
 	body, err := json.Marshal(ch.Body)
 	if err != nil {
 		return err
