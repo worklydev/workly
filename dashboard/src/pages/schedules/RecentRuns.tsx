@@ -14,8 +14,8 @@ const TONE: Record<Run['state'], string> = {
 
 /**
  * The latest runs as a strip of small bars, oldest first, newest on the right;
- * each links to its run. Always `slots` wide, slots without a run as faint
- * stubs, so strips line up down a list and a new schedule reads as new.
+ * each links to its run. Only runs that happened: a placeholder slot reads as
+ * a run that went nowhere.
  */
 export function RecentRuns({
   runs,
@@ -28,27 +28,19 @@ export function RecentRuns({
   phoneSlots?: number;
 }) {
   if (runs === undefined) return <span className="text-xs text-faint">…</span>;
-  const shown = runs.slice(0, slots);
-  const empty = slots - shown.length;
-  // Slot i counts from the oldest; the first slots - phoneSlots are wide-screen only.
-  const wideOnly = (i: number) => i < slots - phoneSlots && 'max-sm:hidden';
+  if (runs.length === 0) return <span className="text-xs text-faint">none yet</span>;
+  const shown = runs.slice(0, slots).reverse();
+  // Counted from the oldest, the first shown - phoneSlots are wide-screen only.
+  const wideOnly = (i: number) => i < shown.length - phoneSlots && 'max-sm:hidden';
   return (
-    // With no runs yet the strip is all stubs, so it lines up with the others and still reads as new.
-    <div
-      className="flex items-center gap-0.5"
-      title={runs.length === 0 ? 'No runs yet' : undefined}
-      onClick={(e) => e.stopPropagation()}
-    >
-      {Array.from({ length: empty }, (_, i) => (
-        <span key={i} aria-hidden className={cn('h-4 w-1.5 rounded-sm bg-muted', wideOnly(i))} />
-      ))}
-      {[...shown].reverse().map((r, i) => (
+    <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+      {shown.map((r, i) => (
         <Link
           key={r.id}
           to={`/runs/${r.id}`}
           state={{ from: `/schedules/${r.schedule}` }}
           title={`${r.state}${r.skip_reason ? ` (${r.skip_reason})` : ''} · ${formatDate(r.scheduled_for)}`}
-          className={cn('h-4 w-1.5 rounded-sm transition-opacity hover:opacity-70', TONE[r.state], wideOnly(empty + i))}
+          className={cn('h-4 w-1.5 rounded-sm transition-opacity hover:opacity-70', TONE[r.state], wideOnly(i))}
         />
       ))}
     </div>

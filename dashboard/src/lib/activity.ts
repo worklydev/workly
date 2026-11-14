@@ -12,7 +12,7 @@ export type Series = {
   color: Record<string, string>;
   totals: Record<string, number>;
   total: number;
-  /** The top of the chart: the tallest bar rounded up to 1, 2 or 5 × 10ⁿ, and at least 5, so a few tasks don't read as a spike. */
+  /** The top of the chart: the tallest bar rounded up by `niceCeil`, and at least 4, so a few tasks don't read as a spike. */
   scale: number;
 };
 
@@ -29,7 +29,7 @@ export function toSeries(buckets: ActivityBucket[]): Series {
     totals[OTHER] = ranked.slice(top.length).reduce((n, q) => n + totals[q], 0);
   }
   const total = ranked.reduce((n, q) => n + totals[q], 0);
-  return { keys, color, totals, total, scale: niceCeil(Math.max(5, ...buckets.map((b) => sum(b.counts)))) };
+  return { keys, color, totals, total, scale: niceCeil(Math.max(4, ...buckets.map((b) => sum(b.counts)))) };
 }
 
 export function countFor(b: ActivityBucket, key: string, keys: string[]): number {
@@ -39,11 +39,14 @@ export function countFor(b: ActivityBucket, key: string, keys: string[]): number
 
 export const sum = (counts: Record<string, number>) => Object.values(counts).reduce((a, b) => a + b, 0);
 
-/** 1, 2 or 5 × 10ⁿ, the first at or above n: the top of a chart's scale. */
+/**
+ * 1, 2, 4, 6 or 8 × 10ⁿ, the first at or above n: the top of a chart's scale.
+ * Even, so the gridline at half the scale is a whole number too (from 2 up).
+ */
 export function niceCeil(n: number): number {
   if (n <= 0) return 1;
   const p = 10 ** Math.floor(Math.log10(n));
-  return ([1, 2, 5, 10].find((m) => m * p >= n) ?? 10) * p;
+  return ([1, 2, 4, 6, 8, 10].find((m) => m * p >= n) ?? 10) * p;
 }
 
 /** Buckets per range (see /v1/activity), for placeholders before the data arrives. */

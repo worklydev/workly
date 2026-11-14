@@ -61,9 +61,8 @@ export function ActivityChart() {
         </>
       ) : (
         <>
-          <Detail data={data} series={series} index={hovered} per={per} />
-          {/* The dashed top line is the scale Detail labels. */}
-          <ChartFrame onMouseLeave={() => setHovered(undefined)}>
+          <Detail data={data} series={series} index={hovered} />
+          <ChartFrame scale={series.scale} onMouseLeave={() => setHovered(undefined)}>
             {data.buckets.map((b, i) => {
               const total = sum(b.counts);
               return (
@@ -128,18 +127,9 @@ export function ActivityChart() {
   );
 }
 
-/** The hovered bar's time and counts, or the scale, labelling the dashed line at the chart's top. */
-function Detail({ data, series, index, per }: { data: Activity; series: Series; index?: number; per: string }) {
-  if (index === undefined) {
-    return (
-      <div className="flex h-5 items-end justify-between text-xs text-faint">
-        <span />
-        <span className="font-mono tabular-nums">
-          {formatCount(series.scale)} per {per}
-        </span>
-      </div>
-    );
-  }
+/** The hovered bar's time and counts. */
+function Detail({ data, series, index }: { data: Activity; series: Series; index?: number }) {
+  if (index === undefined) return <div className="h-5" />;
   const b = data.buckets[index];
   const end = new Date(Date.parse(b.start) + data.bucket_seconds * 1000);
   return (

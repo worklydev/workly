@@ -10,36 +10,70 @@ import { cn } from 'cn';
  * would appear here and how to make it appear.
  */
 
+// Room on the left for the y-axis labels, kept on every chart, labelled or not, so plots line up and nothing jumps.
+const GUTTER = 'pl-9';
+
+const compact = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 });
+
 /**
- * The plot area: bars stand on a hairline baseline under a dashed top line,
- * which is the scale the chart labels above it.
+ * The plot area: bars stand on a hairline baseline, with dashed gridlines at
+ * half and full `scale`, labelled on the y-axis. Without a scale (loading,
+ * empty) the gridlines stay and the labels are left out.
  */
 export function ChartFrame({
   children,
   className,
+  scale,
   onMouseLeave,
 }: {
   children: ReactNode;
   className?: string;
+  /** The value at the top of the plot; see `niceCeil`. */
+  scale?: number;
   onMouseLeave?: () => void;
 }) {
   return (
-    <div
-      className={cn(
-        'relative flex h-28 items-end gap-px border-t border-b border-border border-t-transparent bg-[linear-gradient(to_right,var(--border)_50%,transparent_0)] bg-size-[6px_1px] bg-top bg-repeat-x',
-        className,
+    <div className={cn('relative', GUTTER)}>
+      {scale !== undefined && (
+        <div
+          aria-hidden
+          className="absolute inset-y-0 left-0 w-9 pr-2 text-right font-mono text-xs text-faint tabular-nums"
+        >
+          {[
+            [scale, 'top-0'],
+            [scale / 2, 'top-1/2'],
+            [0, 'top-full'],
+          ].map(([v, at]) => (
+            <span key={at} className={cn('absolute right-2 -translate-y-1/2 leading-none', at)}>
+              {compact.format(v as number)}
+            </span>
+          ))}
+        </div>
       )}
-      onMouseLeave={onMouseLeave}
-    >
-      {children}
+      <div
+        className={cn('relative flex h-28 items-end gap-px border-b border-border', className)}
+        style={GRIDLINES}
+        onMouseLeave={onMouseLeave}
+      >
+        {children}
+      </div>
     </div>
   );
 }
 
+// Dashed hairlines at the top and the middle, under the bars.
+const DASH = 'linear-gradient(to right, var(--border) 50%, transparent 0)';
+const GRIDLINES = {
+  backgroundImage: `${DASH}, ${DASH}`,
+  backgroundSize: '6px 1px',
+  backgroundPosition: '0 0, 0 50%',
+  backgroundRepeat: 'repeat-x',
+};
+
 /** Times under the chart: its start, middle and end. */
 export function ChartAxis({ ticks }: { ticks: ReactNode[] }) {
   return (
-    <div className="flex justify-between font-mono text-xs text-faint">
+    <div className={cn('flex justify-between font-mono text-xs text-faint', GUTTER)}>
       {ticks.map((t, i) => (
         <span key={i}>{t}</span>
       ))}
