@@ -307,6 +307,38 @@ describe('groups', () => {
     assert.equal(sent[1]?.url.search, '?status=running&cursor=c1&limit=1');
   });
 
+  test('enqueue creates, fills in batches and closes', async () => {
+    const batch = () => json({ results: [] }, 201);
+    const { fetch, sent } = fakeFetch(
+      json(group, 201),
+      batch(),
+      batch(),
+      batch(),
+      json({ ...group, status: 'running', total: 250 }),
+    );
+    const tasks = Array.from({ length: 249 }, () => ({ url: 'u' }));
+    const g = await new Workly({ fetch }).groups.enqueue('prices', [...tasks, { url: 'u', idempotencyKey: 'mine' }], {
+      idempotencyKey: 'run-1',
+    });
+    assert.deepEqual([g.status, g.total], ['running', 250]);
+    const batches = sent.slice(1, 4).map((r) => (r.body as { tasks: Record<string, unknown>[] }).tasks);
+    assert.deepEqual(
+      batches.map((b) => b.length),
+      [100, 100, 50],
+    );
+    assert.ok(batches.flat().every((t) => t.group_id === 'grp_1'));
+    assert.equal(batches[1]?.[0]?.idempotency_key, 'grp_1:100');
+    assert.equal(batches[2]?.at(-1)?.idempotency_key, 'mine');
+    assert.equal(`${sent[4]?.method} ${sent[4]?.url.pathname}`, 'POST /v1/groups/grp_1/close');
+  });
+
+  test('enqueue returns a group that is no longer open as it is', async () => {
+    const { fetch, sent } = fakeFetch(json({ ...group, status: 'succeeded' }));
+    const g = await new Workly({ fetch }).groups.enqueue('prices', [{ url: 'u' }], { idempotencyKey: 'run-1' });
+    assert.equal(g.status, 'succeeded');
+    assert.equal(sent.length, 1);
+  });
+
   test('create is retried only with a key', async () => {
     let { fetch, sent } = fakeFetch(json({}, 503), json(group, 201));
     await assert.rejects(new Workly({ fetch }).groups.create({ name: 'x' }));

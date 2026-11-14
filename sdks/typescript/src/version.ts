@@ -1,2 +1,2 @@
 // Kept in step with package.json; test/version.test.ts checks it.
-export const VERSION = '0.4.0';
+export const VERSION = '0.4.3';

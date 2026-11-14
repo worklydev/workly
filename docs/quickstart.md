@@ -12,6 +12,8 @@ curl -fsSL https://raw.githubusercontent.com/worklydev/workly/main/install.sh | 
 
 Binaries for Linux, macOS and Windows are also on the [releases page](https://github.com/worklydev/workly/releases). With Docker, `docker run -p 7337:7337 ghcr.io/worklydev/workly dev`.
 
+Versions go together by their first two numbers: any 0.4.x SDK or `workly` CLI works with any 0.4.x server. Each is released when it changes, so the last number differs between them, and an SDK at 0.4.0 next to a CLI and server at 0.4.2 is expected. workly.run runs the latest server. `workly --version` prints the CLI's.
+
 ## Run it
 
 ```sh

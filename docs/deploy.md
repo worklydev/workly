@@ -167,7 +167,7 @@ Plan for workly.yaml on https://api.workly.run:
 - Since enqueueing creates a queue, every queue your app enqueues to must be in the file, or the next deploy fails while it has work and deletes it when it hasn't.
 - Deletes happen after the creates and updates: schedules first, then workflows, then queues, so nothing left points at something gone.
 
-In CI, `deploy --yes` deletes without asking, so a queue or schedule removed from the file in a pull request is gone once it merges. Run `workly plan` on pull requests to see the deletes in review.
+In CI, `deploy --yes` deletes without asking, so a queue or schedule removed from the file in a pull request is gone once it merges. Run `workly plan` on pull requests, so the deletes are part of the review: see [Review the plan in pull requests](#review-the-plan-in-pull-requests).
 
 ## In CI
 
@@ -179,7 +179,7 @@ Deploy the file with your app. With GitHub Actions:
     curl -fsSL "https://raw.githubusercontent.com/worklydev/workly/$WORKLY_VERSION/install.sh" | sh
     workly deploy --yes
   env:
-    WORKLY_VERSION: v0.4.2   # pin the CLI, and bump it like any other dependency
+    WORKLY_VERSION: v0.4.3   # pin the CLI, and bump it like any other dependency
     WORKLY_URL: https://api.workly.run
     WORKLY_API_KEY: ${{ secrets.WORKLY_API_KEY }}
     API_URL: https://api.example.com
@@ -202,16 +202,49 @@ jobs:
           curl -fsSL "https://raw.githubusercontent.com/worklydev/workly/$WORKLY_VERSION/install.sh" | sh
           workly deploy --yes
         env:
-          WORKLY_VERSION: v0.4.2
+          WORKLY_VERSION: v0.4.3
           WORKLY_URL: https://api.workly.run
           WORKLY_API_KEY: ${{ secrets.WORKLY_API_KEY }}
 ```
 
 The environment's name is whatever your host calls it (Vercel's is `Production`).
 
-In a Python project, `workly-cli==0.4.2` in your dev or CI requirements installs the same pinned binary with `pip` (it's what `workly[cli]` pulls in).
+GitHub starts this workflow for every status the host reports, not only the last one. Railway, for example, reports `in_progress` when a deploy starts and `success` when it's done, so each deploy starts two runs: the first shows as skipped in the Actions tab, and the one for `success` is the one that deploys.
+
+In a Python project, `workly-cli==0.4.3` in your dev or CI requirements installs the same pinned binary with `pip` (it's what `workly[cli]` pulls in).
 
 Run `workly validate` in pull requests to catch mistakes before they merge; it needs no server or API key, only the environment variables the file uses.
+
+### Review the plan in pull requests
+
+`workly plan` shows what merging would change. `--format markdown` writes it for a pull request comment or the job's summary page, with deletes called out at the top, and `--detailed-exitcode` exits 0 when nothing would change, 2 when something would, and 3 when that includes deletes (errors exit 1, as always). With GitHub Actions:
+
+```yaml
+on: pull_request
+
+jobs:
+  workly-plan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Plan Workly configuration
+        run: |
+          curl -fsSL "https://raw.githubusercontent.com/worklydev/workly/$WORKLY_VERSION/install.sh" | sh
+          code=0
+          workly plan --format markdown --detailed-exitcode >> "$GITHUB_STEP_SUMMARY" || code=$?
+          # 0: no changes, 2: changes, 3: changes that delete something.
+          if [ "$code" = 3 ]; then
+            echo "::warning::This pull request deletes queues, workflows or schedules on merge. See the plan in the job summary."
+          elif [ "$code" != 0 ] && [ "$code" != 2 ]; then
+            exit "$code"
+          fi
+        env:
+          WORKLY_VERSION: v0.4.3
+          WORKLY_URL: https://api.workly.run
+          WORKLY_API_KEY: ${{ secrets.WORKLY_API_KEY }}
+```
+
+To make a pull request that deletes something wait for a closer look, fail the step on 3 instead (`exit 1`) and make the check required.
 
 For environments that differ by more than a few values, keep a file per environment and pick one with `--file`:
 

@@ -69,22 +69,53 @@ their default.`,
 	return cmd
 }
 
+// Exit statuses of plan --detailed-exitcode, as Terraform's: 1 stays an
+// error.
+const (
+	exitChanges = 2
+	exitDeletes = 3
+)
+
 func planCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "plan",
 		Short: "Show what workly deploy would change",
-		Args:  cobra.NoArgs,
+		Long: `Show what workly deploy would change, without changing anything.
+
+--format markdown writes the plan for a pull request comment or GitHub's
+step summary ($GITHUB_STEP_SUMMARY). --detailed-exitcode exits 0 when
+there's nothing to change, 2 when there are changes, and 3 when they
+include deletes, so CI can ask for a closer look; errors exit 1.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			format, _ := cmd.Flags().GetString("format")
+			if format != "text" && format != "markdown" {
+				return fmt.Errorf("--format must be text or markdown, not %q", format)
+			}
 			f, _, plan, err := makePlan(cmd)
 			if err != nil {
 				return err
 			}
-			printPlan(cmd.OutOrStdout(), cmd, f, plan)
+			if format == "markdown" {
+				printPlanMarkdown(cmd.OutOrStdout(), cmd, f, plan)
+			} else {
+				printPlan(cmd.OutOrStdout(), cmd, f, plan)
+			}
+			if detailed, _ := cmd.Flags().GetBool("detailed-exitcode"); detailed {
+				switch {
+				case plan.Count(deploy.Delete) > 0:
+					return exitCode(exitDeletes)
+				case plan.Count(deploy.Create)+plan.Count(deploy.Update) > 0:
+					return exitCode(exitChanges)
+				}
+			}
 			return nil
 		},
 	}
 	addFileFlag(cmd)
 	addServerFlags(cmd.Flags())
+	cmd.Flags().String("format", "text", "text, or markdown for a pull request or GitHub's step summary")
+	cmd.Flags().Bool("detailed-exitcode", false, "exit 2 when there are changes, 3 when they include deletes")
 	return cmd
 }
 
@@ -207,11 +238,7 @@ func printPlan(w io.Writer, cmd *cobra.Command, f *deploy.File, plan deploy.Plan
 					fmt.Fprintf(w, "      %s: %s\n", d.Field, d.Change)
 				}
 			case deploy.Delete:
-				failed := ""
-				if ch.Failed > 0 {
-					failed = fmt.Sprintf(" (and its %d failed %s)", ch.Failed, plural(ch.Failed, "task"))
-				}
-				fmt.Fprintf(w, "  - delete %s %s%s\n", ch.Kind, ch.Name, failed)
+				fmt.Fprintf(w, "  - delete %s %s%s\n", ch.Kind, ch.Name, failedTasks(ch))
 			}
 		}
 		fmt.Fprintf(w, "\n%s.\n", summary(plan, true))
@@ -225,6 +252,91 @@ func printPlan(w io.Writer, cmd *cobra.Command, f *deploy.File, plan deploy.Plan
 		fmt.Fprintf(w, "\nNot in %s, left as they are: %s %s.\n", f.Path,
 			plural(len(plan.Undeclared), "schedule"), strings.Join(plan.Undeclared, ", "))
 	}
+}
+
+// printPlanMarkdown writes the plan as GitHub-flavoured Markdown. Deletes
+// come first, in a warning, since they're what a reviewer must not miss.
+func printPlanMarkdown(w io.Writer, cmd *cobra.Command, f *deploy.File, plan deploy.Plan) {
+	creates, updates, deletes := plan.Count(deploy.Create), plan.Count(deploy.Update), plan.Count(deploy.Delete)
+	fmt.Fprintf(w, "### Workly plan\n\n")
+	if creates+updates+deletes == 0 {
+		fmt.Fprintf(w, "No changes: %s matches %s (%d unchanged).\n",
+			mdCode(serverURL(cmd)), mdCode(f.Path), plan.Count(deploy.Unchanged))
+	} else {
+		fmt.Fprintf(w, "%s on %s: %s.\n", mdCode(f.Path), mdCode(serverURL(cmd)), summary(plan, true))
+		if deletes > 0 {
+			fmt.Fprintf(w, "\n> [!WARNING]\n> Deploying this deletes these, with their tasks and runs. It can't be undone.\n")
+			for _, ch := range plan.Changes {
+				if ch.Action == deploy.Delete {
+					fmt.Fprintf(w, "> - %s %s%s\n", ch.Kind, mdCode(ch.Name), failedTasks(ch))
+				}
+			}
+		}
+		fmt.Fprintln(w)
+		for _, ch := range plan.Changes {
+			switch ch.Action {
+			case deploy.Create:
+				fmt.Fprintf(w, "- **create** %s %s\n", ch.Kind, mdCode(ch.Name))
+			case deploy.Update:
+				paused := ""
+				if ch.Paused {
+					paused = " (paused, stays paused)"
+				}
+				fmt.Fprintf(w, "- **update** %s %s%s\n", ch.Kind, mdCode(ch.Name), paused)
+				for _, d := range ch.Diffs {
+					fmt.Fprintf(w, "  - %s: %s\n", d.Field, mdChange(d.Change))
+				}
+			case deploy.Delete:
+				fmt.Fprintf(w, "- **delete** %s %s%s\n", ch.Kind, mdCode(ch.Name), failedTasks(ch))
+			}
+		}
+	}
+	if len(f.Defaults) > 0 {
+		var buf strings.Builder
+		printDefaults(&buf, f)
+		fmt.Fprintf(w, "\n<details><summary>Defaults used</summary>\n\n```%s```\n</details>\n", buf.String())
+	}
+	for _, u := range []struct {
+		names []string
+		kind  string
+	}{{plan.UndeclaredWorkflows, "workflow"}, {plan.Undeclared, "schedule"}} {
+		if len(u.names) > 0 {
+			quoted := make([]string, len(u.names))
+			for i, n := range u.names {
+				quoted[i] = mdCode(n)
+			}
+			fmt.Fprintf(w, "\nNot in %s, left as they are: %s %s.\n", mdCode(f.Path), plural(len(u.names), u.kind), strings.Join(quoted, ", "))
+		}
+	}
+}
+
+func failedTasks(ch deploy.Change) string {
+	if ch.Failed == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (and its %d failed %s)", ch.Failed, plural(ch.Failed, "task"))
+}
+
+// mdChange formats a Diff's change: "old → new" as two code spans, and the
+// words that stand in for secret values ("changed") as they are.
+func mdChange(change string) string {
+	if before, after, ok := strings.Cut(change, " → "); ok {
+		return mdCode(before) + " → " + mdCode(after)
+	}
+	return change
+}
+
+// mdCode puts s in a code span, with enough backticks that none in s ends
+// it early.
+func mdCode(s string) string {
+	fence := "`"
+	for strings.Contains(s, fence) {
+		fence += "`"
+	}
+	if strings.HasPrefix(s, "`") || strings.HasSuffix(s, "`") {
+		return fence + " " + s + " " + fence
+	}
+	return fence + s + fence
 }
 
 // summary counts a plan's changes: "1 to create, 2 to update, 3 unchanged"

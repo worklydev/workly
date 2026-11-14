@@ -393,6 +393,37 @@ class AsyncGroups:
         req = r.create_group(name, idempotency_key, on_complete)
         return Group._from_json(await self._client._send(req))
 
+    async def enqueue(
+        self,
+        queue: str,
+        tasks: Iterable[r.TaskSpec],
+        *,
+        name: str | None = None,
+        idempotency_key: str | None = None,
+        on_complete: Callback | r.CallbackDict | None = None,
+        traceparent: str | None = None,
+    ) -> Group:
+        """Create a group, enqueue `tasks` into it and close it: the whole job in one call.
+
+        Tasks go in batches of 100, each joining the group. Returns the closed
+        group, which completes (and enqueues `on_complete`) once its tasks
+        have finished.
+
+        Safe to retry with the same `idempotency_key` and tasks: the group is
+        found again instead of created, a task without its own
+        `idempotency_key` gets one from the group and its position so none is
+        enqueued twice, and a group that is already closed is returned as it
+        is. Without `idempotency_key`, a retry starts a second group.
+        """
+        group = await self.create(
+            name=name, idempotency_key=idempotency_key, on_complete=on_complete
+        )
+        if group.status != "open":
+            return group
+        for batch in r.group_batches(group.id, tasks):
+            await self._client.tasks.enqueue_many(queue, batch, traceparent=traceparent)
+        return await self.close(group.id)
+
     async def get(self, group_id: str) -> Group:
         return Group._from_json(await self._client._send(r.get_group(group_id)))
 

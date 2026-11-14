@@ -416,3 +416,29 @@ def test_workflows(client: workly.Workly, server_url: str) -> None:
     client.workflows.delete(name)
     with pytest.raises(workly.NotFoundError):
         client.workflows.get(name)
+
+
+def test_groups_enqueue(client: workly.Workly, server_url: str, queue: str) -> None:
+    url = f"{server_url}/_dev/echo"
+    tasks: list[workly.TaskSpec] = [{"url": url, "payload": {"i": i}} for i in range(250)]
+
+    def crashing() -> Iterator[workly.TaskSpec]:
+        # The process dies after the first batch went in, before the group closed.
+        yield from tasks[:150]
+        raise RuntimeError("crashed")
+
+    key = f"prices-{queue}"
+    with pytest.raises(RuntimeError):
+        client.groups.enqueue(queue, crashing(), name=key, idempotency_key=key)
+    open_group = next(client.groups.list(name=key))
+    assert (open_group.status, open_group.total) == ("open", 100)
+
+    # Retrying the whole call finishes the job without enqueueing anything twice.
+    group = client.groups.enqueue(queue, tasks, name=key, idempotency_key=key)
+    assert group.id == open_group.id
+    assert group.status in ("running", "succeeded")
+    assert group.total == 250
+
+    # Once closed, another retry changes nothing.
+    again = client.groups.enqueue(queue, tasks, name=key, idempotency_key=key)
+    assert (again.id, again.total) == (group.id, 250)

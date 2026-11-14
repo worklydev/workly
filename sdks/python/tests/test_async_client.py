@@ -1,5 +1,6 @@
 """The async client shares request building with the sync one; these check the async plumbing."""
 
+import json
 from typing import Any
 
 import httpx
@@ -162,3 +163,45 @@ async def test_workflows() -> None:
         "/v1/workflow-runs",
         "/v1/workflow-runs/wfr_1",
     ]
+
+
+async def test_groups_enqueue() -> None:
+    group = {
+        "id": "grp_1",
+        "status": "open",
+        "total": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "cancelled": 0,
+        "remaining": 0,
+        "created_at": "2026-10-19T10:00:00Z",
+    }
+    batches: list[list[dict[str, Any]]] = []
+    closed: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path.endswith("/tasks:batch"):
+            tasks = json.loads(req.content)["tasks"]
+            batches.append(tasks)
+            return httpx.Response(201, json={"results": []})
+        if req.url.path.endswith("/close"):
+            closed.append(req.url.path)
+            return httpx.Response(200, json={**group, "status": "running", "total": 250})
+        return httpx.Response(200, json=group)
+
+    c = client(handler)
+    tasks: list[workly.TaskSpec] = [{"url": "https://example.com/t"} for _ in range(249)]
+    tasks.append({"url": "https://example.com/t", "idempotency_key": "mine"})
+    got = await c.groups.enqueue("prices", tasks, idempotency_key="run-1")
+    assert (got.status, got.total) == ("running", 250)
+    assert [len(b) for b in batches] == [100, 100, 50]
+    assert all(t["group_id"] == "grp_1" for b in batches for t in b)
+    assert batches[1][0]["idempotency_key"] == "grp_1:100"
+    assert batches[2][-1]["idempotency_key"] == "mine"
+    assert closed == ["/v1/groups/grp_1/close"]
+
+    # A group that's no longer open is returned as it is.
+    group["status"] = "succeeded"
+    batches.clear()
+    assert (await c.groups.enqueue("prices", tasks, idempotency_key="run-1")).status == "succeeded"
+    assert batches == []
