@@ -22,20 +22,20 @@ Live reference: **`/design`** in the dashboard (`src/pages/DesignPage.tsx`). Tok
 
 ## Tokens
 
-| token                                 | dark                   | light            | use                                           |
-| ------------------------------------- | ---------------------- | ---------------- | --------------------------------------------- |
-| `background`                          | oklch(0.19 0 0)        | oklch(0.985 0 0) | sidebar, header                               |
-| `surface`                             | oklch(0.235 0.0015 17) | 0.993            | main content area                             |
-| `card`                                | 0.26                   | 0.96             | cards, inputs, secondary buttons, code panels |
-| `muted`                               | 0.295                  | 0.96             | hover, active nav, neutral badge              |
-| `border`                              | white 7%               | black 8%         | hairlines                                     |
-| `input`                               | white 10%              | black 12%        | control borders                               |
-| `foreground`                          | 0.93                   | 0.21             | primary text                                  |
-| `muted-foreground`                    | 0.65                   | 0.5              | secondary text, table headers                 |
-| `faint`                               | 0.5                    | 0.65             | meta, placeholders, icons                     |
-| `primary`                             | orange                 | orange (darker)  | accent                                        |
-| `success` / `warning` / `destructive` | green / yellow / red   |                  | status tints                                  |
-| `warning-fill`                        | = warning              | brighter yellow  | warning as a solid mark (run bars)            |
+| token                                 | dark                 | light            | use                                           |
+| ------------------------------------- | -------------------- | ---------------- | --------------------------------------------- |
+| `background`                          | oklch(0.22 0 0)      | oklch(0.985 0 0) | sidebar, header                               |
+| `surface`                             | 0.25                 | 0.993            | main content area                             |
+| `card`                                | 0.275                | 0.96             | cards, inputs, secondary buttons, code panels |
+| `muted`                               | 0.3                  | 0.96             | hover, active nav, neutral badge              |
+| `border`                              | white 10%            | black 8%         | hairlines                                     |
+| `input`                               | white 14%            | black 12%        | control borders                               |
+| `foreground`                          | 0.94                 | 0.21             | primary text                                  |
+| `muted-foreground`                    | 0.71                 | 0.5              | secondary text, table headers                 |
+| `faint`                               | 0.55                 | 0.65             | meta, placeholders, icons                     |
+| `primary`                             | orange               | orange (darker)  | accent                                        |
+| `success` / `warning` / `destructive` | green / yellow / red |                  | status tints                                  |
+| `warning-fill`                        | = warning            | brighter yellow  | warning as a solid mark (run bars)            |
 
 ## Type scale
 
