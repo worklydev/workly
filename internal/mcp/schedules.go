@@ -30,7 +30,7 @@ const recentRuns = 10
 const workflowScheduleNote = `A schedule with workflow (url null) sends no HTTP request: each run only starts a workflow run, so the run succeeds as soon as the workflow run has started, last_status is null, and last_duration_ms is the time it took to start it. Its workflow_run_status says whether the workflow run (workflow_run_id; get_workflow_run shows it) is still running or how it ended. With overlap "skip", a slot is skipped while the workflow run started by the previous one is still running.`
 
 var listSchedules = newTool("list_schedules", "List schedules",
-	"All schedules, in summary: cron expression and timezone, what each runs (url, or workflow for a schedule that starts a workflow run; the other is null), whether it is paused (and since when, paused_at, null while it runs), when it next runs (next_run_at, null while paused) and how its latest run went (last_run, null before the first; for a workflow schedule, its workflow_run_status says how the workflow run it started is going). Use get_schedule for a schedule's request, retry policy and recent runs. Schedules are separate from queues; their calls are runs, not tasks.",
+	"All schedules, in summary: cron expression and timezone, what each runs (url, or workflow for a schedule that starts a workflow run; the other is null), whether it is paused (and since when, paused_at, null while it runs), when it next runs (next_run_at, with the schedule's UTC offset; null while paused) and how its latest run went (last_run, null before the first; for a workflow schedule, its workflow_run_status says how the workflow run it started is going). Use get_schedule for a schedule's request, retry policy and recent runs. Schedules are separate from queues; their calls are runs, not tasks.",
 	object(map[string]any{}), readOnly,
 	func(ctx context.Context, api apiClient, _ struct{}) (any, error) {
 		var out struct {
@@ -48,6 +48,7 @@ var listSchedules = newTool("list_schedules", "List schedules",
 // scheduleOverview is what list_schedules shows of a schedule.
 func scheduleOverview(s map[string]any) map[string]any {
 	scheduleTarget(s)
+	localSlots(s, slotKeys...)
 	out := map[string]any{}
 	for _, k := range []string{"name", "cron", "timezone", "url", "workflow", "paused", "paused_at", "next_run_at", "last_run"} {
 		out[k] = s[k]
@@ -59,24 +60,37 @@ func scheduleOverview(s map[string]any) map[string]any {
 func scheduleDetail(s map[string]any) map[string]any {
 	truncateBody(s)
 	scheduleTarget(s)
-	localSlots(s, "next_runs", "next_runs_if_resumed")
+	localSlots(s, slotKeys...)
 	return withNulls(s, "paused_at", "next_run_at", "last_run", "payload", "body", "on_complete")
 }
 
-// localSlots rewrites the slot lists at keys with the schedule's UTC offset,
-// e.g. 2026-11-22T02:30:00+01:00 for Europe/Stockholm: the same instants, in
-// the time the cron expression is read in, so it is easier to check.
+// slotKeys are a schedule's upcoming slots, which tools give with the
+// schedule's UTC offset.
+var slotKeys = []string{"next_run_at", "next_runs", "next_runs_if_resumed"}
+
+// localSlots rewrites the slots at keys, a time or a list of them, with the
+// schedule's UTC offset, e.g. 2026-11-22T02:30:00+01:00 for Europe/Stockholm:
+// the same instants, in the time the cron expression is read in, so it is
+// easier to check.
 func localSlots(s map[string]any, keys ...string) {
 	tz, _ := s["timezone"].(string)
 	loc, err := time.LoadLocation(tz)
 	if err != nil {
 		return
 	}
+	local := func(v any) any {
+		if t := timeValue(v); !t.IsZero() {
+			return t.In(loc).Format(time.RFC3339)
+		}
+		return v
+	}
 	for _, k := range keys {
-		slots, _ := s[k].([]any)
-		for i, v := range slots {
-			if t := timeValue(v); !t.IsZero() {
-				slots[i] = t.In(loc).Format(time.RFC3339)
+		switch v := s[k].(type) {
+		case string:
+			s[k] = local(v)
+		case []any:
+			for i := range v {
+				v[i] = local(v[i])
 			}
 		}
 	}
@@ -105,7 +119,7 @@ func scheduleTarget(s map[string]any) {
 }
 
 var getSchedule = newTool("get_schedule", "Get schedule",
-	`A schedule's settings, its next five slots (next_runs, with the schedule's UTC offset, e.g. 02:30:00+01:00 for Europe/Stockholm) and its most recent runs, newest first. A paused schedule has paused_at (when it was paused; null while it runs), next_run_at null and empty next_runs; next_runs_if_resumed are the slots it would run at if resumed now. A "skipped" run was not delivered: skip_reason "overlap" means the previous run was still going, "missed" that the server was down at that time. `+workflowScheduleNote+` Start here to find out why a scheduled job didn't run or failed.`,
+	`A schedule's settings, its next five slots (next_runs; next_run_at, next_runs and next_runs_if_resumed carry the schedule's UTC offset, e.g. 02:30:00+01:00 for Europe/Stockholm) and its most recent runs, newest first. A paused schedule has paused_at (when it was paused; null while it runs), next_run_at null and empty next_runs; next_runs_if_resumed are the slots it would run at if resumed now. A "skipped" run was not delivered: skip_reason "overlap" means the previous run was still going, "missed" that the server was down at that time. `+workflowScheduleNote+` Start here to find out why a scheduled job didn't run or failed.`,
 	object(map[string]any{"schedule": scheduleProp}, "schedule"), readOnly,
 	func(ctx context.Context, api apiClient, args struct {
 		Schedule string `json:"schedule"`

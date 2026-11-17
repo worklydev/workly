@@ -107,7 +107,7 @@ Read tools (marked read-only, so clients can run them without asking):
 | `wait_for_task` | Waits for an attempt since the task was enqueued or retried, and returns how the latest went, with whether the task has finished or will be retried. Returns at once with the reason if its queue is paused or it isn't due before the wait would end |
 | `list_groups` | [Task groups](groups.md), newest first, with their status and counts, by status and name |
 | `get_group` | One group: its counts, its most recently failed tasks and its callback task |
-| `list_schedules` | All [schedules](schedules.md) in summary: cron, timezone, URL, paused (and since when), next run and how the last one went |
+| `list_schedules` | All [schedules](schedules.md) in summary: cron, timezone, URL, paused (and since when), next run (with the schedule's UTC offset) and how the last one went |
 | `get_schedule` | One schedule, its next five times (with the schedule's UTC offset) and its recent runs, including skipped ones and why. A paused schedule's times are `next_runs_if_resumed` |
 | `list_runs` | Runs of one schedule or of all of them, newest first, optionally by state |
 | `get_run` | A run with its attempts |

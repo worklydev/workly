@@ -611,6 +611,12 @@ func TestMCPSchedules(t *testing.T) {
 		t.Errorf("unknown setting = %q", text)
 	}
 	// Slots carry the schedule's offset, so they read in its timezone.
+	if sc["next_run_at"] != sc["next_runs"].([]any)[0] {
+		t.Errorf("next_run_at %v, next_runs[0] %v", sc["next_run_at"], sc["next_runs"].([]any)[0])
+	}
+	if s := c.call("list_schedules", nil)["schedules"].([]any)[0].(map[string]any); s["next_run_at"] != sc["next_run_at"] {
+		t.Errorf("list_schedules next_run_at = %v, want %v", s["next_run_at"], sc["next_run_at"])
+	}
 	for _, slot := range sc["next_runs"].([]any) {
 		if s := slot.(string); !strings.HasSuffix(s, "+01:00") && !strings.HasSuffix(s, "+02:00") {
 			t.Errorf("next_runs slot %q isn't in Europe/Stockholm", s)
