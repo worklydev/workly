@@ -3,7 +3,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
 import { client } from './api/client.gen';
 import { apiKeyAuth, type Auth } from './auth';
-import { SlotsContext, type GettingStarted, type NavItem } from './context';
+import { SlotsContext, type Examples, type GettingStarted, type NavItem } from './context';
+import { Toaster } from './primitives/toast';
 import { errorCode } from './lib/api';
 import { useLiveUpdates } from './lib/live';
 import { AppShell } from './components/AppShell';
@@ -46,6 +47,12 @@ export type DashboardProps = {
    */
   gettingStarted?: GettingStarted;
   /**
+   * Where the empty states' code examples (Queues, Tasks, Workflows) point:
+   * the API's URL, an endpoint for a first task, and whether an API key is
+   * needed. Defaults to this server as `workly dev` runs it.
+   */
+  examples?: Examples;
+  /**
    * Name the server's settings (e.g. WORKLY_RETENTION) where they explain a
    * limit. Defaults to true; a hosted build, whose users can't set them,
    * turns it off.
@@ -68,6 +75,7 @@ export function Dashboard({
   header,
   banner,
   gettingStarted,
+  examples,
   serverSettings = true,
   queryClient,
 }: DashboardProps) {
@@ -101,31 +109,33 @@ export function Dashboard({
   return (
     <QueryClientProvider client={queries}>
       <LiveUpdates />
-      <SlotsContext value={{ nav, header, banner, gettingStarted, serverSettings }}>
+      <SlotsContext value={{ nav, header, banner, gettingStarted, examples, serverSettings }}>
         <BrowserRouter basename={basename}>
-          <Routes>
-            <Route path="design" element={<DesignPage />} />
-            <Route element={<AppShell />}>
-              <Route index element={<Navigate to="home" replace />} />
-              <Route path="home" element={<HomePage />} />
-              <Route path="queues" element={<QueuesPage />} />
-              <Route path="queues/:queue" element={<QueuePage />} />
-              <Route path="tasks" element={<TasksPage />} />
-              <Route path="tasks/:id" element={<TaskPage />} />
-              <Route path="groups" element={<GroupsPage />} />
-              <Route path="groups/:id" element={<GroupPage />} />
-              <Route path="failures" element={<FailuresPage />} />
-              <Route path="schedules" element={<SchedulesPage />} />
-              <Route path="schedules/:schedule" element={<SchedulePage />} />
-              <Route path="runs/:id" element={<RunPage />} />
-              <Route path="workflows" element={<WorkflowsPage />} />
-              <Route path="workflows/:workflow" element={<WorkflowPage />} />
-              <Route path="workflow-runs/:id" element={<WorkflowRunPage />} />
-              <Route path="alerts" element={<AlertsPage />} />
-              {routes}
-              <Route path="*" element={<NotFoundPage />} />
-            </Route>
-          </Routes>
+          <Toaster>
+            <Routes>
+              <Route path="design" element={<DesignPage />} />
+              <Route element={<AppShell />}>
+                <Route index element={<Navigate to="home" replace />} />
+                <Route path="home" element={<HomePage />} />
+                <Route path="queues" element={<QueuesPage />} />
+                <Route path="queues/:queue" element={<QueuePage />} />
+                <Route path="tasks" element={<TasksPage />} />
+                <Route path="tasks/:id" element={<TaskPage />} />
+                <Route path="groups" element={<GroupsPage />} />
+                <Route path="groups/:id" element={<GroupPage />} />
+                <Route path="failures" element={<FailuresPage />} />
+                <Route path="schedules" element={<SchedulesPage />} />
+                <Route path="schedules/:schedule" element={<SchedulePage />} />
+                <Route path="runs/:id" element={<RunPage />} />
+                <Route path="workflows" element={<WorkflowsPage />} />
+                <Route path="workflows/:workflow" element={<WorkflowPage />} />
+                <Route path="workflow-runs/:id" element={<WorkflowRunPage />} />
+                <Route path="alerts" element={<AlertsPage />} />
+                {routes}
+                <Route path="*" element={<NotFoundPage />} />
+              </Route>
+            </Routes>
+          </Toaster>
         </BrowserRouter>
       </SlotsContext>
     </QueryClientProvider>

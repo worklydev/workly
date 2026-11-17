@@ -30,6 +30,7 @@ import { formatRunsPerMonth, useRunsPerMonth } from '../../hooks/useRunsPerMonth
 import { Badge } from '../../primitives/badge';
 import { Button } from '../../primitives/button';
 import { Tabs, TabsList, TabsTab } from '../../primitives/tabs';
+import { useToast } from '../../hooks/useToast';
 import { EditSchedule } from './EditSchedule';
 import { RecentRuns } from './RecentRuns';
 import { runPaging } from '../../lib/runs';
@@ -170,7 +171,23 @@ function ScheduleActions({ schedule }: { schedule: Schedule }) {
   const onSuccess = () => qc.invalidateQueries();
   const pause = useMutation({ ...pauseScheduleMutation(), onSuccess });
   const resume = useMutation({ ...resumeScheduleMutation(), onSuccess });
-  const trigger = useMutation({ ...triggerScheduleMutation(), onSuccess });
+  const toast = useToast();
+  const from = useFromHere();
+  const trigger = useMutation({
+    ...triggerScheduleMutation(),
+    onSuccess: (run) => {
+      toast.show({
+        title: 'Run started',
+        description: (
+          <Link to={`/runs/${run.id}`} state={from} className="font-mono underline underline-offset-4">
+            {run.id}
+          </Link>
+        ),
+      });
+      return onSuccess();
+    },
+    onError: (err) => toast.error('Could not start a run', errorMessage(err)),
+  });
   const navigate = useNavigate();
   const remove = useMutation({
     ...deleteScheduleMutation(),
@@ -180,22 +197,13 @@ function ScheduleActions({ schedule }: { schedule: Schedule }) {
       return qc.invalidateQueries();
     },
   });
-  const from = useFromHere();
   const path = { path: { schedule: schedule.name } };
-  const error = pause.error ?? resume.error ?? trigger.error ?? remove.error;
+  const error = pause.error ?? resume.error ?? remove.error;
   const [editing, setEditing] = useState(false);
 
   return (
     <>
       {error && <span className="text-xs text-destructive">{errorMessage(error)}</span>}
-      {trigger.data && (
-        <span className="text-xs text-muted-foreground">
-          Started{' '}
-          <Link to={`/runs/${trigger.data.id}`} state={from} className="font-mono underline underline-offset-4">
-            {trigger.data.id}
-          </Link>
-        </span>
-      )}
       <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>
         <Pencil />
         Edit

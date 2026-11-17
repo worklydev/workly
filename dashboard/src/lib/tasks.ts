@@ -5,6 +5,8 @@ export type TaskPages = {
   data?: { pages: TaskList[] };
   error: unknown;
   isPending: boolean;
+  /** Showing the previous filter's rows while the new ones load. */
+  isPlaceholderData?: boolean;
   hasNextPage: boolean;
   isFetchingNextPage: boolean;
   fetchNextPage: () => Promise<unknown>;

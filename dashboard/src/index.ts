@@ -2,7 +2,7 @@
 // '@workly/dashboard/index.css' once as well.
 export { Dashboard, type DashboardProps } from './Dashboard';
 export { apiKeyAuth, type Auth } from './auth';
-export type { GettingStarted, NavItem } from './context';
+export type { Examples, GettingStarted, NavItem } from './context';
 export { PageHeader } from './components/PageHeader';
 export { CodePanel } from './components/CodePanel';
 export { ChartAxis, ChartFrame } from './components/Chart';

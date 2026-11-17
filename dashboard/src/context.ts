@@ -9,8 +9,24 @@ export type Slots = {
   header?: ReactNode;
   banner?: ReactNode;
   gettingStarted?: GettingStarted;
+  examples?: Examples;
   /** False hides server settings (environment variables) from explanations; see <Dashboard>. */
   serverSettings?: boolean;
+};
+
+/**
+ * Where the empty states' code examples point. Defaults to this server, with
+ * no API key and `workly dev`'s echo endpoint as the target.
+ */
+export type Examples = {
+  /** The API's base URL, which the SDKs read from WORKLY_URL. */
+  apiUrl: string;
+  /** A URL that answers any request, for a first task to call. */
+  echoUrl: string;
+  /** Whether requests need WORKLY_API_KEY. */
+  apiKey: boolean;
+  /** Shown before the examples, e.g. where to get an API key. */
+  setup?: ReactNode;
 };
 
 /** What the Queues and Schedules pages show while there are none. */

@@ -54,8 +54,13 @@ export const BARS: Record<Range, number> = { '1h': 12, '24h': 24, '7d': 28 };
 
 export const RANGE_SECONDS: Record<Range, number> = { '1h': 3600, '24h': 86_400, '7d': 7 * 86_400 };
 
-const time = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' });
-const dayTime = new Intl.DateTimeFormat(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+const time = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+const dayTime = new Intl.DateTimeFormat(undefined, {
+  weekday: 'short',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
 
 // Beyond an hour the axis spans two days or more, so its times need the day.
 export function tick(iso: string, range: Range) {

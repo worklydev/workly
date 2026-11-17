@@ -143,11 +143,19 @@ function byDate(cron: string): boolean {
 
 const formats = new Map<string, Intl.DateTimeFormat>();
 
-/** A time of day in the schedule's timezone: "03:30" or "3:30 AM", as the viewer's locale writes it. */
+/** A time of day in the schedule's timezone, on a 24-hour clock: "03:30". */
 function clock(t: number, zone: string): string {
   let f = formats.get(zone);
   if (!f)
-    formats.set(zone, (f = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', timeZone: zone })));
+    formats.set(
+      zone,
+      (f = new Intl.DateTimeFormat(undefined, {
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+        timeZone: zone,
+      })),
+    );
   return f.format(t);
 }
 
@@ -157,6 +165,7 @@ function zonedDate(iso: string, zone: string): string {
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    hourCycle: 'h23',
     timeZone: zone,
   }).format(new Date(iso));
 }
