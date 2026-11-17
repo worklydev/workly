@@ -65,7 +65,7 @@ const task = await workly.tasks.enqueue('emails', {
 });
 ```
 
-Tasks can also be delayed, deduplicated with an idempotency key, and given their own retries and timeout: see the SDK READMEs.
+Tasks can also be delayed, deduplicated with an idempotency key, and given their own retries and timeout: the [Python](../sdks/python/README.md#tasks) and [TypeScript](../sdks/typescript/README.md#tasks) SDK pages cover every option.
 
 ## Handle it
 

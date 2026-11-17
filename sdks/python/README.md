@@ -216,6 +216,51 @@ client.schedules.put(
 
 The summary arrives as the callback task's JSON body: `task_id`, `queue`, `state`, `attempt_count`, `last_status`, `last_error` and `finished_at` for a task; `run_id`, `schedule` and the same outcome fields for a run.
 
+## Workflows
+
+A workflow is a DAG of HTTP steps: each step is delivered as a task once the steps in its `depends_on` have succeeded, and a failed step stops the run. Most workflows live in a `workly.yaml` and are applied with `workly deploy`; `put` does the same from code, declaratively. See [Workflows](https://workly.run/docs/workflows/).
+
+```python
+client.workflows.put(
+    "daily-refresh",
+    steps=[
+        {"name": "prices", "url": "https://api.example.com/jobs/prices"},
+        {"name": "fx", "url": "https://api.example.com/jobs/fx"},
+        {
+            "name": "analytics",
+            "url": "https://api.example.com/jobs/analytics",
+            "depends_on": ["prices", "fx"],
+        },
+    ],
+)
+
+run = client.workflows.trigger(
+    "daily-refresh", input={"date": "2026-11-13"}, idempotency_key="refresh-2026-11-13"
+)
+run = client.workflow_runs.get(run.id)
+for step in run.steps:
+    print(step.name, step.status, step.blocked_by, step.error)
+
+for run in client.workflow_runs.list(workflow="daily-refresh", status="failed"):
+    client.workflow_runs.retry(run.id)  # its failed and skipped steps run again
+client.workflow_runs.cancel(run.id)  # steps not yet started are skipped
+```
+
+A step without `payload` or `body` is sent the run's context as JSON, with `input`. A step can also wait for a task group: its endpoint answers 2xx with `Workly-Wait-For: group/<id>`, and the step finishes when the group does.
+
+## Alerts
+
+Alert channels get an email or a Slack message when tasks or schedule runs fail: within about a minute, then at most one every 30 minutes per queue or schedule. See [Alerts](https://workly.run/docs/alerts/).
+
+```python
+channel = client.alerts.create(
+    "slack", "https://hooks.slack.com/services/..."
+)  # or "email", "ops@example.com"
+client.alerts.test(channel.id)  # send a test alert now
+print(client.alerts.list().channels)
+client.alerts.delete(channel.id)
+```
+
 ## Async
 
 `AsyncWorkly` has the same methods, as coroutines:

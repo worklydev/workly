@@ -7,11 +7,7 @@
 [![Docs](https://img.shields.io/badge/docs-workly.run-orange)](https://workly.run/docs/)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-**The open-source Cloud Tasks.** A simple, reliable HTTP task queue and scheduler you can run locally, deploy as a pod in your cluster, or use as a managed service at [workly.run](https://workly.run).
-
-```text
-enqueue → queue → HTTP delivery → retry → success/failure
-```
+**The open-source Cloud Tasks.** Your app enqueues a task with a URL, and Workly delivers it as a signed HTTP request, retrying with backoff until your endpoint answers 2xx. Every attempt is kept with its status, error and response body. Run it locally, as a pod in your cluster, or hosted at [workly.run](https://workly.run).
 
 Next to queues, schedules call an endpoint on a cron timetable, with the same retries, signing and history: cron for HTTP endpoints, separate from queues.
 

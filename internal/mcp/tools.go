@@ -175,6 +175,9 @@ func (s *server) call(r *http.Request, t *tool, args json.RawMessage) map[string
 	}
 	s.opts.Logger.InfoContext(ctx, "mcp tool call", log...)
 
+	if text, ok := out.(markdown); ok && err == nil {
+		return map[string]any{"content": []any{textContent(string(text))}}
+	}
 	if err == nil {
 		// Without HTML escaping, so URLs and curl commands read as they are
 		// (& rather than \u0026).
@@ -243,7 +246,7 @@ func allTools() []*tool {
 	return []*tool{
 		listQueues, getQueue, listTasks, getTask, getTaskDelivery, waitForTask, listGroups, getGroup,
 		listSchedules, getSchedule, listRuns, getRun, getRunDelivery, waitForRun,
-		listWorkflows, getWorkflow, listWorkflowRuns, getWorkflowRun,
+		listWorkflows, getWorkflow, listWorkflowRuns, getWorkflowRun, getDocs,
 		enqueueTask, retryTask, cancelTask, retryFailedTasks, cancelPendingTasks, pauseQueue, resumeQueue,
 		updateQueuePolicy, deleteQueue,
 		updateSchedule, triggerSchedule, pauseSchedule, resumeSchedule, retryRun, cancelRun, deleteSchedule,

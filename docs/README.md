@@ -2,10 +2,6 @@
 
 Workly is an open-source HTTP task queue and scheduler. You enqueue a task with a URL and a payload; Workly delivers it to your endpoint and retries with backoff until the endpoint answers 2xx. There are no workers to run and no broker to operate.
 
-```text
-enqueue → queue → HTTP delivery → retry → success/failure
-```
-
 It also runs [schedules](schedules.md), which call an endpoint on a cron timetable; [task groups](groups.md), which call you back once a set of tasks has finished; and [workflows](workflows.md), which run HTTP steps in dependency order.
 
 The same binary runs everywhere: `workly dev` on your laptop (SQLite, no configuration), `workly serve` with Postgres in your own infrastructure, or hosted at [workly.run](https://workly.run). Moving between them means changing environment variables, not code.
@@ -34,10 +30,16 @@ The same binary runs everywhere: `workly dev` on your laptop (SQLite, no configu
 
 ## Reference
 
-- [Configuration](configuration.md): every `WORKLY_*` setting.
+- SDKs: [Python](../sdks/python/README.md) and [TypeScript](../sdks/typescript/README.md), with every method.
+- [CLI](cli.md): every `workly` command and flag.
 - [API reference](../api/openapi.yaml): the HTTP API, generated from its OpenAPI spec.
+- [Configuration](configuration.md): every `WORKLY_*` setting.
 - [Metrics](metrics.md): Prometheus metrics and example alerts.
 - [Performance](performance.md): load test results.
-- SDKs: [Python](../sdks/python) and [TypeScript](../sdks/typescript).
 
-For AI agents, [workly.run/docs/llms-full.txt](https://workly.run/docs/llms-full.txt) has these docs in one file, and each page is Markdown at its address plus `.md`, such as [workly.run/docs/quickstart.md](https://workly.run/docs/quickstart.md).
+## For AI agents
+
+- [workly.run/docs/llms-full.txt](https://workly.run/docs/llms-full.txt) has all of these docs in one file, SDKs and CLI included. [llms-small.txt](https://workly.run/docs/llms-small.txt) leaves out the reference pages and self-hosting.
+- Each page is also Markdown at its address plus `.md`, such as [workly.run/docs/quickstart.md](https://workly.run/docs/quickstart.md).
+- The API is described by [openapi.yaml](https://workly.run/docs/api/openapi.yaml).
+- An agent connected over [MCP](mcp.md) can read these pages with the `get_docs` tool.

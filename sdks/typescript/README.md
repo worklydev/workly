@@ -214,6 +214,45 @@ await workly.schedules.put('nightly-report', {
 
 The bodies are a `TaskSummary` (`task_id`, `queue`, `state`, `attempt_count`, `last_status`, `last_error`, `finished_at`, …) and a `RunSummary` (`run_id`, `schedule`, `state`, …), in snake_case as sent.
 
+## Workflows
+
+A workflow is a DAG of HTTP steps: each step is delivered as a task once the steps in its `dependsOn` have succeeded, and a failed step stops the run. Most workflows live in a `workly.yaml` and are applied with `workly deploy`; `put` does the same from code, declaratively. See [Workflows](https://workly.run/docs/workflows/).
+
+```ts
+await workly.workflows.put('daily-refresh', {
+  steps: [
+    { name: 'prices', url: 'https://api.example.com/jobs/prices' },
+    { name: 'fx', url: 'https://api.example.com/jobs/fx' },
+    { name: 'analytics', url: 'https://api.example.com/jobs/analytics', dependsOn: ['prices', 'fx'] },
+  ],
+});
+
+const started = await workly.workflows.trigger('daily-refresh', {
+  input: { date: '2026-11-13' },
+  idempotencyKey: 'refresh-2026-11-13',
+});
+const run = await workly.workflowRuns.get(started.id);
+for (const step of run.steps) console.log(step.name, step.status, step.blockedBy, step.error);
+
+for await (const failed of workly.workflowRuns.list({ workflow: 'daily-refresh', status: 'failed' })) {
+  await workly.workflowRuns.retry(failed.id); // its failed and skipped steps run again
+}
+await workly.workflowRuns.cancel(run.id); // steps not yet started are skipped
+```
+
+A step without `payload` or `body` is sent the run's context as JSON, with `input`. A step can also wait for a task group: its endpoint answers 2xx with `Workly-Wait-For: group/<id>`, and the step finishes when the group does.
+
+## Alerts
+
+Alert channels get an email or a Slack message when tasks or schedule runs fail: within about a minute, then at most one every 30 minutes per queue or schedule. See [Alerts](https://workly.run/docs/alerts/).
+
+```ts
+const channel = await workly.alerts.create('slack', 'https://hooks.slack.com/services/...'); // or 'email', 'ops@example.com'
+await workly.alerts.test(channel.id); // send a test alert now
+console.log((await workly.alerts.list()).channels);
+await workly.alerts.delete(channel.id);
+```
+
 ## Errors
 
 | Error                   | When                                                                    |
