@@ -3,6 +3,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { previewCronOptions } from '../../api/@tanstack/react-query.gen';
 import { errorMessage } from '../../lib/api';
 import { formatSeconds } from '../../lib/format';
+import { formatRunsPerMonth, useRunsPerMonth } from '../../hooks/useRunsPerMonth';
 
 const when = new Intl.DateTimeFormat(undefined, {
   weekday: 'short',
@@ -29,6 +30,7 @@ export function CronPreview({ cron, timezone }: { cron: string; timezone: string
     placeholderData: keepPreviousData,
     retry: false,
   });
+  const perMonth = useRunsPerMonth(settled.cron, settled.timezone);
 
   if (settled.cron === '')
     return <span className="text-xs text-faint">Type a cron expression to see its next runs.</span>;
@@ -41,7 +43,10 @@ export function CronPreview({ cron, timezone }: { cron: string; timezone: string
           {when.format(new Date(t))}
         </span>
       ))}
-      <span className="text-faint">In your browser's time. At most every {formatSeconds(data.interval_seconds)}.</span>
+      <span className="text-faint">
+        In your browser's time. At most every {formatSeconds(data.interval_seconds)}
+        {perMonth !== undefined && `, ${formatRunsPerMonth(perMonth)}`}.
+      </span>
     </span>
   );
 }

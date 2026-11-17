@@ -13,9 +13,6 @@ import (
 type Admission interface {
 	// AdmitTasks is called before up to n tasks are enqueued.
 	AdmitTasks(ctx context.Context, ws workspace.ID, n int) error
-	// TasksCreated reports how many of them were new, not repeats of an
-	// idempotency key.
-	TasksCreated(ctx context.Context, ws workspace.ID, n int)
 	// AdmitSchedule is called before a schedule is created or replaced.
 	AdmitSchedule(ctx context.Context, ws workspace.ID, s ScheduleAdmission) error
 }

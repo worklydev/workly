@@ -26,6 +26,7 @@ import { errorMessage, LIVE } from '../../lib/api';
 import { describeCron } from '../../lib/cron';
 import { formatDate, formatSeconds, prettyBody } from '../../lib/format';
 import { useFromHere } from '../../lib/from';
+import { formatRunsPerMonth, useRunsPerMonth } from '../../hooks/useRunsPerMonth';
 import { Badge } from '../../primitives/badge';
 import { Button } from '../../primitives/button';
 import { Tabs, TabsList, TabsTab } from '../../primitives/tabs';
@@ -63,6 +64,7 @@ export function SchedulePage() {
               <span className="font-mono text-xs">
                 {schedule.cron} · {schedule.timezone}
               </span>
+              <RunsPerMonth schedule={schedule} />
             </span>
           }
           badge={schedule.paused && <Badge variant="warning">paused</Badge>}
@@ -229,6 +231,17 @@ function ScheduleActions({ schedule }: { schedule: Schedule }) {
         </ConfirmItem>
       </MoreActions>
     </>
+  );
+}
+
+/** How often it runs, as a month's count: one every minute is 43,200. */
+function RunsPerMonth({ schedule }: { schedule: Schedule }) {
+  const n = useRunsPerMonth(schedule.cron, schedule.timezone);
+  if (n === undefined) return null;
+  return (
+    <span className="text-xs text-faint" title="Runs in the next 30 days">
+      {formatRunsPerMonth(n)}
+    </span>
   );
 }
 

@@ -10,12 +10,12 @@ import (
 	"github.com/worklydev/workly/server"
 )
 
-// quota admits up to limit created tasks and schedules running at most
-// every minInterval.
+// quota admits up to limit tasks and schedules running at most every
+// minInterval.
 type quota struct {
 	mu          sync.Mutex
 	limit       int
-	created     int
+	admitted    int
 	schedules   []server.ScheduleAdmission
 	minInterval time.Duration
 }
@@ -23,16 +23,11 @@ type quota struct {
 func (q *quota) AdmitTasks(_ context.Context, _ server.WorkspaceID, n int) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if q.created+n > q.limit {
+	if q.admitted+n > q.limit {
 		return server.LimitError(http.StatusForbidden, "quota_exceeded", "monthly task quota reached")
 	}
+	q.admitted += n
 	return nil
-}
-
-func (q *quota) TasksCreated(_ context.Context, _ server.WorkspaceID, n int) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	q.created += n
 }
 
 func (q *quota) AdmitSchedule(_ context.Context, _ server.WorkspaceID, s server.ScheduleAdmission) error {
@@ -49,17 +44,12 @@ func TestAdmissionTasks(t *testing.T) {
 	q := &quota{limit: 3}
 	h := newServer(t, server.Options{Admission: q}).Handler()
 
-	task := `{"url": "https://example.com/hook", "idempotency_key": "a"}`
-	if r := doBody(t, h, "POST", "/v1/queues/q/tasks", "", task); r.status != 201 {
-		t.Fatalf("enqueue = %d %s", r.status, r.body)
-	}
-	// A repeat of the idempotency key isn't a new task.
-	if r := doBody(t, h, "POST", "/v1/queues/q/tasks", "", task); r.status != 200 || q.created != 1 {
-		t.Fatalf("repeat = %d, created %d", r.status, q.created)
+	if r := doBody(t, h, "POST", "/v1/queues/q/tasks", "", `{"url": "https://example.com/hook"}`); r.status != 201 || q.admitted != 1 {
+		t.Fatalf("enqueue = %d %s, admitted %d", r.status, r.body, q.admitted)
 	}
 	batch := `{"tasks": [{"url": "https://example.com/1"}, {"url": "https://example.com/2"}]}`
-	if r := doBody(t, h, "POST", "/v1/queues/q/tasks:batch", "", batch); r.status != 200 || q.created != 3 {
-		t.Fatalf("batch = %d %s, created %d", r.status, r.body, q.created)
+	if r := doBody(t, h, "POST", "/v1/queues/q/tasks:batch", "", batch); r.status != 200 || q.admitted != 3 {
+		t.Fatalf("batch = %d %s, admitted %d", r.status, r.body, q.admitted)
 	}
 	r := doBody(t, h, "POST", "/v1/queues/q/tasks", "", `{"url": "https://example.com/4"}`)
 	if r.status != 403 || r.json["error"].(map[string]any)["code"] != "quota_exceeded" {
