@@ -1,3 +1,4 @@
+import { Stale } from '../../components/Stale';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { RotateCcw, X } from 'lucide-react';
 import { Link, useNavigate } from 'react-router';
@@ -21,16 +22,23 @@ import { displayState } from '../../lib/states';
 import { Button } from '../../primitives/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../primitives/table';
 
-export function RunTable({
-  pages,
-  empty,
-  callback,
-}: {
+type RunTableProps = {
   pages: RunPages;
   empty: string;
   /** Whether the schedule has a callback, so each run says whether it went out. */
   callback?: boolean;
-}) {
+};
+
+/** A schedule's runs, faded while a new filter's rows load (see Stale). */
+export function RunTable(props: RunTableProps) {
+  return (
+    <Stale stale={props.pages.isPlaceholderData ?? false}>
+      <RunRows {...props} />
+    </Stale>
+  );
+}
+
+function RunRows({ pages, empty, callback }: RunTableProps) {
   const navigate = useNavigate();
   const from = useFromHere();
   const now = useNow(5_000);

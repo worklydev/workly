@@ -1,3 +1,4 @@
+import { Stale } from '../../components/Stale';
 import { keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { listGroupsInfiniteOptions } from '../../api/@tanstack/react-query.gen';
@@ -49,7 +50,9 @@ export function GroupsPage() {
           ))}
         </TabsList>
       </Tabs>
-      <GroupTable pages={pages} status={status} />
+      <Stale stale={pages.isPlaceholderData}>
+        <GroupTable pages={pages} status={status} />
+      </Stale>
     </>
   );
 }

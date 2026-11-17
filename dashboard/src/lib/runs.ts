@@ -5,6 +5,8 @@ export type RunPages = {
   data?: { pages: RunList[] };
   error: unknown;
   isPending: boolean;
+  /** Showing the previous filter's rows while the new ones load. */
+  isPlaceholderData?: boolean;
   hasNextPage: boolean;
   isFetchingNextPage: boolean;
   fetchNextPage: () => Promise<unknown>;

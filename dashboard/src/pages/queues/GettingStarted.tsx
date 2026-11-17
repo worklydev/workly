@@ -1,25 +1,53 @@
-import { CodePanel } from '../../components/CodePanel';
+import { StartHere } from '../../components/StartHere';
 import { useSlots } from '../../context';
+import { enqueueExamples, QUEUE_YAML } from '../../lib/examples';
 
-/** A wrapping app's own first steps, or the `workly dev` example. */
+/** A wrapping app's own first steps, or how to enqueue a first task. */
 export function QueuesGettingStarted() {
   const custom = useSlots().gettingStarted?.queues;
-  return custom ?? <GettingStarted />;
+  return custom ?? <FirstQueue />;
 }
 
-function GettingStarted() {
-  const origin = window.location.origin;
+function FirstQueue() {
   return (
-    <div className="flex max-w-2xl flex-col gap-3">
-      <p className="text-muted-foreground">
-        No queues yet. Enqueue a task and its queue is created. With{' '}
-        <span className="font-mono text-xs">workly dev</span>, the built-in echo endpoint makes a handy target:
-      </p>
-      <CodePanel title="Terminal">
-        {`curl -X POST ${origin}/v1/queues/hello/tasks \\
-  -H 'Content-Type: application/json' \\
-  -d '{"url": "${origin}/_dev/echo", "payload": {"hello": "world"}}'`}
-      </CodePanel>
-    </div>
+    <StartHere
+      title="No queues yet"
+      intro="Enqueue a task and its queue is created. Workly delivers the task to its URL, and retries with backoff until it answers 2xx."
+      code={enqueueExamples}
+      yaml={() => QUEUE_YAML}
+      yamlIntro={
+        <>
+          Set a queue's limits and retries in <span className="font-mono text-xs">workly.yaml</span>, and apply it with{' '}
+          <span className="font-mono text-xs">workly deploy</span>.
+        </>
+      }
+      docs={[
+        ['Quickstart', 'quickstart'],
+        ['Configuration as code', 'deploy'],
+      ]}
+    />
+  );
+}
+
+/** For the Tasks page: the same first task. */
+export function FirstTask() {
+  return (
+    <StartHere
+      title="No tasks yet"
+      intro="A task is an HTTP request Workly delivers for you, with retries, in a queue. Enqueue one and it shows up here, with every delivery attempt."
+      code={enqueueExamples}
+      yaml={() => QUEUE_YAML}
+      yamlIntro={
+        <>
+          Tasks come from your code, but their queue's limits and retries live in{' '}
+          <span className="font-mono text-xs">workly.yaml</span>, applied with{' '}
+          <span className="font-mono text-xs">workly deploy</span>.
+        </>
+      }
+      docs={[
+        ['Concepts', 'concepts'],
+        ['Configuration as code', 'deploy'],
+      ]}
+    />
   );
 }

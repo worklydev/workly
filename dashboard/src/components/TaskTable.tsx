@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { RotateCcw, X } from 'lucide-react';
 import { Link, useNavigate } from 'react-router';
 import { cn } from 'cn';
+import { Stale } from './Stale';
 import { cancelTask, retryTask } from '../api';
 import { cancelTaskMutation, retryTaskMutation } from '../api/@tanstack/react-query.gen';
 import type { Task } from '../api';
@@ -36,7 +37,16 @@ type Props = {
   sorting?: TaskSorting;
 };
 
-export function TaskTable({ pages, showQueue, empty, paused = () => false, sorting }: Props) {
+/** Tasks, faded while a new filter's rows load (see Stale). */
+export function TaskTable(props: Props) {
+  return (
+    <Stale stale={props.pages.isPlaceholderData ?? false}>
+      <TaskRows {...props} />
+    </Stale>
+  );
+}
+
+function TaskRows({ pages, showQueue, empty, paused = () => false, sorting }: Props) {
   const navigate = useNavigate();
   const from = useFromHere();
   // Scheduled tasks become due without their data changing.

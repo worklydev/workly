@@ -1,3 +1,4 @@
+import { Stale } from '../../components/Stale';
 import { useState } from 'react';
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Play, Trash2 } from 'lucide-react';
@@ -182,79 +183,90 @@ function Runs({ workflow }: { workflow: Workflow }) {
           ))}
         </TabsList>
       </Tabs>
-      {pages.isPending ? (
-        <Muted>Loading…</Muted>
-      ) : pages.error ? (
-        <ErrorText error={pages.error} />
-      ) : page.items.length === 0 ? (
-        <Muted>
-          {status === 'all' ? 'No runs yet. Run it now, or start one from a schedule.' : `No ${status} runs.`}
-        </Muted>
-      ) : (
-        <>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Run</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Started</TableHead>
-                <TableHead className="text-right">Took</TableHead>
-                <TableHead className="hidden sm:table-cell">Error</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {page.items.map((r) => (
-                <TableRow key={r.id} className="cursor-pointer" onClick={() => navigate(`/workflow-runs/${r.id}`)}>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <Link
-                        to={`/workflow-runs/${r.id}`}
-                        title={r.id}
-                        className="font-mono text-xs"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {shortId(r.id)}
-                      </Link>
-                      {r.schedule_run_id && <span className="text-xs text-faint">scheduled</span>}
-                      {r.attempt > 1 && (
-                        <span className="text-xs text-faint" title={`Retried ${r.attempt - 1}×`}>
-                          attempt {r.attempt}
-                        </span>
-                      )}
-                      {r.version !== workflow.version && (
-                        <span className="font-mono text-xs text-faint" title="Ran under an earlier definition">
-                          v{r.version}
-                        </span>
-                      )}
-                      <RowHint />
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <WorkflowRunStatusBadge status={r.status} />
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    <RelativeTime iso={r.created_at} />
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-xs text-muted-foreground">
-                    {r.duration_ms !== undefined ? (
-                      formatDuration(r.duration_ms)
-                    ) : (
-                      <span className="text-faint">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell
-                    className="hidden max-w-80 truncate text-xs text-muted-foreground sm:table-cell"
-                    title={r.error}
-                  >
-                    {r.error ?? <span className="text-faint">—</span>}
-                  </TableCell>
+      <Stale stale={pages.isPlaceholderData}>
+        {pages.isPending ? (
+          <Muted>Loading…</Muted>
+        ) : pages.error ? (
+          <ErrorText error={pages.error} />
+        ) : page.items.length === 0 ? (
+          <Muted>
+            {status === 'all' ? 'No runs yet. Run it now, or start one from a schedule.' : `No ${status} runs.`}
+          </Muted>
+        ) : (
+          <>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Run</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Started</TableHead>
+                  <TableHead className="text-right">Took</TableHead>
+                  <TableHead className="hidden sm:table-cell">Error</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          <CursorPager page={page} noun="runs" />
-        </>
-      )}
+              </TableHeader>
+              <TableBody>
+                {page.items.map((r) => (
+                  <TableRow key={r.id} className="cursor-pointer" onClick={() => navigate(`/workflow-runs/${r.id}`)}>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Link
+                          to={`/workflow-runs/${r.id}`}
+                          title={r.id}
+                          className="font-mono text-xs"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {shortId(r.id)}
+                        </Link>
+                        {r.schedule_run_id && (
+                          <Link
+                            to={`/runs/${r.schedule_run_id}`}
+                            title="Started by a schedule; opens the schedule run"
+                            className="text-xs text-faint underline decoration-border underline-offset-4 hover:text-foreground"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            by schedule
+                          </Link>
+                        )}
+                        {r.attempt > 1 && (
+                          <span className="text-xs text-faint" title={`Retried ${r.attempt - 1}×`}>
+                            attempt {r.attempt}
+                          </span>
+                        )}
+                        {r.version !== workflow.version && (
+                          <span className="font-mono text-xs text-faint" title="Ran under an earlier definition">
+                            v{r.version}
+                          </span>
+                        )}
+                        <RowHint />
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <WorkflowRunStatusBadge status={r.status} />
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      <RelativeTime iso={r.created_at} />
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs text-muted-foreground">
+                      {r.duration_ms !== undefined ? (
+                        formatDuration(r.duration_ms)
+                      ) : (
+                        <span className="text-faint">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell
+                      className="hidden max-w-80 truncate text-xs text-muted-foreground sm:table-cell"
+                      title={r.error}
+                    >
+                      {r.error ?? <span className="text-faint">—</span>}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            <CursorPager page={page} noun="runs" />
+          </>
+        )}
+      </Stale>
     </Section>
   );
 }

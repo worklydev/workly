@@ -67,6 +67,7 @@ export function formatDate(iso: string, { seconds = true }: { seconds?: boolean 
     hour: '2-digit',
     minute: '2-digit',
     second: seconds ? '2-digit' : undefined,
+    hourCycle: 'h23',
   });
 }
 

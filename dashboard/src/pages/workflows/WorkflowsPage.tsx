@@ -2,7 +2,8 @@ import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router';
 import { listWorkflowsOptions } from '../../api/@tanstack/react-query.gen';
 import type { Workflow } from '../../api';
-import { CodePanel } from '../../components/CodePanel';
+import { StartHere } from '../../components/StartHere';
+import { workflowExamples, workflowYaml } from '../../lib/examples';
 import { ListPager, ListSearch } from '../../components/ListControls';
 import { PageHeader } from '../../components/PageHeader';
 import { ErrorText, Muted } from '../../components/QueryState';
@@ -113,27 +114,22 @@ function WorkflowTable({ workflows }: { workflows: Workflow[] }) {
 }
 
 function GettingStarted() {
-  const origin = window.location.origin;
   return (
-    <div className="flex max-w-2xl flex-col gap-3">
-      <p className="text-muted-foreground">
-        No workflows yet. Declare one in <span className="font-mono text-xs">workly.yaml</span>: each step is an HTTP
-        request, sent once the steps it depends on have succeeded.
-      </p>
-      <CodePanel title="workly.yaml">
-        {`workflows:
-  hello:
-    steps:
-      - name: prices
-        url: ${origin}/_dev/echo
-      - name: fx
-        url: ${origin}/_dev/echo
-      - name: report
-        url: ${origin}/_dev/echo
-        depends_on: [prices, fx]`}
-      </CodePanel>
-      <CodePanel title="Terminal">{`workly deploy
-workly workflows trigger hello`}</CodePanel>
-    </div>
+    <StartHere
+      title="No workflows yet"
+      intro="A workflow runs HTTP steps in dependency order: each step is delivered as a task once the steps it depends on have succeeded."
+      code={workflowExamples}
+      yaml={workflowYaml}
+      yamlIntro={
+        <>
+          Or keep it in <span className="font-mono text-xs">workly.yaml</span> with your queues and schedules, applied
+          with <span className="font-mono text-xs">workly deploy</span>.
+        </>
+      }
+      docs={[
+        ['Workflows', 'workflows'],
+        ['Configuration as code', 'deploy'],
+      ]}
+    />
   );
 }

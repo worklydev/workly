@@ -5,6 +5,8 @@ export type GroupPages = {
   data?: { pages: GroupList[] };
   error: unknown;
   isPending: boolean;
+  /** Showing the previous filter's rows while the new ones load. */
+  isPlaceholderData?: boolean;
   hasNextPage: boolean;
   isFetchingNextPage: boolean;
   fetchNextPage: () => Promise<unknown>;
