@@ -226,11 +226,17 @@ client.workflows.put(
     steps=[
         {"name": "prices", "url": "https://api.example.com/jobs/prices"},
         {"name": "fx", "url": "https://api.example.com/jobs/fx"},
-        {"name": "analytics", "url": "https://api.example.com/jobs/analytics", "depends_on": ["prices", "fx"]},
+        {
+            "name": "analytics",
+            "url": "https://api.example.com/jobs/analytics",
+            "depends_on": ["prices", "fx"],
+        },
     ],
 )
 
-run = client.workflows.trigger("daily-refresh", input={"date": "2026-11-13"}, idempotency_key="refresh-2026-11-13")
+run = client.workflows.trigger(
+    "daily-refresh", input={"date": "2026-11-13"}, idempotency_key="refresh-2026-11-13"
+)
 run = client.workflow_runs.get(run.id)
 for step in run.steps:
     print(step.name, step.status, step.blocked_by, step.error)
@@ -247,7 +253,9 @@ A step without `payload` or `body` is sent the run's context as JSON, with `inpu
 Alert channels get an email or a Slack message when tasks or schedule runs fail: within about a minute, then at most one every 30 minutes per queue or schedule. See [Alerts](https://workly.run/docs/alerts/).
 
 ```python
-channel = client.alerts.create("slack", "https://hooks.slack.com/services/...")  # or "email", "ops@example.com"
+channel = client.alerts.create(
+    "slack", "https://hooks.slack.com/services/..."
+)  # or "email", "ops@example.com"
 client.alerts.test(channel.id)  # send a test alert now
 print(client.alerts.list().channels)
 client.alerts.delete(channel.id)

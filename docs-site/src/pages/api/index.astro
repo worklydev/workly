@@ -14,7 +14,7 @@ import '@fontsource-variable/jetbrains-mono';
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 // Builds run in docs-site/; import.meta.url is the bundled chunk's, elsewhere.
-const spec = parse(readFileSync('../api/openapi.yaml', 'utf8'));
+const spec: { paths: Record<string, Record<string, { summary?: string }>> } = parse(readFileSync('../api/openapi.yaml', 'utf8'));
 const methods = ['get', 'post', 'put', 'patch', 'delete'];
 const endpoints = Object.entries(spec.paths).flatMap(([path, ops]) =>
   methods.filter((m) => ops[m]).map((m) => ({ method: m.toUpperCase(), path, summary: ops[m].summary ?? '' })),
