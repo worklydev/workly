@@ -278,6 +278,7 @@ var listQueues = newTool("list_queues", "List queues",
 // it is healthy, without the retry policy.
 func queueOverview(q, lastDay map[string]any) map[string]any {
 	out := map[string]any{"last_24h": lastDay, "internal": internalQueue(q["name"])}
+	queueStats(q)
 	for _, k := range []string{"name", "paused", "rate_per_second", "max_concurrency", "stats"} {
 		out[k] = q[k]
 	}
@@ -400,7 +401,7 @@ var listTasks = newTool("list_tasks", "List tasks",
 	})
 
 var getTask = newTool("get_task", "Get task",
-	"A task with its delivery attempts, oldest first: each attempt's outcome, status code, error, response headers, the start of the response body and its duration. Attempts with retried_at followed a manual retry. Large payloads and response bodies are truncated.",
+	"A task with its delivery attempts, oldest first: each attempt's outcome, status code, error, response headers, the start of the response body and its duration. Attempts with retried_at followed a manual retry. effective_max_attempts is the task's max_attempts, or its queue's when the task has none; attempts_remaining is how many of those are left since the task was enqueued or last retried by hand (null once it has finished), since attempt_count counts every attempt ever made. Large payloads and response bodies are truncated.",
 	object(map[string]any{"id": taskIDProp}, "id"), readOnly,
 	func(ctx context.Context, api apiClient, args struct {
 		ID string `json:"id"`
@@ -415,7 +416,14 @@ var getTask = newTool("get_task", "Get task",
 		if err := api.do(ctx, "GET", apiPath("/v1/tasks/%s/attempts", args.ID), nil, nil, &attempts); err != nil {
 			return nil, err
 		}
-		out := map[string]any{"task": fullTask(task)}
+		limit, err := effectiveMaxAttempts(ctx, api, task)
+		if err != nil {
+			return nil, err
+		}
+		out := map[string]any{"task": fullTask(task), "effective_max_attempts": limit, "attempts_remaining": nil}
+		if !finished(task) {
+			out["attempts_remaining"] = max(0, limit-currentAttempts(task, attempts.Attempts))
+		}
 		list := attempts.Attempts
 		if omitted := len(list) - maxAttempts; omitted > 0 {
 			list = list[omitted:]
@@ -454,7 +462,7 @@ var getTaskDelivery = newTool("get_task_delivery", "Get task delivery request",
 	})
 
 var waitForTask = newTool("wait_for_task", "Wait for task",
-	"Waits until the task has had a delivery attempt since it was enqueued or last retried by hand, or has finished, then returns the task and latest_attempt: the latest attempt in that time, so not the first if the wait began after several (null if there was none, e.g. a task cancelled before delivery). attempted says whether there was such an attempt; finished whether the task is in a final state (succeeded, failed or cancelled). attempted with finished false means the task will be delivered again: it is waiting to retry, or a retry is in flight. Returns at once if either already holds. Use it after enqueue_task or retry_task. Times out after timeout_seconds with attempted and finished false and a reason; a task scheduled for later (run_at) isn't attempted before then.",
+	"Waits until the task has had a delivery attempt since it was enqueued or last retried by hand, or has finished, then returns the task and latest_attempt: the latest attempt in that time, so not the first if the wait began after several (null if there was none, e.g. a task cancelled before delivery). attempted says whether there was such an attempt; finished whether the task is in a final state (succeeded, failed or cancelled). attempted with finished false means the task will be delivered again: it is waiting to retry, or a retry is in flight. Returns at once if either already holds. Use it after enqueue_task or retry_task. When there is no attempt to report it returns attempted and finished false, a reason and a reason_code: at once with \"queue_paused\" if the task's queue is paused, or \"scheduled_for_later\" (with run_at) if the task isn't due before the wait would end; after timeout_seconds with \"running\" if an attempt is still in flight, or \"timeout\" if the task is due but hasn't been delivered yet (see get_queue for its limits and backlog).",
 	object(map[string]any{
 		"id":              taskIDProp,
 		"timeout_seconds": prop("number", "How long to wait (default 30).", "minimum", 1, "maximum", 60),
@@ -463,16 +471,24 @@ var waitForTask = newTool("wait_for_task", "Wait for task",
 		ID             string  `json:"id"`
 		TimeoutSeconds float64 `json:"timeout_seconds"`
 	}) (any, error) {
-		return waitFor(ctx, api, args.TimeoutSeconds, "task", apiPath("/v1/tasks/%s", args.ID), summary)
+		return waitFor(ctx, api, args.TimeoutSeconds, "task", apiPath("/v1/tasks/%s", args.ID), summary, taskHeldUp)
 	})
+
+// heldUp says why a task or run that hasn't been attempted won't be before
+// deadline, as a reason_code and a reason, or returns "" if it may be.
+type heldUp func(ctx context.Context, api apiClient, v map[string]any, deadline time.Time) (code, reason string, err error)
 
 // waitFor polls a task or run at path until it has been attempted or has
 // finished, for wait_for_task and wait_for_run; kind names it in the result.
-func waitFor(ctx context.Context, api apiClient, timeoutSeconds float64, kind, path string, view func(map[string]any) map[string]any) (any, error) {
+// held, if not nil, ends the wait early when nothing can happen before it
+// would time out, so an agent isn't kept waiting for a paused queue.
+func waitFor(ctx context.Context, api apiClient, timeoutSeconds float64, kind, path string, view func(map[string]any) map[string]any, held heldUp) (any, error) {
 	timeout := time.Duration(min(cmp.Or(timeoutSeconds, 30), 60) * float64(time.Second))
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	deadline := time.Now().Add(timeout)
+	ctx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 	var v map[string]any
+	checked := false
 	for {
 		err := api.do(ctx, "GET", path, nil, nil, &v)
 		if err != nil && ctx.Err() == nil {
@@ -481,12 +497,22 @@ func waitFor(ctx context.Context, api apiClient, timeoutSeconds float64, kind, p
 		if err == nil && (attempted(v) || finished(v)) {
 			break
 		}
+		if err == nil && held != nil && !checked {
+			checked = true
+			code, reason, err := held(ctx, api, v, deadline)
+			if err != nil && ctx.Err() == nil {
+				return nil, err
+			}
+			if code != "" {
+				return waitResult(kind, view(v), code, reason), nil
+			}
+		}
 		select {
 		case <-ctx.Done():
-			return map[string]any{
-				"attempted": false, "finished": false, kind: view(v), "latest_attempt": nil,
-				"reason": fmt.Sprintf("no attempt completed within %v", timeout),
-			}, nil
+			if v["state"] == "running" {
+				return waitResult(kind, view(v), "running", fmt.Sprintf("an attempt is in flight but hadn't finished after %v", timeout)), nil
+			}
+			return waitResult(kind, view(v), "timeout", fmt.Sprintf("no attempt within %v: it is due but hasn't been delivered yet", timeout)), nil
 		case <-time.After(pollInterval):
 		}
 	}
@@ -499,6 +525,66 @@ func waitFor(ctx context.Context, api apiClient, timeoutSeconds float64, kind, p
 		out["latest_attempt"] = latest
 	}
 	return out, nil
+}
+
+// effectiveMaxAttempts is how many attempts task gets: its own max_attempts,
+// or its queue's.
+func effectiveMaxAttempts(ctx context.Context, api apiClient, task map[string]any) (int, error) {
+	if n, ok := task["max_attempts"].(float64); ok {
+		return int(n), nil
+	}
+	queue, _ := task["queue"].(string)
+	var q struct {
+		MaxAttempts int `json:"max_attempts"`
+	}
+	err := api.do(ctx, "GET", apiPath("/v1/queues/%s", queue), nil, nil, &q)
+	return q.MaxAttempts, err
+}
+
+// currentAttempts counts the attempts since task was enqueued or last
+// retried by hand. The first attempt after a manual retry records it, so
+// the current ones start at the last attempt that does.
+func currentAttempts(task map[string]any, attempts []map[string]any) int {
+	retried := timeField(task, "retried_at")
+	if retried.IsZero() {
+		return len(attempts)
+	}
+	for i := len(attempts) - 1; i >= 0; i-- {
+		if timeField(attempts[i], "retried_at").Equal(retried) {
+			return len(attempts) - i
+		}
+	}
+	return 0 // retried, and not attempted since
+}
+
+// waitResult is what waitFor returns when there is no attempt to report.
+func waitResult(kind string, v map[string]any, code, reason string) map[string]any {
+	return map[string]any{
+		"attempted": false, "finished": false, kind: v, "latest_attempt": nil,
+		"reason": reason, "reason_code": code,
+	}
+}
+
+// taskHeldUp is wait_for_task's heldUp: a task isn't delivered while its
+// queue is paused, or before its run_at.
+func taskHeldUp(ctx context.Context, api apiClient, task map[string]any, deadline time.Time) (string, string, error) {
+	if task["state"] != "pending" {
+		return "", "", nil
+	}
+	queue, _ := task["queue"].(string)
+	var q struct {
+		Paused bool `json:"paused"`
+	}
+	if err := api.do(ctx, "GET", apiPath("/v1/queues/%s", queue), nil, nil, &q); err != nil {
+		return "", "", err
+	}
+	if q.Paused {
+		return "queue_paused", fmt.Sprintf("queue %s is paused: the task won't be delivered until it's resumed (resume_queue)", queue), nil
+	}
+	if runAt := timeField(task, "run_at"); runAt.After(deadline) {
+		return "scheduled_for_later", fmt.Sprintf("the task isn't due until %s", runAt.UTC().Format(time.RFC3339)), nil
+	}
+	return "", "", nil
 }
 
 // attempted reports whether a task or run has had an attempt since it was
@@ -653,7 +739,7 @@ var resumeQueue = newTool("resume_queue", "Resume queue",
 	})
 
 var updateQueuePolicy = newTool("update_queue_policy", "Update queue policy",
-	"Changes a queue's delivery policy. Only the settings given change; the others keep their current values. Pass null for rate_per_second to remove the rate limit. Creates the queue if it doesn't exist. Returns the queue.",
+	"Changes a queue's delivery policy. Only the settings given change; the others keep their current values. Pass null for rate_per_second to remove the rate limit. Creates the queue if it doesn't exist. Returns the queue, with created true if it was just created, which for a queue you meant to change means a misspelt name. Workly's own queues can be tuned too: _workflows' and _callbacks' concurrency and rate limits are how hard workflow steps and callbacks hit your endpoints.",
 	object(map[string]any{
 		"queue":               queueProp,
 		"max_attempts":        prop("integer", "Total delivery attempts before a task fails.", "minimum", 1, "maximum", 1000),
@@ -699,10 +785,16 @@ var updateQueuePolicy = newTool("update_queue_policy", "Update queue policy",
 				config[k] = v
 			}
 		}
-		if err := api.do(ctx, "PUT", apiPath("/v1/queues/%s", queue), nil, config, nil); err != nil {
+		status, err := api.doStatus(ctx, "PUT", apiPath("/v1/queues/%s", queue), nil, config, nil)
+		if err != nil {
 			return nil, err
 		}
-		return getQueueView(ctx, api, queue)
+		q, err := getQueueView(ctx, api, queue)
+		if err != nil {
+			return nil, err
+		}
+		q["created"] = status == http.StatusCreated
+		return q, nil
 	})
 
 var policyFields = []string{
@@ -841,7 +933,16 @@ func latestAttempt(ctx context.Context, api apiClient, path string) (map[string]
 // its policy, internal and current work (stats), with no limit as null.
 func queueView(q map[string]any) map[string]any {
 	q["internal"] = internalQueue(q["name"])
+	queueStats(q)
 	return withNulls(q, "rate_per_second")
+}
+
+// queueStats gives a queue's stats every key: oldest_due_at is null when
+// nothing is due.
+func queueStats(q map[string]any) {
+	if s, ok := q["stats"].(map[string]any); ok {
+		withNulls(s, "oldest_due_at")
+	}
 }
 
 // getQueueView reads a queue, for tools whose API call returns less of it.

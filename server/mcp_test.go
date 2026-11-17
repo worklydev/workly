@@ -464,13 +464,21 @@ func TestMCPUpdateQueuePolicy(t *testing.T) {
 
 	// Creates a missing queue.
 	q := c.call("update_queue_policy", map[string]any{"queue": "q", "max_attempts": 3, "rate_per_second": 50, "max_concurrency": 4})
-	if q["max_attempts"] != 3.0 || q["rate_per_second"] != 50.0 || q["max_concurrency"] != 4.0 || q["stats"] == nil || q["internal"] != false {
+	if q["max_attempts"] != 3.0 || q["rate_per_second"] != 50.0 || q["max_concurrency"] != 4.0 || q["stats"] == nil || q["internal"] != false ||
+		q["created"] != true {
 		t.Fatalf("create = %v", q)
+	}
+	// Nothing is due, so how far behind the queue is has no value.
+	if !nullKeys(q["stats"].(map[string]any), "oldest_due_at") {
+		t.Errorf("stats = %v", q["stats"])
 	}
 	// Only the settings given change.
 	q = c.call("update_queue_policy", map[string]any{"queue": "q", "rate_per_second": 200})
-	if q["max_attempts"] != 3.0 || q["rate_per_second"] != 200.0 || q["max_concurrency"] != 4.0 {
+	if q["max_attempts"] != 3.0 || q["rate_per_second"] != 200.0 || q["max_concurrency"] != 4.0 || q["created"] != false {
 		t.Fatalf("update = %v", q)
+	}
+	if s := c.call("list_queues", nil)["queues"].([]any)[0].(map[string]any)["stats"].(map[string]any); !nullKeys(s, "oldest_due_at") {
+		t.Errorf("list_queues stats = %v", s)
 	}
 	// null removes the rate limit.
 	q = c.call("update_queue_policy", map[string]any{"queue": "q", "rate_per_second": nil, "timeout_seconds": 5})
@@ -527,12 +535,28 @@ func TestMCPWaitForTask(t *testing.T) {
 	if time.Since(start) > time.Second {
 		t.Errorf("second wait took %v", time.Since(start))
 	}
+	// One of the queue's 3 attempts used, and 2 left while it waits to retry.
+	if got := c.call("get_task", map[string]any{"id": task["id"]}); got["effective_max_attempts"] != 3.0 || got["attempts_remaining"] != 2.0 {
+		t.Errorf("get_task attempts = %v of %v left", got["attempts_remaining"], got["effective_max_attempts"])
+	}
 
-	// A task scheduled for later times out.
+	// A task scheduled for after the wait would end: no point waiting.
 	later := c.call("enqueue_task", map[string]any{"queue": "q", "url": target.URL, "delay_seconds": 3600})
-	if got := c.call("wait_for_task", map[string]any{"id": later["id"], "timeout_seconds": 1}); got["attempted"] != false || got["finished"] != false ||
-		got["reason"] == nil || !nullKeys(got, "latest_attempt") {
+	start = time.Now()
+	if got := c.call("wait_for_task", map[string]any{"id": later["id"], "timeout_seconds": 10}); got["attempted"] != false || got["finished"] != false ||
+		got["reason_code"] != "scheduled_for_later" || !nullKeys(got, "latest_attempt") {
 		t.Errorf("wait for a scheduled task = %v", got)
+	}
+	if time.Since(start) > time.Second {
+		t.Errorf("wait for a scheduled task took %v", time.Since(start))
+	}
+	// Nor for a paused queue.
+	c.call("update_queue_policy", map[string]any{"queue": "held"})
+	c.call("pause_queue", map[string]any{"queue": "held"})
+	held := c.call("enqueue_task", map[string]any{"queue": "held", "url": target.URL})
+	if got := c.call("wait_for_task", map[string]any{"id": held["id"], "timeout_seconds": 10}); got["reason_code"] != "queue_paused" ||
+		!strings.Contains(got["reason"].(string), "held") {
+		t.Errorf("wait for a task in a paused queue = %v", got)
 	}
 	// Cancelled before its first attempt: finished, never attempted.
 	c.call("cancel_task", map[string]any{"id": later["id"]})
@@ -585,6 +609,12 @@ func TestMCPSchedules(t *testing.T) {
 	}
 	if text, isError := c.callRaw("update_schedule", map[string]any{"schedule": "nightly", "retries": 3}); !isError || !strings.Contains(text, `unknown setting "retries"`) {
 		t.Errorf("unknown setting = %q", text)
+	}
+	// Slots carry the schedule's offset, so they read in its timezone.
+	for _, slot := range sc["next_runs"].([]any) {
+		if s := slot.(string); !strings.HasSuffix(s, "+01:00") && !strings.HasSuffix(s, "+02:00") {
+			t.Errorf("next_runs slot %q isn't in Europe/Stockholm", s)
+		}
 	}
 
 	// A paused schedule's slots are only what would happen if resumed.
@@ -728,7 +758,8 @@ func TestMCPGroups(t *testing.T) {
 		}
 	}
 
-	if got := c.call("list_groups", map[string]any{"status": "failed"}); len(got["groups"].([]any)) != 1 {
+	if got := c.call("list_groups", map[string]any{"status": "failed"}); len(got["groups"].([]any)) != 1 ||
+		!nullKeys(got["groups"].([]any)[0].(map[string]any), "idempotency_key") {
 		t.Errorf("list_groups = %v", got)
 	}
 	got := c.call("get_group", map[string]any{"id": id})
