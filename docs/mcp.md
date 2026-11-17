@@ -89,7 +89,7 @@ bearer_token_env_var = "WORKLY_PROD_API_KEY"
 | `full` | Read and write tools | `workly dev` |
 | `off` | None: `/mcp` answers 404 | |
 
-So pointing an agent at production can't enqueue, retry or cancel anything unless whoever runs the server opts in with `WORKLY_MCP=full`. workly.run serves the full tools to API keys, and to OAuth connections given read and write access; a connection given read-only access gets the read tools. The endpoint takes the same credentials as `/v1`: with `WORKLY_API_KEY` set, an agent needs the key. Anyone with the key can already do everything through the API, so `read-only` is a guard against an agent's mistakes, not an access control.
+An agent pointed at production can't enqueue, retry or cancel anything unless whoever runs the server sets `WORKLY_MCP=full`. workly.run serves the full tools to API keys, and to OAuth connections given read and write access; a connection given read-only access gets the read tools. The endpoint takes the same credentials as `/v1`: with `WORKLY_API_KEY` set, an agent needs the key. Anyone with the key can already do everything through the API, so `read-only` is a guard against an agent's mistakes, not an access control.
 
 ## Tools
 
@@ -99,7 +99,7 @@ Read tools (marked read-only, so clients can run them without asking):
 
 | Tool | What it does |
 |---|---|
-| `list_queues` | All queues in summary: paused or not, rate and concurrency limits, current work (due, scheduled, running, failed, how far behind) and the last 24 hours (succeeded, failed, p50 and p95 attempt duration and how many attempts they're taken over) |
+| `list_queues` | All queues in summary: paused or not, rate and concurrency limits, current work (due, scheduled, running, failed, how far behind) and the last 24 hours (succeeded, failed, and p50 and p95 attempt duration with its sample size) |
 | `get_queue` | One queue with its full policy, the last 24 hours, how many tasks succeeded, failed and were cancelled recently, and its failed tasks grouped by error |
 | `list_tasks` | Task summaries, newest first, by queue, state, group, idempotency key, last error and creation time. Each says when its first attempt started and how long the latest took, so queue wait and handler time can be told apart |
 | `get_task` | A task with its attempts: outcomes, status codes, errors, response bodies, durations |
@@ -146,6 +146,6 @@ Arguments are checked against each tool's schema before anything runs, and error
 
 ## What agents see
 
-Task payloads, headers, response bodies and error messages come from your endpoints and whatever enqueues tasks, so they reach the agent as data that could contain anything. The server tells agents to treat them as untrusted, and shortens them to keep an agent's context small: response bodies to 2 KB, payloads to 8 KB, and a task's attempts to the latest 20. The full data is always in the dashboard and the API.
+Task payloads, headers, response bodies and error messages come from your endpoints and whatever enqueues tasks, so they could contain anything. The server tells agents to treat them as untrusted, and shortens them to keep an agent's context small: response bodies to 2 KB, payloads to 8 KB, and a task's attempts to the latest 20. The full data is always in the dashboard and the API.
 
 Each tool call is logged (`mcp tool call`, with the tool name, duration and any error).

@@ -2,7 +2,7 @@
 
 A schedule calls an HTTP endpoint on a cron timetable: a nightly report, a sync every 15 minutes, a weekly cleanup. Each call is a **run**, delivered, signed and retried like a task, with every attempt recorded. It's cron for HTTP endpoints, with a history and a "run now" button.
 
-Schedules are separate from queues. A schedule has its own settings (retries, timeout, what to do when runs overlap) and its own history, and it never uses a queue's limits. Its only tasks are [callbacks](callbacks.md), if you ask for them.
+Schedules are separate from queues: a schedule has its own settings (retries, timeout, what to do when runs overlap) and history, and no queue's limits apply to it. Its only tasks are [callbacks](callbacks.md), if you ask for them.
 
 ```text
 Queue    → Task → Attempt
@@ -20,7 +20,7 @@ curl -X PUT localhost:7337/v1/schedules/nightly-report -d '{
 }'
 ```
 
-`PUT` is declarative, like queues: the schedule ends up with exactly the settings given, and omitted ones go back to their defaults. The response includes `next_runs`, the next five times it will run, so you can check the expression before relying on it.
+`PUT` is declarative, like queues: the schedule ends up with exactly the settings given, and omitted ones go back to their defaults. The response includes `next_runs`, the next five times it will run, so you can check the expression.
 
 From code:
 
@@ -50,7 +50,7 @@ workly schedules put nightly-report https://api.example.com/reports/nightly \
   --cron '0 3 * * *' --timezone Europe/Stockholm -d '{"kind": "daily"}'
 ```
 
-Or keep it in a `workly.yaml` with your code and deploy it with `workly deploy` ([configuration as code](deploy.md)):
+Or keep it in a `workly.yaml` and deploy it with `workly deploy` ([configuration as code](deploy.md)):
 
 ```yaml
 version: 1
@@ -96,13 +96,13 @@ The expression is read in the schedule's `timezone`, an IANA name such as `Europ
 | `missed` | `skip` | What to do about times missed while the server was down. |
 | `on_complete` | none | A [callback](callbacks.md), `{url, headers}`, called with a summary each time a run finishes. |
 
-A schedule with `workflow` sends no request of its own: each run starts a workflow run, using the schedule run's ID as its idempotency key, and succeeds once it has started (a workflow that doesn't exist yet is retried like a failed request). The schedule run links to the workflow run (`workflow_run_id`), and `workflow_run_status` gives that run's status, so you can tell a schedule run that started a workflow still going from one whose workflow finished. For `overlap`, the schedule counts as still going until that workflow run finishes, so with `skip` a slow workflow never has two scheduled runs at once. `method`, `headers`, `body` and `content_type` don't apply.
+With `workflow`, a schedule sends no request of its own. Each run starts a workflow run, with the schedule run's ID as its idempotency key, and succeeds once it has started; a workflow that doesn't exist yet is retried like a failed request. The schedule run links to the workflow run (`workflow_run_id`), and `workflow_run_status` says whether it's still going or how it ended. For `overlap`, the schedule counts as running until the workflow run finishes, so with `skip` a slow workflow never has two scheduled runs at once. `method`, `headers`, `body` and `content_type` don't apply.
 
-Retries are fewer and shorter than a queue's by default, so a failing run gives up well before a frequent schedule's next one.
+Retries are fewer and shorter than a queue's by default, so a failing run gives up before a frequent schedule's next one.
 
 **Overlap.** With `skip`, a run that comes up while the previous run is still pending or running (or, for a schedule with `workflow`, while the workflow run it started is still going) is recorded as `skipped`, with `skip_reason: overlap`, and not delivered. With `allow`, it runs alongside. Runs you start by hand always run.
 
-**Missed runs.** If no server was running at a scheduled time (a run is missed if it can't start within a minute), `skip` records the most recent missed time as a `skipped` run with `skip_reason: missed` and carries on; `catch_up` runs it once. Either way, a server that was down for a day doesn't make up every run it missed.
+**Missed runs.** A run is missed if no server could start it within a minute of its time. `skip` records the most recent missed time as a `skipped` run with `skip_reason: missed` and carries on; `catch_up` runs it once. Either way, a server that was down for a day doesn't make up every run it missed.
 
 ## Runs
 
@@ -114,16 +114,16 @@ workly runs ls --state failed                   # failed runs of every schedule
 workly runs get <run id>                        # the run and its attempts
 ```
 
-`GET /v1/runs` lists runs newest first, of every schedule or of one, optionally by state: `GET /v1/runs?schedule=nightly-report`, or `GET /v1/runs?state=failed` for every failed run. A run's `started_at` is when its first attempt started and `last_duration_ms` how long its latest attempt took.
+In the API, `GET /v1/runs` takes the same filters: `?schedule=nightly-report`, `?state=failed`. A run's `started_at` is when its first attempt started, and `last_duration_ms` how long its latest attempt took.
 
-The run keeps the request as the schedule had it when the run was created, so its page shows exactly what was sent even after the schedule changes. Retries use the schedule's current retry settings.
+A run keeps the request as it was when the run was created, so it shows what was sent even after the schedule changes. Retries use the schedule's current retry settings.
 
 - **Run now:** `POST /v1/schedules/{name}/trigger` (or `workly schedules trigger`, or the dashboard's Run now) creates a run with `trigger: manual` and delivers it at once, even while the schedule is paused. It doesn't change when the schedule next runs.
 - **Retry a run:** `POST /v1/runs/{id}/retry` delivers a failed, cancelled, succeeded or skipped run again, with a fresh set of attempts. Retrying a skipped run delivers the time it skipped.
-- **Pause:** `POST /v1/schedules/{name}/pause` stops it from running; runs already pending finish. A paused schedule has `paused_at`, no `next_run_at` and empty `next_runs`; `next_runs_if_resumed` are the times it would run if resumed now. Resuming starts again from the next scheduled time. Times that pass while it's paused aren't run.
+- **Pause:** `POST /v1/schedules/{name}/pause` stops new runs; runs already pending finish. A paused schedule has `paused_at`, no `next_run_at` and empty `next_runs`; `next_runs_if_resumed` are the times it would run if resumed now. Times that pass while it's paused aren't run.
 - **Delete:** deleting a schedule deletes its runs.
 
-Finished runs are kept for `WORKLY_RUN_RETENTION` (by default the same as `WORKLY_RETENTION`, 7 days), except that each schedule's latest run is always kept, so a monthly job still shows how it last went.
+Finished runs are kept for `WORKLY_RUN_RETENTION` (by default `WORKLY_RETENTION`, 7 days), except each schedule's latest run, which is always kept, so a monthly job still shows how it last went.
 
 ## Handling a run
 
@@ -141,6 +141,6 @@ Runs don't carry `Workly-Task-Id` or `Workly-Queue`, so one handler can tell a s
 
 ## Monitoring
 
-The dashboard's Schedules page shows each schedule's next run, its last run and a strip of recent runs; a schedule's page shows its upcoming times and every run with its attempts. Over [MCP](mcp.md), `get_schedule` answers "why didn't the 03:00 report run?" from the skipped and failed runs.
+The dashboard's Schedules page shows each schedule's next run, last run and recent runs; a schedule's page has its upcoming times and every run with its attempts. Over [MCP](mcp.md), `get_schedule` answers "why didn't the 03:00 report run?" from the skipped and failed runs.
 
 For alerts, `workly_schedule_last_success_timestamp_seconds` tells you when each schedule last succeeded; alert when it's older than the schedule's period. See [metrics](metrics.md).
