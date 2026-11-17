@@ -38,14 +38,14 @@ Connection settings go in the URL:
 
 ## The CLI
 
-The `queues` and `tasks` commands talk to a server over its API:
+The CLI's API commands (`queues`, `tasks`, `schedules` and the rest) talk to a server over its API:
 
 | Variable | Flag | Default |
 |---|---|---|
 | `WORKLY_URL` | `--url` | `http://localhost:7337` |
 | `WORKLY_API_KEY` | `--api-key` | unset |
 
-The Python SDK reads the same two variables.
+The Python and TypeScript SDKs read the same two variables.
 
 ## Rotating the signing secret
 

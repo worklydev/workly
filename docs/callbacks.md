@@ -96,7 +96,7 @@ Skipped runs (an overlap, or a slot missed while the server was down) were never
 ## When a callback fires
 
 - **Once each time it finishes.** A task or run calls back when it succeeds, when its last attempt fails or it gets a response Workly doesn't retry, and when it is cancelled. Attempts that will be retried don't.
-- **Again after a retry by hand.** Retrying a failed task, or a run, gives it a fresh set of attempts, and when it finishes again it calls back again, with the new outcome. A fix-and-retry tells your app it finally worked.
+- **Again after a retry by hand.** A retried task or run gets a fresh set of attempts and calls back again when it finishes, with the new outcome, so a fix-and-retry tells your app it finally worked.
 - **Not for deleted tasks.** Deleting a queue deletes its tasks without calling back.
 - **Groups call back once.** A [group's](groups.md) callback fires when the group completes, with its counts, and never again.
 
@@ -104,7 +104,7 @@ The callback is enqueued in the same database transaction that finishes the task
 
 ## The `_callbacks` queue
 
-Every callback is a task in `_callbacks`, a queue Workly creates when it first needs one. Only Workly enqueues into it, so everything in it is a callback, and callbacks never have callbacks of their own. From there a callback is an ordinary task: signed, retried with the queue's backoff, and recorded with every attempt. The task, run or group links to it (`callback_task_id`, the latest one), and the dashboard shows it next to them. A schedule's runs also carry that task's state (`callback_state`), so a list of runs says which callbacks were delivered without fetching each one.
+Every callback is a task in `_callbacks`, a queue Workly creates when it first needs one. Only Workly enqueues into it, and callbacks never have callbacks of their own. Otherwise a callback is an ordinary task: signed, retried with the queue's backoff, and recorded with every attempt. The task, run or group links to it (`callback_task_id`, the latest one), and the dashboard shows it next to them. A schedule's runs also carry that task's state (`callback_state`), so a list of runs says which callbacks were delivered without fetching each one.
 
 `_callbacks` has the default settings. To give callbacks more retries or a longer timeout, configure it like any queue, e.g. in [`workly.yaml`](deploy.md):
 
@@ -115,7 +115,7 @@ queues:
     timeout_seconds: 300
 ```
 
-If it has been deleted, it is created again with default settings rather than a callback being dropped.
+If it has been deleted, it's created again with default settings, so no callback is dropped.
 
 ## Handling a callback
 

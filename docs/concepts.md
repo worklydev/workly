@@ -1,10 +1,10 @@
 # Concepts
 
-This page explains how Workly thinks about work: queues, tasks and attempts, what happens on each delivery, and how your endpoint can trust a request came from Workly. [Schedules](schedules.md) and [task groups](groups.md) build on the same pieces and have pages of their own.
+Queues, tasks and attempts, what happens on each delivery, and how your endpoint checks that a request came from Workly. [Schedules](schedules.md) and [task groups](groups.md) build on the same pieces.
 
 ## Queues
 
-A **queue** holds tasks and the policy for delivering them. It's created the first time you enqueue into it, with the defaults below, and you change its policy with `PUT /v1/queues/{queue}` (or `workly queues put`, or a [`workly.yaml`](deploy.md)).
+A **queue** holds tasks and the policy for delivering them. It's created with the defaults below the first time you enqueue into it. Change its policy with `PUT /v1/queues/{queue}`, `workly queues put` or a [`workly.yaml`](deploy.md).
 
 | Setting | Default | |
 |---|---|---|
@@ -21,7 +21,7 @@ A **paused** queue keeps accepting tasks but doesn't start deliveries; those alr
 
 ## Tasks
 
-A **task** is one HTTP request Workly owes your endpoint: a URL, a method (`POST` by default), headers, and a body: either `payload`, sent as JSON, or `body` with its own `content_type`. It can wait: `delay_seconds` or `run_at` set when it's first due. It can override its queue's `max_attempts` and `timeout_seconds`, and with `on_complete` call you back each time it finishes (see [Callbacks](callbacks.md)).
+A **task** is one HTTP request Workly owes your endpoint: a URL, a method (`POST` by default), headers, and a body, either `payload` sent as JSON or `body` with its own `content_type`. `delay_seconds` or `run_at` sets when it's first due. It can override its queue's `max_attempts` and `timeout_seconds`, and with `on_complete` call you back each time it finishes (see [Callbacks](callbacks.md)).
 
 A task is in one of these states:
 
@@ -37,7 +37,7 @@ A task is in one of these states:
 
 ### Idempotency keys
 
-Give a task an `idempotency_key` and enqueueing it again in the same queue returns the existing task (`200` instead of `201`) instead of creating a second one. A key holds as long as its task is kept, so retrying an enqueue after a timeout or a crash is safe. This deduplicates enqueues; deduplicating deliveries is your handler's job (see [Delivery semantics](#delivery-semantics)).
+Enqueue a task with an `idempotency_key` that's already in the queue and you get the existing task back (`200` instead of `201`). A key holds as long as its task is kept, so retrying an enqueue after a timeout or a crash is safe. This deduplicates enqueues; deduplicating deliveries is your handler's job (see [Delivery semantics](#delivery-semantics)).
 
 ## Attempts
 
@@ -56,8 +56,8 @@ This history is what the dashboard, the CLI and [MCP](mcp.md) show when you ask 
 ### Retries
 
 - **Retried:** 5xx, 408 and 429 responses, timeouts, network errors and lost attempts.
-- **Not retried:** other 4xx responses fail the task at once, since sending the same request again won't change the answer. Set `retry_on_4xx` on the queue if your endpoint uses them for temporary problems. Neither are connections the server refuses to make, such as to a private address on a server that only delivers to the public internet.
-- **Backoff:** retry *n* waits a random time between `min_backoff_seconds` and `min_backoff_seconds × backoff_multiplier^(n−1)`, capped at `max_backoff_seconds`. The randomness (jitter) keeps a burst of failures from coming back all at once. A `Retry-After` header on the response is honoured.
+- **Not retried:** other 4xx responses fail the task at once, since sending the same request again won't change the answer. Set `retry_on_4xx` on the queue if your endpoint uses them for temporary problems. Connections the server refuses to make, such as to a private address on a server that only delivers to the public internet, aren't retried either.
+- **Backoff:** retry *n* waits a random time between `min_backoff_seconds` and `min_backoff_seconds × backoff_multiplier^(n−1)`, capped at `max_backoff_seconds`. The randomness (jitter) spreads out a burst of failures. A `Retry-After` header on the response is honoured.
 
 ## Delivery semantics
 
@@ -78,13 +78,13 @@ So make handlers safe to run twice. Every delivery carries headers to help:
 
 Your own `headers` are sent too; `Workly-*` names are reserved. Schedule runs carry `Workly-Run-Id`, `Workly-Schedule` and `Workly-Scheduled-For` instead of the task headers ([schedules](schedules.md#handling-a-run)), and a [workflow](workflows.md#what-a-step-receives)'s steps carry `Workly-Workflow`, `Workly-Workflow-Run-Id`, `Workly-Workflow-Step`, `Workly-Workflow-Step-Id` and `Workly-Workflow-Run-Attempt` as well.
 
-Order isn't guaranteed. Tasks in a queue are started roughly in the order they're due, but with more than one delivery at a time, and with retries, they can finish in any order. If order matters, set `max_concurrency: 1`, and keep in mind that a retry still lets later tasks go first.
+Order isn't guaranteed. Tasks start roughly in the order they're due, but with several deliveries at once, and with retries, they can finish in any order. If order matters, set `max_concurrency: 1`; a retry still lets later tasks go first.
 
 ## Signing
 
 Every delivery is signed with a secret that Workly and your endpoint share (`WORKLY_SIGNING_SECRET` when you self-host; the API keys page on workly.run). Check the signature before trusting a request: anyone who can reach your endpoint can call it, but only Workly knows the secret.
 
-The [SDKs](quickstart.md#handle-it) do the check for you, with `verify_signature` in Python and `verifySignature` in TypeScript. In another language it's a few lines.
+The [SDKs](quickstart.md#handle-it) check it with `verify_signature` in Python and `verifySignature` in TypeScript. In another language it's a few lines.
 
 ### Verifying a signature without an SDK
 
@@ -106,11 +106,11 @@ To verify a request:
 1. Read the **raw body**, before any JSON parsing: re-serializing it changes the bytes and breaks the signature.
 2. Compute the HMAC of `timestamp + "." + body` with your secret.
 3. Split `Workly-Signature` on commas. It holds more than one signature while the secret is being [rotated](configuration.md#rotating-the-signing-secret); accept the request if any `v1=` value matches. Compare in constant time.
-4. Reject the request if the timestamp is more than 5 minutes from your clock. That stops someone who captured a request from replaying it later. The SDKs use the same tolerance.
+4. Reject the request if the timestamp is more than 5 minutes from your clock, so a captured request can't be replayed later. The SDKs use the same tolerance.
 
 The timestamp is the time of the attempt, so every retry has a fresh one and a new signature.
 
-For a test vector: with the secret `secret`, the timestamp `1790000000` and the body `{"user_id":"123"}`, the signature is the one above. You can check it from a shell:
+Test vector: the secret `secret`, the timestamp `1790000000` and the body `{"user_id":"123"}` give the signature above. Check it from a shell:
 
 ```sh
 printf '%s' '1790000000.{"user_id":"123"}' | openssl dgst -sha256 -hmac secret
@@ -152,4 +152,4 @@ def verify(secret, headers, body)
 end
 ```
 
-Answer a request that doesn't verify with a 401. Workly doesn't retry 4xx responses, so a wrong secret shows up as failed tasks with a 401 in the dashboard instead of retrying for an hour.
+Answer a request that doesn't verify with a 401. Workly doesn't retry 4xx responses, so a wrong secret shows up at once as failed tasks with a 401, instead of an hour of retries.

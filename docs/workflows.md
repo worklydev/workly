@@ -1,6 +1,6 @@
 # Workflows
 
-A workflow is a set of HTTP steps that run in dependency order: a step is sent once the steps it depends on have succeeded. Each step is an ordinary [task](concepts.md), delivered, retried and signed like any other, so a workflow adds ordering to what you already have, not a new kind of worker.
+A workflow is a set of HTTP steps that run in dependency order: a step is sent once the steps it depends on have succeeded. Each step is an ordinary [task](concepts.md), delivered, retried and signed like any other: a workflow adds ordering to tasks, not a new kind of worker.
 
 ```text
 prices ─┐
@@ -11,7 +11,7 @@ news ──────────────────┘
 
 A step can also hand its completion to a [task group](groups.md): its endpoint starts the work, answers `202` with `Workly-Wait-For: group/<id>`, and the step finishes when the group does. That is how one step fans out over hundreds of tasks and the next step waits for all of them.
 
-Workflows are deliberately static. A workflow is a DAG declared up front: there are no conditions, loops, outputs passed between steps or nested workflows, and Workly never runs your code. If a step needs data from an earlier one, read it from where that step stored it.
+A workflow is a static DAG declared up front: no conditions, loops, outputs passed between steps or nested workflows, and Workly never runs your code. If a step needs data from an earlier one, read it from where that step stored it.
 
 ## Define a workflow
 
@@ -46,7 +46,7 @@ schedules:
     workflow: daily-refresh
 ```
 
-Or with `PUT /v1/workflows/{name}`, `workflows.put` in the SDKs. Steps without `depends_on` start as soon as a run does; here `prices`, `fx` and `news` run in parallel, `analytics` once `prices` and `fx` have both succeeded, and `notify` once `analytics` and `news` have.
+Or with `PUT /v1/workflows/{name}` or `workflows.put` in the SDKs. Steps without `depends_on` start as soon as a run does: here `prices`, `fx` and `news` run in parallel, `analytics` once `prices` and `fx` have both succeeded, and `notify` once `analytics` and `news` have.
 
 | Step setting | Default | |
 |---|---|---|
@@ -59,7 +59,7 @@ Or with `PUT /v1/workflows/{name}`, `workflows.put` in the SDKs. Steps without `
 
 A workflow has at most 100 steps, which must form a DAG: Workly rejects unknown or self dependencies and names the cycle in one (`steps form a cycle: a → b → a`). `max_duration_seconds` (default a day) is how long a run may take before it fails.
 
-Steps go to the `_workflows` queue unless they name another. Like [`_callbacks`](callbacks.md), it is created when first needed and you can change its settings like any queue's, but you can't enqueue into it. A step that names one of your queues shares its limits with that queue's other tasks, which is the way to keep a workflow from overloading an endpoint other work also calls.
+Steps go to the `_workflows` queue unless they name another. Like [`_callbacks`](callbacks.md), it's created when first needed and configured like any queue, but you can't enqueue into it. A step that names one of your queues shares that queue's limits with its other tasks: use this to keep a workflow from overloading an endpoint that other work also calls.
 
 Changing a workflow doesn't touch runs already going: a run keeps the definition (and `version`) it started with.
 
@@ -77,7 +77,7 @@ run = workly.workflows.trigger("daily-refresh", input={"date": "2026-11-13"}, id
 const run = await workly.workflows.trigger('daily-refresh', { input: { date: '2026-11-13' }, idempotencyKey: '2026-11-13' });
 ```
 
-Or from the dashboard's Run now, or a [schedule](schedules.md) with `workflow:` instead of `url:`, whose `payload` becomes each run's input. With an `idempotency_key` already used for a run of the workflow, that run is returned and nothing starts; a schedule uses its run's ID, so a retried schedule run never starts a second workflow run. With the schedule's `overlap: skip` (the default), a slot that comes up while the schedule's last workflow run is still going is skipped.
+Or with the dashboard's Run now, or a [schedule](schedules.md) with `workflow:` instead of `url:`, whose `payload` becomes each run's input. An `idempotency_key` already used for a run of the workflow returns that run and starts nothing. A schedule uses its run's ID as the key, so a retried schedule run never starts a second workflow run, and with `overlap: skip` (the default) it skips a slot while its last workflow run is still going.
 
 ## What a step receives
 
@@ -108,7 +108,7 @@ A 2xx response succeeds the step. Anything else is retried with its queue's poli
 
 ## Waiting for a group
 
-A step that starts work Workly should track answers with `Workly-Wait-For: group/<id>` and a 2xx, typically `202`. The step then stays `waiting` until the group completes: it succeeds if every task in the group succeeded, and fails, failing the run, if any failed or was cancelled. Close the group once its tasks are enqueued, or it never completes.
+To hand a step's completion to a group, answer 2xx (typically `202`) with `Workly-Wait-For: group/<id>`. The step stays `waiting` until the group completes, then succeeds if every task in the group succeeded, or fails, failing the run, if any failed or was cancelled. Close the group once its tasks are enqueued, or it never completes.
 
 ```python
 @app.post("/jobs/start-price-update")
@@ -130,9 +130,9 @@ def start_price_update():
     return "", 202, {"Workly-Wait-For": f"group/{group.id}"}
 ```
 
-The header names exactly one group in the workspace. A header Workly can't use (another resource type, two groups, a group that doesn't exist) fails the step at once, with the reason, rather than retrying the request. A group that had already completed when the response arrived finishes the step straight away.
+The header names exactly one group in the workspace. A header Workly can't use (another resource type, two groups, a group that doesn't exist) fails the step at once, with the reason, rather than retrying. If the group has already completed, the step finishes at once.
 
-Handing over is safe across restarts and replicas: the step's completion is recorded in the same database transaction as the group's, so a step can't miss its group, and it can't finish twice.
+This is safe across restarts and replicas: the step's completion is recorded in the same database transaction as the group's, so a step can't miss its group or finish twice.
 
 ## When a step fails
 
@@ -143,17 +143,19 @@ A run stops at its first failed step:
 - steps waiting for a group are `skipped`; the group itself goes on, and its tasks still run,
 - requests already in flight finish, and their steps record how they went, but start nothing.
 
-The run is `failed`, with the step's error. A run that is still going after `max_duration_seconds` fails the same way, except that its waiting steps are `failed`, since they are what didn't finish in time; cancelling a run (`workly workflows cancel`, or the dashboard) skips what hasn't started. Step tasks can't be retried one at a time: [retry the run](#retry-a-run) instead. A step's task says which step and run it delivers (`workflow_step` on the task in the API, and a link to the run on its dashboard page), so a failure found in a queue leads back to its run.
+The run is `failed`, with the step's error. A run still going after `max_duration_seconds` fails the same way, except that its waiting steps are `failed`, since they didn't finish in time. Cancelling a run (`workly workflows cancel`, or the dashboard) skips what hasn't started.
+
+Step tasks can't be retried one at a time: [retry the run](#retry-a-run) instead. A step's task names its step and run (`workflow_step` in the API, and a link on its dashboard page), so a failure found in a queue leads back to its run.
 
 ## Retry a run
 
-Once you've fixed what failed, retry the run rather than starting over: the dashboard's Retry run, `workly workflows retry ID`, `workflow_runs.retry(id)` in the SDKs or `retry_workflow_run` over [MCP](mcp.md). A failed or cancelled run then goes back to `running`, under the definition and input it started with, even if the workflow has changed since:
+Once you've fixed what failed, retry the run rather than starting over: the dashboard's Retry run, `workly workflows retry ID`, `workflow_runs.retry(id)` in the SDKs or `retry_workflow_run` over [MCP](mcp.md). A failed or cancelled run goes back to `running`, with the definition and input it started with, even if the workflow has changed since:
 
 - steps that succeeded stay succeeded, and aren't sent again,
 - failed and skipped steps run again once their dependencies have succeeded, each on the task it had, with a fresh set of attempts,
 - a step that was waiting for a group follows the group: it succeeds if the group has succeeded since, waits again if it is still going, and runs again if it failed.
 
-The run's `attempt` goes up by one, and its `max_duration_seconds` starts over. Steps are sent the attempt as `Workly-Workflow-Run-Attempt`, so work keyed on the step ID and the attempt, like the group in the example above, is redone on a retry instead of reusing what failed. To run a changed definition, start a new run.
+The run's `attempt` goes up by one, and its `max_duration_seconds` starts over. Steps get the attempt as `Workly-Workflow-Run-Attempt`, so work keyed on the step ID and the attempt, like the group above, is redone on a retry rather than reusing what failed. To run a changed definition, start a new run.
 
 ## Statuses
 
@@ -179,8 +181,8 @@ Open the run in the dashboard, or `workly workflows run ID`. Each step says why 
 
 ## Delivery is at least once
 
-Steps are tasks, so a step's request can arrive more than once, for example when a server stops mid-delivery. Workly starts each step's task once per run however many times its dependencies finish, but your endpoints should still treat `Workly-Workflow-Step-Id` as an idempotency key, as the example above does with its group.
+Steps are tasks, so a step's request can arrive more than once, for example when a server stops mid-delivery. Workly starts each step's task once per run, but your endpoints should still treat `Workly-Workflow-Step-Id` as an idempotency key, as the example above does with its group.
 
 ## Retention
 
-Finished runs are deleted with schedule runs, after the server's run retention (`WORKLY_RUN_RETENTION`, see [Configuration](configuration.md)); a workflow's latest run is always kept. Step tasks are deleted with other tasks, so an old run's steps may no longer link to their task.
+Finished runs are deleted after `WORKLY_RUN_RETENTION`, like schedule runs ([configuration](configuration.md)); a workflow's latest run is always kept. Step tasks are deleted with other tasks, so an old run's steps may no longer link to theirs.

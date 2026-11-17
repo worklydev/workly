@@ -1,12 +1,12 @@
 # Task groups
 
-A task group tracks a set of tasks and calls you back once all of them have finished. It is fan-out and fan-in for an HTTP task queue: enqueue a task per item, and get one callback with how they went, without writing the bookkeeping yourself.
+A task group tracks a set of tasks and calls you back once all of them have finished. Enqueue a task per item and get one callback with how they went: fan-out and fan-in, without writing the bookkeeping yourself.
 
 ```text
 create group → enqueue tasks into it → close it → … tasks finish … → callback task
 ```
 
-A group is one execution, not a reusable definition: a nightly job creates a new group each night, and can give them all the same `name`. Groups are deliberately small: there are no dependencies between tasks, no chains and no nested groups. To run steps in order, with a group in the middle, use a [workflow](workflows.md): a step can hand its completion to a group with `Workly-Wait-For`, and the next step starts once the group has succeeded.
+A group is one execution, not a reusable definition: a nightly job creates a new group each night, and can give them all the same `name`. A group has no dependencies between its tasks, no chains and no nested groups. To run steps in order with a group in the middle, use a [workflow](workflows.md): a step can hand its completion to a group with `Workly-Wait-For`, and the next step starts once the group has succeeded.
 
 ## Example: refresh stock prices, then rebuild the views
 
@@ -88,9 +88,7 @@ export async function startPriceUpdate(day: string, symbols: string[]) {
 }
 ```
 
-`groups.enqueue` is the three steps in one call: create the group, enqueue the tasks into it (in batches of 100, the most one request takes) and close it. With the group's `idempotency_key` it's safe to retry: the group is found again rather than created, a task without its own `idempotency_key` gets one from the group and its position so none is counted twice, and if the group was already closed, it's returned as it is. It needs SDK 0.4.3 or later; with an older SDK, or over HTTP, do the three steps yourself, as below.
-
-Over HTTP:
+`groups.enqueue` does three steps in one call: create the group, enqueue the tasks into it (in batches of 100, the most one request takes) and close it. With the group's `idempotency_key` it's safe to retry. The group is found again rather than created; a task without its own `idempotency_key` gets one from the group and its position, so none is counted twice; and a group that's already closed is returned as it is. It needs SDK 0.4.3 or later. With an older SDK, or over HTTP, do the three steps yourself:
 
 ```sh
 curl -X POST localhost:7337/v1/groups -d '{
@@ -130,14 +128,14 @@ To try it locally, point the URLs at `http://localhost:7337/_dev/echo`.
 | `succeeded` | Every task succeeded. |
 | `failed` | Every task finished, and at least one failed or was cancelled. |
 
-- **Close the group once you've enqueued everything.** A group can't complete while it's open, because more tasks may still come. Then you don't have to know the number of tasks up front. Closing a closed group does nothing, so it is safe to retry.
-- A group whose tasks have all finished by the time it's closed completes right away, and so does a closed group with no tasks.
-- Tasks in a group are ordinary tasks: they keep their queue's retries, limits and history. A task that's waiting to retry still counts as remaining. A task that fails for good doesn't stop the others.
+- **Close the group once you've enqueued everything.** It can't complete while it's open, since more tasks may come, so you don't need to know the number of tasks up front. Closing a closed group does nothing, so it's safe to retry.
+- A group whose tasks have all finished when it's closed completes at once, and so does a closed group with no tasks.
+- Tasks in a group are ordinary tasks, with their queue's retries, limits and history. A task waiting to retry counts as remaining. A task that fails for good doesn't stop the others.
 - `succeeded` and `failed` are final. Once a group has completed, nothing changes it.
 
 ## The callback
 
-`on_complete` is a [callback](callbacks.md): a URL, and optionally headers. Tasks and schedules take the same one. When the group completes, Workly enqueues a task: a `POST` to the URL with the group's summary as its JSON body.
+`on_complete` is a [callback](callbacks.md): a URL and optional headers, as for tasks and schedules. When the group completes, Workly enqueues a `POST` to the URL with the group's summary as its JSON body:
 
 ```json
 {
@@ -151,20 +149,9 @@ To try it locally, point the URLs at `http://localhost:7337/_dev/echo`.
 }
 ```
 
-It is enqueued once per group, and only once: the group completes in the same database transaction that finishes its last task (or closes it), and that transaction enqueues the callback. A crash can't leave a completed group without its callback, and two completions racing each other can't enqueue two.
+It's enqueued exactly once: the group completes in the same database transaction that finishes its last task (or closes it), and that transaction enqueues the callback. A crash can't lose it, and two completions racing can't enqueue two.
 
-From there it is a normal task: it is delivered with the `_callbacks` queue's retries, signed, and recorded, and the group's `callback_task_id` points to it. As with every task, delivery is at least once, so make the handler safe to run twice; `group_id` identifies the group. `headers` in `on_complete` are sent with the callback.
-
-Callbacks go to the `_callbacks` queue. Workly creates it when a callback first needs it, and only Workly enqueues into it, so everything in it is a callback. It has the default settings; to give callbacks more retries or a longer timeout, configure it like any queue, e.g. in [`workly.yaml`](deploy.md):
-
-```yaml
-queues:
-  _callbacks:
-    max_attempts: 10
-    timeout_seconds: 300
-```
-
-If `_callbacks` has been deleted by the time the group completes, it is created again with default settings.
+From there it's an ordinary task in the [`_callbacks` queue](callbacks.md#the-_callbacks-queue): signed, retried and recorded, with the group's `callback_task_id` pointing to it. Delivery is at least once, so make the handler safe to run twice; `group_id` identifies the group. Headers in `on_complete` are sent with it.
 
 The callback fires whether the group succeeded or failed: check `status`. A group without `on_complete` still completes, and you can poll it instead.
 
@@ -172,22 +159,22 @@ The body carries counts, not the tasks' results. To see which tasks failed, list
 
 ## Retries, cancellations and deleted queues
 
-- **Retrying a task while its group is open or running** counts it as remaining again, so the group waits for the retry. That's the way to fix a failure before the group completes, e.g. while you're still enqueueing.
+- **Retrying a task while its group is open or running** counts it as remaining again, so the group waits for the retry. That's how to fix a failure before the group completes.
 - **Retrying a task after its group completed** delivers the task again but doesn't change the group. To redo the work as a group, create a new group.
 - **Cancelling** a task counts it as cancelled, which makes the group `failed` once it completes.
 - **Deleting a queue** takes its tasks out of their groups (`total` goes down), and a group may complete without them.
 
 ## Adding tasks safely
 
-Enqueueing into a group checks that it's open in the same transaction as the enqueue, so a task can't slip in after the group is closed and be missed. Enqueueing into a closed or completed group fails with `group_closed` (409), and into a missing one with `group_not_found` (404). In a batch, all the tasks are enqueued or none.
+An enqueue checks that the group is open in the same transaction, so a task can't slip in after the group closes and be missed. Enqueueing into a closed or completed group fails with `group_closed` (409), and into a missing one with `group_not_found` (404). In a batch, all the tasks are enqueued or none.
 
 Make it safe to retry (`groups.enqueue` in the SDKs does all of this):
 
 - Give tasks an `idempotency_key`. A task enqueued again with the same key isn't counted twice, so you can resend a batch after a timeout.
-- Give the group an `idempotency_key`. Creating it again returns the same group, so a retried request (or a retried schedule run, as in the example) continues the same group rather than starting a second.
+- Give the group an `idempotency_key`. Creating it again returns the same group, so a retried request (or schedule run, as in the example) continues it rather than starting a second.
 
 ## Watching groups
 
-The dashboard's **Groups** page lists groups with their progress. A group's page shows its counts, its callback and how its delivery went, and its tasks, filtered by state, with failed ones a click away. `GET /v1/groups` lists groups newest first, filtered by `status` and `name`; `GET /v1/groups/{id}` returns one with `total`, `succeeded`, `failed`, `cancelled` and `remaining`. Agents get `list_groups` and `get_group` over [MCP](mcp.md), and `list_tasks` takes a `group_id`.
+The dashboard's **Groups** page lists groups with their progress. A group's page shows its counts, its callback and how it was delivered, and its tasks by state. `GET /v1/groups` lists groups newest first, filtered by `status` and `name`; `GET /v1/groups/{id}` returns one with `total`, `succeeded`, `failed`, `cancelled` and `remaining`. Agents get `list_groups` and `get_group` over [MCP](mcp.md), and `list_tasks` takes a `group_id`.
 
-Completed groups are deleted after `WORKLY_RETENTION`, like finished tasks. Their tasks may be deleted before the group is, so the group's counts stay accurate after its tasks are gone.
+Completed groups are deleted after `WORKLY_RETENTION`, like finished tasks. Their tasks may go first; the group's counts stay accurate without them.

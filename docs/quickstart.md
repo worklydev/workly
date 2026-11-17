@@ -1,6 +1,6 @@
 # Quickstart
 
-This runs Workly on your machine, enqueues a task and follows it to your own handler. It takes about five minutes.
+Run Workly on your machine, enqueue a task and handle it in your own code.
 
 ## Install
 
@@ -12,7 +12,7 @@ curl -fsSL https://raw.githubusercontent.com/worklydev/workly/main/install.sh | 
 
 Binaries for Linux, macOS and Windows are also on the [releases page](https://github.com/worklydev/workly/releases). With Docker, `docker run -p 7337:7337 ghcr.io/worklydev/workly dev`.
 
-Versions go together by their first two numbers: any 0.4.x SDK or `workly` CLI works with any 0.4.x server. Each is released when it changes, so the last number differs between them, and an SDK at 0.4.0 next to a CLI and server at 0.4.2 is expected. workly.run runs the latest server. `workly --version` prints the CLI's.
+SDKs, the CLI and the server work together when their first two version numbers match: any 0.4.x SDK or CLI works with any 0.4.x server. Each is released on its own, so the last number can differ. workly.run runs the latest server; `workly --version` prints the CLI's.
 
 ## Run it
 
@@ -20,7 +20,7 @@ Versions go together by their first two numbers: any 0.4.x SDK or `workly` CLI w
 workly dev
 ```
 
-This starts a server on http://localhost:7337 with SQLite storage in `.workly/`, no API key, and the dashboard at the same address. It prints its settings, including the signing secret (`workly-dev-secret`).
+This starts a server and the dashboard on http://localhost:7337, with SQLite storage in `.workly/` and no API key. It prints its settings, including the signing secret (`workly-dev-secret`).
 
 ## Enqueue a task
 
@@ -31,7 +31,7 @@ curl -X POST localhost:7337/v1/queues/demo/tasks \
   -d '{"url": "http://localhost:7337/_dev/echo?fail_rate=0.5", "payload": {"hello": "world"}}'
 ```
 
-The queue `demo` is created on first use. Queue names are lowercase letters, digits, `-` and `_`; names starting with `_` are reserved for Workly's own queues. Open the dashboard to see the task's attempts, or ask the API:
+The queue `demo` is created on first use. Queue names are lowercase letters, digits, `-` and `_`; names starting with `_` are reserved for Workly. See the task's attempts in the dashboard, or with the API:
 
 ```sh
 curl localhost:7337/v1/tasks/<id>
@@ -65,11 +65,11 @@ const task = await workly.tasks.enqueue('emails', {
 });
 ```
 
-Tasks can also be delayed, deduplicated with an idempotency key, and given their own retries and timeout. The SDK READMEs cover every option.
+Tasks can also be delayed, deduplicated with an idempotency key, and given their own retries and timeout: see the SDK READMEs.
 
 ## Handle it
 
-Your endpoint receives a `POST` with the JSON payload. Answer with any 2xx when the work is done; anything else is retried. Check the signature against the raw body first:
+Your endpoint receives a `POST` with the JSON payload. Answer 2xx when the work is done; anything else is retried. Check the signature against the raw body first:
 
 ```python
 from flask import Flask, abort, request
@@ -109,7 +109,7 @@ Run your handler with `WORKLY_SIGNING_SECRET=workly-dev-secret`. Delivery is at 
 
 ## Shape the queue
 
-A queue delivers up to 3 tasks at once, with no rate limit, until you change it:
+A new queue delivers up to 3 tasks at once, with no rate limit:
 
 ```sh
 workly queues ls
@@ -117,7 +117,7 @@ curl -X PUT localhost:7337/v1/queues/emails -d '{"rate_per_second": 5, "max_conc
 workly queues pause emails
 ```
 
-When a handler has been failing, see its failures grouped by error, fix it, and replay them:
+When a handler has been failing, see its failures grouped by error, fix it, and retry them:
 
 ```sh
 workly queues failures emails
@@ -136,5 +136,5 @@ workly schedules get heartbeat       # its next times and recent runs
 
 ## Next
 
-- Connect your coding agent over [MCP](mcp.md), so it can enqueue test tasks and read failures while you work on a handler.
+- Connect your coding agent over [MCP](mcp.md) to enqueue test tasks and read failures while you work on a handler.
 - Go to production with [self-hosting](self-hosting.md), or point `WORKLY_URL` at a hosted server.
