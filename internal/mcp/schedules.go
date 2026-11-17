@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Schedules are separate from queues: a schedule calls its URL on a cron
@@ -58,7 +59,33 @@ func scheduleOverview(s map[string]any) map[string]any {
 func scheduleDetail(s map[string]any) map[string]any {
 	truncateBody(s)
 	scheduleTarget(s)
+	localSlots(s, "next_runs", "next_runs_if_resumed")
 	return withNulls(s, "paused_at", "next_run_at", "last_run", "payload", "body", "on_complete")
+}
+
+// localSlots rewrites the slot lists at keys with the schedule's UTC offset,
+// e.g. 2026-11-22T02:30:00+01:00 for Europe/Stockholm: the same instants, in
+// the time the cron expression is read in, so it is easier to check.
+func localSlots(s map[string]any, keys ...string) {
+	tz, _ := s["timezone"].(string)
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		return
+	}
+	for _, k := range keys {
+		slots, _ := s[k].([]any)
+		for i, v := range slots {
+			if t := timeValue(v); !t.IsZero() {
+				slots[i] = t.In(loc).Format(time.RFC3339)
+			}
+		}
+	}
+}
+
+func timeValue(v any) time.Time {
+	s, _ := v.(string)
+	t, _ := time.Parse(time.RFC3339Nano, s)
+	return t
 }
 
 // scheduleTarget gives a schedule one target: url or workflow, the other
@@ -78,7 +105,7 @@ func scheduleTarget(s map[string]any) {
 }
 
 var getSchedule = newTool("get_schedule", "Get schedule",
-	`A schedule's settings, its next five slots (next_runs) and its most recent runs, newest first. A paused schedule has paused_at (when it was paused; null while it runs), next_run_at null and empty next_runs; next_runs_if_resumed are the slots it would run at if resumed now. A "skipped" run was not delivered: skip_reason "overlap" means the previous run was still going, "missed" that the server was down at that time. `+workflowScheduleNote+` Start here to find out why a scheduled job didn't run or failed.`,
+	`A schedule's settings, its next five slots (next_runs, with the schedule's UTC offset, e.g. 02:30:00+01:00 for Europe/Stockholm) and its most recent runs, newest first. A paused schedule has paused_at (when it was paused; null while it runs), next_run_at null and empty next_runs; next_runs_if_resumed are the slots it would run at if resumed now. A "skipped" run was not delivered: skip_reason "overlap" means the previous run was still going, "missed" that the server was down at that time. `+workflowScheduleNote+` Start here to find out why a scheduled job didn't run or failed.`,
 	object(map[string]any{"schedule": scheduleProp}, "schedule"), readOnly,
 	func(ctx context.Context, api apiClient, args struct {
 		Schedule string `json:"schedule"`
@@ -194,7 +221,7 @@ var getRunDelivery = newTool("get_run_delivery", "Get run delivery request",
 	})
 
 var waitForRun = newTool("wait_for_run", "Wait for run",
-	"Waits until the run has had a delivery attempt since it was created or last retried by hand, or has finished, then returns the run and latest_attempt, the latest attempt in that time (null if there was none, e.g. a skipped run). attempted says whether there was such an attempt; finished whether the run is in a final state (succeeded, failed, cancelled or skipped). attempted with finished false means it will be delivered again. Returns at once if either already holds. Use it after trigger_schedule or retry_run. Times out after timeout_seconds with attempted and finished false and a reason. For a schedule that starts a workflow, it returns once the workflow run has started, not finished: follow workflow_run_id with get_workflow_run.",
+	"Waits until the run has had a delivery attempt since it was created or last retried by hand, or has finished, then returns the run and latest_attempt, the latest attempt in that time (null if there was none, e.g. a skipped run). attempted says whether there was such an attempt; finished whether the run is in a final state (succeeded, failed, cancelled or skipped). attempted with finished false means it will be delivered again. Returns at once if either already holds. Use it after trigger_schedule or retry_run. Times out after timeout_seconds with attempted and finished false, a reason and a reason_code: \"running\" if an attempt is still in flight, \"timeout\" if the run is due but hasn't been delivered yet. For a schedule that starts a workflow, it returns once the workflow run has started, not finished: follow workflow_run_id with get_workflow_run.",
 	object(map[string]any{
 		"id":              runIDProp,
 		"timeout_seconds": prop("number", "How long to wait (default 30).", "minimum", 1, "maximum", 60),
@@ -203,7 +230,7 @@ var waitForRun = newTool("wait_for_run", "Wait for run",
 		ID             string  `json:"id"`
 		TimeoutSeconds float64 `json:"timeout_seconds"`
 	}) (any, error) {
-		return waitFor(ctx, api, args.TimeoutSeconds, "run", apiPath("/v1/runs/%s", args.ID), runSummary)
+		return waitFor(ctx, api, args.TimeoutSeconds, "run", apiPath("/v1/runs/%s", args.ID), runSummary, nil)
 	})
 
 // Write tools.

@@ -39,9 +39,23 @@ var listGroups = newTool("list_groups", "List task groups",
 			}
 		}
 		var out map[string]any
-		err := api.do(ctx, "GET", "/v1/groups", q, nil, &out)
-		return out, err
+		if err := api.do(ctx, "GET", "/v1/groups", q, nil, &out); err != nil {
+			return nil, err
+		}
+		groups, _ := out["groups"].([]any)
+		for _, g := range groups {
+			if g, ok := g.(map[string]any); ok {
+				groupView(g)
+			}
+		}
+		return withNulls(out, "next_cursor"), nil
 	})
+
+// groupKeys are a group's fields that the API leaves out when they have no
+// value; tools return them as null.
+var groupKeys = []string{"name", "idempotency_key", "on_complete", "callback_task_id", "closed_at", "finished_at"}
+
+func groupView(g map[string]any) map[string]any { return withNulls(g, groupKeys...) }
 
 var getGroup = newTool("get_group", "Get task group",
 	`A task group's status and counts, its most recently failed tasks (what keeps it from succeeding) and its callback task, once it has completed. A group with failed or cancelled tasks completes as "failed". List all its tasks with list_tasks and group_id.`,
@@ -53,7 +67,7 @@ var getGroup = newTool("get_group", "Get task group",
 		if err := api.do(ctx, "GET", apiPath("/v1/groups/%s", args.ID), nil, nil, &group); err != nil {
 			return nil, err
 		}
-		out := map[string]any{"group": group}
+		out := map[string]any{"group": groupView(group)}
 		if n, _ := group["failed"].(float64); n > 0 {
 			var failed struct {
 				Tasks []map[string]any `json:"tasks"`

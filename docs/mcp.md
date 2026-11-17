@@ -102,13 +102,13 @@ Read tools (marked read-only, so clients can run them without asking):
 | `list_queues` | All queues in summary: paused or not, rate and concurrency limits, current work (due, scheduled, running, failed, how far behind) and the last 24 hours (succeeded, failed, and p50 and p95 attempt duration with its sample size) |
 | `get_queue` | One queue with its full policy, the last 24 hours, how many tasks succeeded, failed and were cancelled recently, and its failed tasks grouped by error |
 | `list_tasks` | Task summaries, newest first, by queue, state, group, idempotency key, last error and creation time. Each says when its first attempt started and how long the latest took, so queue wait and handler time can be told apart |
-| `get_task` | A task with its attempts: outcomes, status codes, errors, response bodies, durations |
+| `get_task` | A task with its attempts (outcomes, status codes, errors, response bodies, durations), how many attempts it gets and how many are left |
 | `get_task_delivery` | The exact signed request for a task, with a curl command to replay it against a local handler |
-| `wait_for_task` | Waits for an attempt since the task was enqueued or retried, and returns how the latest went, with whether the task has finished or will be retried |
+| `wait_for_task` | Waits for an attempt since the task was enqueued or retried, and returns how the latest went, with whether the task has finished or will be retried. Returns at once with the reason if its queue is paused or it isn't due before the wait would end |
 | `list_groups` | [Task groups](groups.md), newest first, with their status and counts, by status and name |
 | `get_group` | One group: its counts, its most recently failed tasks and its callback task |
 | `list_schedules` | All [schedules](schedules.md) in summary: cron, timezone, URL, paused (and since when), next run and how the last one went |
-| `get_schedule` | One schedule, its next five times and its recent runs, including skipped ones and why. A paused schedule's times are `next_runs_if_resumed` |
+| `get_schedule` | One schedule, its next five times (with the schedule's UTC offset) and its recent runs, including skipped ones and why. A paused schedule's times are `next_runs_if_resumed` |
 | `list_runs` | Runs of one schedule or of all of them, newest first, optionally by state |
 | `get_run` | A run with its attempts |
 | `get_run_delivery` | The exact signed request for a run, with a curl command |
