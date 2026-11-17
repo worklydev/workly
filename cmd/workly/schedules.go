@@ -124,8 +124,8 @@ URL) starts a run of that workflow, with --payload as the run's input.
 
 Declarative, like the API: the schedule ends up with exactly the settings
 given, and settings you leave out are reset to their defaults. Pausing is
-separate (see pause and resume). --payload and --body take a value, @file, or
-- for stdin.
+separate (see pause and resume). --payload and --body take a value, @file,
+or - for stdin.
 
 --cron takes five fields (minute hour day-of-month month day-of-week), or
 @hourly, @daily, @weekly, @monthly or @yearly.`,

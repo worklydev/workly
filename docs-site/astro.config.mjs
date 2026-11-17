@@ -1,3 +1,4 @@
+import { readFileSync, writeFileSync } from 'node:fs';
 import { sep } from 'node:path';
 import starlight from '@astrojs/starlight';
 import { defineConfig } from 'astro/config';
@@ -19,6 +20,26 @@ const docs = {
   },
 };
 
+/**
+ * llms-full.txt and llms-small.txt are read on their own, without a page to
+ * resolve /docs/... links against, so their links get the site's origin.
+ */
+const absoluteLlmsLinks = {
+  name: 'workly-llms-links',
+  hooks: {
+    'astro:build:done': ({ dir }) => {
+      for (const name of ['llms-full.txt', 'llms-small.txt']) {
+        const file = new URL(name, dir);
+        const text = readFileSync(file, 'utf8');
+        writeFileSync(file, text.replace(/\]\(\/docs\//g, '](https://workly.run/docs/'));
+      }
+    },
+  },
+};
+
+// The order of the sidebar, which llms-full.txt follows too.
+const order = ['index', 'quickstart', 'concepts', 'schedules', 'groups', 'workflows', 'callbacks', 'alerts', 'deploy', 'self-hosting', 'mcp', 'sdks/python', 'sdks/typescript', 'cli', 'configuration', 'metrics', 'performance'];
+
 export default defineConfig({
   // Served at workly.run/docs by a Workers route, so search engines and
   // assistants see one site. `base` only prefixes links; outDir puts the files
@@ -28,6 +49,7 @@ export default defineConfig({
   outDir: './dist/docs',
   integrations: [
     docs,
+    absoluteLlmsLinks,
     starlight({
       title: 'Workly',
       description: 'The open-source HTTP task queue.',
@@ -56,10 +78,14 @@ export default defineConfig({
             '- Handlers are plain HTTP endpoints in any language; there are Python (`pip install workly`) and TypeScript (`npm install @worklydev/sdk`) SDKs, a CLI and an MCP server.',
             '- `workly dev` runs a local server and dashboard on localhost:7337 with no configuration. Hosted Workly is at https://api.workly.run with an API key.',
             '- Delivery is at least once: handlers should be idempotent, using the `Workly-Task-Id` header.',
+            '- The SDK pages (https://workly.run/docs/sdks/python/ and https://workly.run/docs/sdks/typescript/) list every method; the CLI reference (https://workly.run/docs/cli/) every command and flag; the OpenAPI spec (https://workly.run/docs/api/openapi.yaml) every endpoint.',
             `- These docs describe Workly ${ref}. Every page is also available as Markdown: https://workly.run/docs/quickstart.md for https://workly.run/docs/quickstart/, and https://workly.run/docs/index.md for the overview.`,
           ].join('\n'),
           // Starlight's "Section titled …" heading links are noise in plain text.
           customSelectors: { all: ['.sl-anchor-link'] },
+          promote: order,
+          // The small set keeps what's needed to write code against Workly.
+          exclude: ['cli', 'configuration', 'metrics', 'performance', 'self-hosting'],
           optionalLinks: [
             { label: 'API reference', url: 'https://workly.run/docs/api/openapi.yaml', description: 'the OpenAPI spec for the HTTP API' },
             { label: 'workly.run', url: 'https://workly.run/llms.txt', description: 'the product, pricing and comparisons with other tools' },
@@ -82,8 +108,16 @@ export default defineConfig({
           items: [{ slug: 'schedules' }, { slug: 'groups' }, { slug: 'workflows' }, { slug: 'callbacks' }, { slug: 'alerts' }, { slug: 'deploy' }, { slug: 'self-hosting' }, { slug: 'mcp', label: 'MCP' }],
         },
         {
+          label: 'SDKs',
+          items: [
+            { slug: 'sdks/python', label: 'Python' },
+            { slug: 'sdks/typescript', label: 'TypeScript' },
+          ],
+        },
+        {
           label: 'Reference',
           items: [
+            { slug: 'cli', label: 'CLI' },
             { slug: 'configuration' },
             { label: 'API reference', link: '/api/' },
             { slug: 'metrics' },

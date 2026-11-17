@@ -11,6 +11,9 @@ on:
       - "api/**"
       - "internal/**/migrations/**"
       - "internal/*/oapi-codegen.yaml"
+      # Embedded in the binary for get_docs; docs/cli.md is checked against the commands.
+      - "docs/*.md"
+      - "sdks/*/README.md"
       - ".github/workflows/server.yml"
 
 jobs:

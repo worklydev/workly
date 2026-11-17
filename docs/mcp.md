@@ -117,6 +117,7 @@ Read tools (marked read-only, so clients can run them without asking):
 | `get_workflow` | One workflow's definition: steps, dependencies, queues |
 | `list_workflow_runs` | Runs of one workflow or of all of them, newest first, optionally by status |
 | `get_workflow_run` | A run with each step's status, task, last result and what it is blocked by or waiting for |
+| `get_docs` | These docs, for the server's version, as Markdown: the list of pages, or one page, SDK and CLI references included |
 
 Write tools (`WORKLY_MCP=full`):
 

@@ -1,11 +1,24 @@
 ---
 // The API reference: Scalar renders api/openapi.yaml (copied into public/api/ by
 // scripts/sync.mjs), on the dashboard's tokens so it reads like the rest of the docs.
+//
+// Scalar runs in the browser, so the page also lists every endpoint in its
+// HTML, for agents and anything else that reads it without JavaScript. With
+// JavaScript the list is hidden from the start; it sits outside #app, since
+// Scalar would try to hydrate anything inside it.
+import { readFileSync } from 'node:fs';
+import { parse } from 'yaml';
 import '../../../../dashboard/src/tokens.css';
 import '@fontsource-variable/geist';
 import '@fontsource-variable/jetbrains-mono';
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+// Builds run in docs-site/; import.meta.url is the bundled chunk's, elsewhere.
+const spec = parse(readFileSync('../api/openapi.yaml', 'utf8'));
+const methods = ['get', 'post', 'put', 'patch', 'delete'];
+const endpoints = Object.entries(spec.paths).flatMap(([path, ops]) =>
+  methods.filter((m) => ops[m]).map((m) => ({ method: m.toUpperCase(), path, summary: ops[m].summary ?? '' })),
+);
 ---
 
 <!doctype html>
@@ -14,16 +27,36 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>API reference | Workly</title>
+    <meta name="description" content="The Workly HTTP API: every endpoint for tasks, queues, groups, schedules, runs, workflows and alerts, from its OpenAPI spec." />
+    <link rel="alternate" type="application/yaml" title="OpenAPI spec" href={`${base}/api/openapi.yaml`} />
     <link rel="icon" href={`${base}/favicon.svg`} type="image/svg+xml" />
     <script is:inline>
       // Follow the theme picked in the docs (Starlight stores it), so both look the same.
       const stored = localStorage.getItem('starlight-theme');
       const dark = stored ? stored === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
       document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+      document.documentElement.classList.add('js');
     </script>
   </head>
   <body>
     <a class="back" href={`${base}/`}>← Workly docs</a>
+    <main class="static">
+        <h1>Workly API reference</h1>
+        <p>
+          Every endpoint of the HTTP API. The full contract, with every request and response schema, is the
+          OpenAPI spec: <a href={`${base}/api/openapi.yaml`}>{`https://workly.run${base}/api/openapi.yaml`}</a>.
+          Requests to <code>/v1</code> take <code>Authorization: Bearer $WORKLY_API_KEY</code>; hosted Workly is at
+          <code>https://api.workly.run</code>.
+        </p>
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>What it does</th></tr></thead>
+          <tbody>
+            {endpoints.map((e) => (
+              <tr><td><code>{e.method}</code></td><td><code>{e.path}</code></td><td>{e.summary}</td></tr>
+            ))}
+          </tbody>
+        </table>
+    </main>
     <div id="app"></div>
     <script is:inline src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.72.2"></script>
     <script is:inline define:vars={{ specUrl: `${base}/api/openapi.yaml` }}>
@@ -60,6 +93,25 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
   }
   .back:hover {
     color: var(--foreground);
+  }
+  .js .static {
+    display: none;
+  }
+  .static {
+    max-width: 60rem;
+    margin: 0 auto;
+    padding: 24px 16px;
+    font-size: 14px;
+  }
+  .static table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .static th,
+  .static td {
+    padding: 4px 8px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
   }
 
   /* Scalar's theme variables, onto the tokens; they switch with data-theme. */

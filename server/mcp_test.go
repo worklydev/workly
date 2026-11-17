@@ -124,7 +124,7 @@ func (c mcpClient) toolNames() []string {
 
 var readTools = []string{"list_queues", "get_queue", "list_tasks", "get_task", "get_task_delivery", "wait_for_task",
 	"list_groups", "get_group", "list_schedules", "get_schedule", "list_runs", "get_run", "get_run_delivery", "wait_for_run",
-	"list_workflows", "get_workflow", "list_workflow_runs", "get_workflow_run"}
+	"list_workflows", "get_workflow", "list_workflow_runs", "get_workflow_run", "get_docs"}
 
 func TestMCPProtocol(t *testing.T) {
 	c := mcpClient{t: t, h: newServer(t, server.Options{DisableDispatcher: true, Version: "1.2.3"}).Handler()}
@@ -961,5 +961,41 @@ func TestMCPDelete(t *testing.T) {
 	}
 	if got := c.call("list_workflows", map[string]any{}); len(got["workflows"].([]any)) != 0 {
 		t.Errorf("list_workflows after delete = %v", got)
+	}
+}
+
+func TestMCPDocs(t *testing.T) {
+	c := mcpClient{t: t, h: newServer(t, server.Options{DisableDispatcher: true}).Handler()}
+
+	list := c.call("get_docs", map[string]any{})
+	pages, _ := list["pages"].([]any)
+	var names []string
+	for _, p := range pages {
+		names = append(names, p.(map[string]any)["page"].(string))
+	}
+	for _, want := range []string{"index", "quickstart", "workflows", "sdks/python", "sdks/typescript", "cli"} {
+		if !slices.Contains(names, want) {
+			t.Errorf("pages = %v, missing %s", names, want)
+		}
+	}
+	if names[0] != "index" || names[1] != "quickstart" {
+		t.Errorf("pages start %v, want the sidebar's order", names[:2])
+	}
+
+	// A page is Markdown as it is, not JSON, with links to other pages on the
+	// docs site.
+	text, isError := c.callRaw("get_docs", map[string]any{"page": "quickstart"})
+	if isError || !strings.HasPrefix(text, "# Quickstart\n") {
+		t.Fatalf("quickstart = %.200s", text)
+	}
+	if !strings.Contains(text, "](https://workly.run/docs/schedules/)") || strings.Contains(text, "](schedules.md") {
+		t.Errorf("quickstart's links aren't absolute:\n%s", text)
+	}
+	if text, _ := c.callRaw("get_docs", map[string]any{"page": "sdks/python"}); !strings.Contains(text, "client.workflows.put(") {
+		t.Errorf("sdks/python = %.200s", text)
+	}
+
+	if text, isError := c.callRaw("get_docs", map[string]any{"page": "nope"}); !isError || !strings.Contains(text, "page") {
+		t.Errorf("unknown page = %q, error %v", text, isError)
 	}
 }
