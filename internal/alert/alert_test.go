@@ -260,10 +260,12 @@ func fakeSMTP(t *testing.T) *smtpServer {
 						}
 						reply("250 ok")
 					case "QUIT":
-						reply("221 bye")
+						// Record before replying: the client returns once it
+						// reads the reply, and the test reads msgs right after.
 						s.mu.Lock()
 						s.msgs = append(s.msgs, transcript.String())
 						s.mu.Unlock()
+						reply("221 bye")
 						return
 					default:
 						reply("250 ok")
