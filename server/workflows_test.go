@@ -273,9 +273,8 @@ func TestWorkflowEndToEnd(t *testing.T) {
 // its payload as the run's input.
 func TestScheduledWorkflow(t *testing.T) {
 	ready := make(chan net.Addr, 1)
-	q := &quota{limit: 100}
 	srv := newServer(t, server.Options{
-		Addr: "127.0.0.1:0", DevEndpoints: true, Admission: q,
+		Addr: "127.0.0.1:0", DevEndpoints: true,
 		OnReady: func(addr net.Addr) { ready <- addr },
 	})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -349,11 +348,5 @@ func TestScheduledWorkflow(t *testing.T) {
 	last := do(t, h, "GET", "/v1/schedules/nightly", "").json["last_run"].(map[string]any)
 	if last["workflow_run_id"] != wfRunID || last["workflow_run_status"] != "succeeded" {
 		t.Errorf("schedule last_run = %v", last)
-	}
-	// Its one step is a task, counted as the API counts a run it starts.
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	if q.created != 1 {
-		t.Errorf("tasks created = %d, want 1", q.created)
 	}
 }

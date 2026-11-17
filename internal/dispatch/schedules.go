@@ -168,6 +168,9 @@ func (s *scheduler) claim(ctx, deliverCtx context.Context, wg *sync.WaitGroup, d
 				r = d.deliverer.deliverRun(deliverCtx, c.Run, c.Schedule.Timeout)
 			}
 			s.finish(c.Run, decideRun(c.Schedule.ScheduleConfig, c.Run, r, rand.Float64))
+			if c.Schedule.Workflow == "" {
+				d.executed(deliverCtx, c.Run.WorkspaceID, KindScheduleRun, c.Run.AttemptsSinceReplay())
+			}
 		})
 	}
 	return len(claims) == free, nil

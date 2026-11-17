@@ -5,6 +5,8 @@ export { apiKeyAuth, type Auth } from './auth';
 export type { GettingStarted, NavItem } from './context';
 export { PageHeader } from './components/PageHeader';
 export { CodePanel } from './components/CodePanel';
+export { ChartAxis, ChartFrame } from './components/Chart';
+export { niceCeil } from './lib/activity';
 export { CodeTabs, type CodeTab } from './components/CodeTabs';
 export { ConfirmButton } from './components/ConfirmButton';
 export { CopyButton } from './components/CopyButton';

@@ -87,11 +87,12 @@ type Options struct {
 	// Changed, if set, is told when a workspace's tasks or runs change
 	// state, so dashboards can refresh. It must not block.
 	Changed func(workspace.ID)
-	// TasksCreated, if set, is told how many tasks a schedule created by
-	// starting a workflow run (one per step), as the API's Admission is for
-	// runs started through it. A scheduled run isn't refused: its slot has
-	// already come.
-	TasksCreated func(ctx context.Context, ws workspace.ID, n int)
+	// Executed, if set, is told of each execution: the first delivery
+	// attempt of a task or schedule run since it was created or retried by
+	// hand, once the attempt is done. A schedule run that starts a workflow
+	// isn't one (its steps are). It must not block for long: it is called
+	// from the delivery's goroutine.
+	Executed func(ctx context.Context, ws workspace.ID, kind Kind)
 }
 
 type Dispatcher struct {
@@ -467,6 +468,7 @@ func (d *Dispatcher) dispatch(ctx, deliverCtx context.Context, wg *sync.WaitGrou
 func (d *Dispatcher) deliver(ctx context.Context, q store.Queue, t store.Task) {
 	r := d.deliverer.deliver(ctx, t, t.EffectiveTimeout(q.QueueConfig))
 	d.finish(q, t, decide(q.QueueConfig, t, r, rand.Float64))
+	d.executed(ctx, t.WorkspaceID, taskKind(t), t.AttemptsSinceReplay())
 }
 
 // finish records the attempt and logs it: one line per attempt.

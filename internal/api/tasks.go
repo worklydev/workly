@@ -35,9 +35,6 @@ func (h Handlers) CreateTask(ctx context.Context, req CreateTaskRequestObject) (
 	if err != nil {
 		return nil, enqueueError(err, req.Queue)
 	}
-	if created && h.Admission != nil {
-		h.Admission.TasksCreated(ctx, ws, 1)
-	}
 	if created {
 		h.Metrics.TasksEnqueued.Inc(string(task.WorkspaceID), task.Queue)
 		return CreateTask201JSONResponse(toTask(task)), nil
@@ -82,16 +79,11 @@ func (h Handlers) CreateTasks(ctx context.Context, req CreateTasksRequestObject)
 		return nil, enqueueError(err, req.Queue)
 	}
 	out := CreateTasks200JSONResponse{Results: make([]BatchEnqueueResult, len(tasks))}
-	n := 0
 	for i, t := range tasks {
 		out.Results[i] = BatchEnqueueResult{Created: created[i], Task: toTask(t)}
 		if created[i] {
 			h.Metrics.TasksEnqueued.Inc(string(t.WorkspaceID), t.Queue)
-			n++
 		}
-	}
-	if n > 0 && h.Admission != nil {
-		h.Admission.TasksCreated(ctx, ws, n)
 	}
 	return out, nil
 }

@@ -429,9 +429,6 @@ func (h Handlers) startWorkflowRun(ctx context.Context, name string, nr store.Ne
 	if err != nil {
 		return store.WorkflowRun{}, false, err
 	}
-	if created && h.Admission != nil {
-		h.Admission.TasksCreated(ctx, ws, len(r.Config.Steps))
-	}
 	if r, err = h.Store.GetWorkflowRun(ctx, ws, r.ID); err != nil {
 		return store.WorkflowRun{}, false, err
 	}

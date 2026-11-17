@@ -39,6 +39,7 @@ type (
 	Config            = config.Config
 	MCPMode           = mcp.Mode
 	Admission         = api.Admission
+	ExecutionKind     = dispatch.Kind
 	ScheduleAdmission = api.ScheduleAdmission
 	Mailer            = alert.Mailer
 	Email             = alert.Email
@@ -63,6 +64,14 @@ func DeliveryRefused(err error) error { return dispatch.Refused(err) }
 // code and message in the API's error shape, e.g. 403 "quota_exceeded". Use
 // 429 only when retrying soon will work: the SDKs retry every 429.
 func LimitError(status int, code, message string) error { return api.LimitError(status, code, message) }
+
+// Kinds of execution, for Options.Executed.
+const (
+	ExecutedTask         = dispatch.KindTask
+	ExecutedWorkflowStep = dispatch.KindWorkflowStep
+	ExecutedCallback     = dispatch.KindCallback
+	ExecutedScheduleRun  = dispatch.KindScheduleRun
+)
 
 // MCP modes, for Options.MCP.
 const (
@@ -202,9 +211,16 @@ type Options struct {
 	DeliveryDialControl func(network, address string, c syscall.RawConn) error
 	// Admission, if set, is asked before tasks are enqueued and schedules
 	// created or replaced, through the API and so through MCP, and can
-	// refuse with LimitError. For quotas on a hosted service. It is also
-	// told of the tasks a schedule creates by starting a workflow run.
+	// refuse with LimitError. For quotas on a hosted service.
 	Admission Admission
+	// Executed, if set, is told of each execution, for metering usage: the
+	// first delivery attempt of a task, workflow step, callback or schedule
+	// run since it was created or retried by hand, once the attempt is
+	// done. Retries with backoff aren't executions, and neither is a
+	// schedule run that starts a workflow (its steps are). It is called
+	// from deliveries' goroutines, so it must be safe for concurrent use
+	// and not block for long.
+	Executed func(ctx context.Context, ws WorkspaceID, kind ExecutionKind)
 	// Mailer, if set, sends alert emails, so workspaces can have email
 	// alert channels; SMTPMailer builds one. Slack channels need nothing.
 	Mailer Mailer
@@ -310,10 +326,6 @@ func New(opts Options) (*Server, error) {
 		s.handler = opts.WrapHandler(s.handler)
 	}
 	if !opts.DisableDispatcher {
-		var tasksCreated func(context.Context, WorkspaceID, int)
-		if opts.Admission != nil {
-			tasksCreated = opts.Admission.TasksCreated
-		}
 		s.dispatcher = dispatch.New(dispatch.Options{
 			Store:                 opts.Store,
 			Logger:                opts.Logger,
@@ -331,7 +343,7 @@ func New(opts Options) (*Server, error) {
 			DialControl:           opts.DeliveryDialControl,
 			Alerts:                &alert.Notifier{Store: opts.Store, Sender: alerts, Logger: opts.Logger},
 			Changed:               hub.Changed,
-			TasksCreated:          tasksCreated,
+			Executed:              opts.Executed,
 		})
 	}
 	return s, nil
