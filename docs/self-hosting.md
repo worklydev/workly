@@ -13,7 +13,7 @@ docker run -p 7337:7337 \
   -e WORKLY_DATABASE_URL=postgres://user:pass@db:5432/workly \
   -e WORKLY_SIGNING_SECRET=... \
   -e WORKLY_API_KEY=... \
-  ghcr.io/worklydev/workly:0.4.5
+  ghcr.io/worklydev/workly:0.4.6
 ```
 
 To run Workly and Postgres together on one machine, use [`deploy/docker/compose.yaml`](../deploy/docker/compose.yaml):
