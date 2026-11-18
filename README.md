@@ -94,10 +94,10 @@ for company in companies:
 workly.groups.close(group.id)
 ```
 
-From your coding agent, over [MCP](docs/mcp.md): every server serves `/mcp`, so an agent can enqueue test tasks, see why deliveries fail and retry them once the handler is fixed. For Claude Code:
+From your coding agent, over [MCP](docs/mcp.md): every server serves `/mcp`, so an agent can enqueue test tasks, see why deliveries fail and retry them once the handler is fixed. For Claude Code (Codex, Cursor and VS Code are in [the MCP docs](docs/mcp.md#connect)):
 
 ```sh
-claude mcp add --transport http workly http://localhost:7337/mcp
+claude mcp add --transport http workly-dev http://localhost:7337/mcp
 ```
 
 Or with the CLI:

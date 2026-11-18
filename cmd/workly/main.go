@@ -156,7 +156,7 @@ starts: restart it to apply changes to the file.`,
 				}
 				if cfg.MCP != server.MCPOff {
 					fmt.Fprintf(os.Stderr, "  MCP:             http://localhost:%d/mcp (%s)\n", port, cfg.MCP)
-					fmt.Fprintf(os.Stderr, "\n  Connect Claude Code: claude mcp add --transport http workly http://localhost:%d/mcp\n", port)
+					fmt.Fprintf(os.Stderr, "\n  Connect Claude Code: claude mcp add --transport http workly-dev http://localhost:%d/mcp\n", port)
 				}
 				fmt.Fprintln(os.Stderr)
 			})

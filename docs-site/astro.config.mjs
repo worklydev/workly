@@ -65,11 +65,17 @@ export default defineConfig({
         // No traffic-light title bar on shell blocks: a plain panel, like the dashboard's CodePanel.
         defaultProps: { frame: 'code' },
         styleOverrides: { frames: { terminalTitlebarDotsOpacity: '0' } },
+        // ```prompt marks text to paste into an agent; public/code-blocks.js collapses it.
+        shiki: { langAlias: { prompt: 'txt' } },
       },
       // /docs/llms.txt, llms-full.txt and llms-small.txt, so an assistant can
       // read all the docs in one fetch. workly.run/llms.txt links here, and
       // so does every page's <head>.
-      head: [{ tag: 'link', attrs: { rel: 'alternate', type: 'text/plain', title: 'All of the docs, for LLMs', href: '/docs/llms-full.txt' } }],
+      head: [
+        { tag: 'link', attrs: { rel: 'alternate', type: 'text/plain', title: 'All of the docs, for LLMs', href: '/docs/llms-full.txt' } },
+        // Tabbed and collapsed code blocks (public/code-blocks.js).
+        { tag: 'script', attrs: { src: '/docs/code-blocks.js', defer: true } },
+      ],
       plugins: [
         starlightLlmsTxt({
           description:

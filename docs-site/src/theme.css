@@ -344,3 +344,76 @@ footer .meta a {
 footer .meta a:hover {
   color: var(--foreground);
 }
+
+/* Tabbed code blocks (public/code-tabs.js): the tab bar takes the place of the
+   blocks' own title bars, joined to the block below it. */
+.code-tabs {
+  margin-top: 1rem;
+}
+.code-tabs > [hidden] {
+  display: none;
+}
+.code-tabs > .expressive-code {
+  margin-top: 0;
+}
+.code-tabs > .expressive-code .frame > figcaption {
+  display: none;
+}
+.code-tabs > .expressive-code .frame pre {
+  border-top: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+.code-tabs-bar {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0 0.5rem;
+  position: relative;
+  z-index: 1;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem 0.5rem 0 0;
+  background: var(--card);
+  font-size: var(--sl-text-xs);
+}
+.code-tabs-bar button {
+  margin-bottom: -1px;
+  padding: 0.5rem;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: none;
+  color: var(--faint);
+  font: inherit;
+  cursor: pointer;
+}
+.code-tabs-bar button:hover,
+.code-tabs-bar button[aria-selected='true'] {
+  color: var(--foreground);
+}
+.code-tabs-bar button[aria-selected='true'] {
+  border-bottom-color: var(--primary);
+}
+
+/* Collapsed ```prompt blocks (public/code-blocks.js): two lines, fading out. */
+.prompt-block.collapsed pre > code {
+  max-height: calc(2 * 1.75 * var(--sl-text-code-sm));
+  /* The space below goes on the pre, so the third line can't show through it. */
+  padding-bottom: 0;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, black 40%, transparent);
+}
+.prompt-block.collapsed pre {
+  padding-bottom: 0.75rem;
+}
+.prompt-toggle {
+  margin-top: 0.375rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--primary);
+  font: inherit;
+  font-size: var(--sl-text-sm);
+  cursor: pointer;
+}
+.prompt-toggle:hover {
+  text-decoration: underline;
+}
