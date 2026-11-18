@@ -185,7 +185,7 @@ Deploy the file with your app. With GitHub Actions:
     curl -fsSL "https://raw.githubusercontent.com/worklydev/workly/$WORKLY_VERSION/install.sh" | sh
     workly deploy --yes
   env:
-    WORKLY_VERSION: v0.4.6   # pin the CLI, and bump it like any other dependency
+    WORKLY_VERSION: v0.4.7   # pin the CLI, and bump it like any other dependency
     WORKLY_URL: https://api.workly.run
     WORKLY_API_KEY: ${{ secrets.WORKLY_API_KEY }}
     API_URL: https://api.example.com
@@ -208,7 +208,7 @@ jobs:
           curl -fsSL "https://raw.githubusercontent.com/worklydev/workly/$WORKLY_VERSION/install.sh" | sh
           workly deploy --yes
         env:
-          WORKLY_VERSION: v0.4.6
+          WORKLY_VERSION: v0.4.7
           WORKLY_URL: https://api.workly.run
           WORKLY_API_KEY: ${{ secrets.WORKLY_API_KEY }}
 ```
@@ -217,7 +217,7 @@ The environment's name is whatever your host calls it (Vercel's is `Production`)
 
 GitHub starts this workflow for every status the host reports. Railway, for example, reports `in_progress` and then `success`, so each deploy starts two runs: the first shows as skipped, and the one for `success` deploys.
 
-In a Python project, `workly-cli==0.4.6` in your dev or CI requirements installs the same pinned binary with `pip` (it's what `workly[cli]` pulls in).
+In a Python project, `workly-cli==0.4.7` in your dev or CI requirements installs the same pinned binary with `pip` (it's what `workly[cli]` pulls in).
 
 Run `workly validate` in pull requests to catch mistakes before they merge. It needs no server or API key, only the environment variables the file uses.
 
@@ -245,7 +245,7 @@ jobs:
             exit "$code"
           fi
         env:
-          WORKLY_VERSION: v0.4.6
+          WORKLY_VERSION: v0.4.7
           WORKLY_URL: https://api.workly.run
           WORKLY_API_KEY: ${{ secrets.WORKLY_API_KEY }}
 ```
