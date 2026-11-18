@@ -60,6 +60,20 @@ codex mcp add workly --url https://api.workly.run/mcp  # opens the sign-in
 
 Cursor can also install it from a link: [Add to Cursor](cursor://anysphere.cursor-deeplink/mcp/install?name=workly&config=eyJ1cmwiOiJodHRwczovL2FwaS53b3JrbHkucnVuL21jcCJ9). For Claude or ChatGPT, see [chat apps](#claude-chatgpt-and-other-chat-apps).
 
+#### Plugin for Claude Code and Codex
+
+The Workly plugin ([`plugin/`](../plugin)) adds the same server along with two skills: one for finding out why deliveries fail and retrying them once they're fixed, and one for adding Workly to an app and testing the handler end to end. It signs in the same way.
+
+```sh title="Claude Code"
+claude plugin marketplace add worklydev/workly
+claude plugin install workly@workly
+```
+
+```sh title="Codex"
+codex plugin marketplace add worklydev/workly
+codex plugin add workly@workly
+```
+
 For an agent that can't open a browser, such as one in CI, create an API key in the console (**API keys**) and send it as a bearer token, as for a [self-hosted](#self-hosted) server. The agent gets that key's workspace.
 
 ### Local dev server: `workly dev`

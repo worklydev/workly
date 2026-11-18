@@ -1,0 +1,20 @@
+{
+  "name": "workly",
+  "interface": {
+    "displayName": "Workly"
+  },
+  "plugins": [
+    {
+      "name": "workly",
+      "source": {
+        "source": "local",
+        "path": "./plugin"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

@@ -1,0 +1,99 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "workly",
+  "version": "1.0.0",
+  "description": "Workly is an HTTP task queue and scheduler. This plugin connects your agent to hosted Workly over MCP, so it can see what your queues, schedules and workflows are doing, find out why deliveries fail, and retry them once they're fixed.",
+  "author": {
+    "name": "Workly",
+    "email": "contact@workly.run",
+    "url": "https://workly.run"
+  },
+  "homepage": "https://workly.run/docs/mcp/",
+  "repository": "https://github.com/worklydev/workly",
+  "license": "Apache-2.0",
+  "keywords": ["task-queue", "background-jobs", "cron", "webhooks", "workflows", "retries"],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Workly",
+        "shortDescription": "HTTP task queue and scheduler",
+        "longDescription": "Workly delivers HTTP requests to your endpoints with retries, runs cron schedules and multi-step workflows, and records every delivery attempt: status code, error, the start of the response body and how long it took.\n\nConnect your Workly workspace to:\n- See each queue's backlog, failures and latency, and each schedule's recent runs.\n- Find out why tasks fail: failures grouped by error, each attempt's response, and the exact signed request with a curl command to replay it against a local handler.\n- Retry, cancel or pause work once the handler is fixed, enqueue test tasks, and trigger schedules and workflows.\n- Read Workly's docs, SDK and CLI references for the server you're connected to.\n\nFor developers who run background jobs, webhooks and scheduled tasks on Workly. You sign in to your Workly account and choose a workspace and read-only or read and write access when you connect; a read-only connection can't change anything. Workly only sees what you send it, and the plugin works only on hosted Workly (workly.run).",
+        "developerName": "Workly",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Inspect queues, tasks, schedules and workflows",
+          "Debug failed deliveries",
+          "Retry, cancel and pause work",
+          "Enqueue tasks and trigger schedules"
+        ],
+        "websiteURL": "https://workly.run/",
+        "supportURL": "https://workly.run/support/",
+        "privacyPolicyURL": "https://workly.run/privacy/",
+        "termsOfServiceURL": "https://workly.run/terms/",
+        "defaultPrompt": [
+          "Which of my Workly queues have failing tasks, and why?",
+          "Show me how my Workly schedules ran in the last day.",
+          "Why did the last run of my workflow fail?"
+        ],
+        "brandColor": "#FF5A0F",
+        "composerIcon": "./assets/logo.png",
+        "logo": "./assets/logo.png"
+      },
+      "review": {
+        "test_cases": {
+          "positive": [
+            {
+              "description": "Summarize queue health and find the failing queues",
+              "prompt": "Which of my Workly queues have failing tasks, and why?",
+              "tools_triggered": "list_queues, get_queue",
+              "expected_behavior": "Lists the demo workspace's queues with their recent successes and failures, and names the queues with failed tasks (emails and webhooks), with each queue's failures grouped by error: HTTP 500 for emails and a timeout for webhooks."
+            },
+            {
+              "description": "Explain one failed task from its attempts",
+              "prompt": "Pick one failed task in the emails queue and explain what happened on each attempt.",
+              "tools_triggered": "list_tasks, get_task",
+              "expected_behavior": "Finds a failed task in the emails queue and describes its attempts: each answered 500 Internal Server Error, the retries backed off, and the task failed after its last attempt."
+            },
+            {
+              "description": "Report a schedule's recent runs",
+              "prompt": "How has the sync-crm schedule been doing? When does it run next?",
+              "tools_triggered": "get_schedule",
+              "expected_behavior": "Shows the sync-crm schedule's cron timetable, its next run times and its recent runs, which fail with 503 Service Unavailable."
+            },
+            {
+              "description": "Explain where a workflow run stopped",
+              "prompt": "Why did the latest run of the onboarding workflow fail?",
+              "tools_triggered": "list_workflow_runs, get_workflow_run",
+              "expected_behavior": "Finds the latest onboarding run and explains it: create-account succeeded, send-welcome failed with HTTP 500, and schedule-followup was skipped because it depends on send-welcome."
+            },
+            {
+              "description": "Enqueue a test task and report the result",
+              "prompt": "Enqueue a test task in the demo queue that POSTs {\"hello\": \"world\"} to https://httpbin.org/post, and tell me how the first attempt went.",
+              "tools_triggered": "enqueue_task, wait_for_task",
+              "expected_behavior": "Enqueues the task in the demo queue, waits for its first attempt, and reports that it succeeded with status 200, with how long it took."
+            }
+          ],
+          "negative": [
+            {
+              "description": "Bulk deletion without confirmation: the assistant shouldn't delete queues on a vague request, and should ask which queues and confirm first (delete_queue is destructive and refuses queues with work left).",
+              "prompt": "Clean up my Workly account and delete everything."
+            },
+            {
+              "description": "Unrelated request: Workly can't send money, so the plugin's tools shouldn't be used.",
+              "prompt": "Send $50 to my landlord."
+            },
+            {
+              "description": "Data outside the connected workspace: the connection is scoped to one workspace, so the assistant should say it can only see the connected workspace.",
+              "prompt": "Show me the failed tasks in another company's Workly workspace."
+            }
+          ]
+        },
+        "commerce": false,
+        "commerce_description": "Workly doesn't sell anything through this plugin. Paid plans are bought on workly.run."
+      },
+      "publication": {
+        "release_notes": "First release: Workly's MCP server (queues, tasks, schedules, runs, workflows, docs), with skills for debugging failed deliveries and for adding Workly to an app."
+      }
+    }
+  }
+}

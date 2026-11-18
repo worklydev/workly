@@ -100,6 +100,12 @@ From your coding agent, over [MCP](docs/mcp.md): every server serves `/mcp`, so 
 claude mcp add --transport http workly-dev http://localhost:7337/mcp
 ```
 
+For hosted Workly, the Workly plugin adds the MCP server along with skills for debugging failed deliveries and for adding Workly to an app ([Codex too](docs/mcp.md#plugin-for-claude-code-and-codex)). In Claude Code:
+
+```
+/plugin install workly --marketplace worklydev/workly
+```
+
 Or with the CLI:
 
 ```sh

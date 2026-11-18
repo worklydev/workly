@@ -1,0 +1,16 @@
+{
+  "name": "workly",
+  "description": "Workly's plugins: connect your agent to hosted Workly, the HTTP task queue and scheduler.",
+  "owner": {
+    "name": "Workly",
+    "email": "contact@workly.run"
+  },
+  "plugins": [
+    {
+      "name": "workly",
+      "source": "./plugin",
+      "description": "See what your Workly queues, schedules and workflows are doing, find out why deliveries fail, and retry them once they're fixed.",
+      "category": "development"
+    }
+  ]
+}
