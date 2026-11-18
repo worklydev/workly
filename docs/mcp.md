@@ -23,11 +23,11 @@ Or set it up yourself. How an agent signs in depends on where Workly runs:
 
 | Server | Endpoint | Sign-in |
 |---|---|---|
-| [workly.run](#worklyrun) | `https://api.workly.run/mcp` | OAuth in the browser, or an API key |
-| [`workly dev`](#workly-dev) | `http://localhost:7337/mcp` | None |
-| [Your own server](#your-own-server) | `https://<your server>/mcp` | `WORKLY_API_KEY` as a bearer token |
+| [Hosted: workly.run](#hosted-worklyrun) | `https://api.workly.run/mcp` | OAuth in the browser, or an API key |
+| [Local dev server: `workly dev`](#local-dev-server-workly-dev) | `http://localhost:7337/mcp` | None |
+| [Self-hosted](#self-hosted) | `https://<your server>/mcp` | `WORKLY_API_KEY` as a bearer token |
 
-### workly.run
+### Hosted: workly.run
 
 Add the server, then sign in. The console opens in your browser: sign in or create an account, pick a workspace, and choose read-only or read and write.
 
@@ -60,9 +60,9 @@ codex mcp add workly --url https://api.workly.run/mcp  # opens the sign-in
 
 Cursor can also install it from a link: [Add to Cursor](cursor://anysphere.cursor-deeplink/mcp/install?name=workly&config=eyJ1cmwiOiJodHRwczovL2FwaS53b3JrbHkucnVuL21jcCJ9). For Claude or ChatGPT, see [chat apps](#claude-chatgpt-and-other-chat-apps).
 
-For an agent that can't open a browser, such as one in CI, create an API key in the console (**API keys**) and send it as a bearer token, as for [your own server](#your-own-server). The agent gets that key's workspace.
+For an agent that can't open a browser, such as one in CI, create an API key in the console (**API keys**) and send it as a bearer token, as for a [self-hosted](#self-hosted) server. The agent gets that key's workspace.
 
-### `workly dev`
+### Local dev server: `workly dev`
 
 The dev server takes no key, and prints the Claude Code command when it starts.
 
@@ -92,7 +92,7 @@ codex mcp add workly-dev --url http://localhost:7337/mcp
 }
 ```
 
-### Your own server
+### Self-hosted
 
 Send the server's `WORKLY_API_KEY` as a bearer token. Each config reads it from an environment variable (VS Code prompts for it once and stores it), so it can be committed and shared with your team.
 
@@ -135,7 +135,7 @@ codex mcp add workly-prod --url https://workly.example.com/mcp --bearer-token-en
 
 Chat apps that support remote MCP servers add workly.run as a custom connector: add one with the URL `https://api.workly.run/mcp`. Workly's console opens; sign in or create an account, pick a workspace, and choose read-only or read and write.
 
-A chat app connects from its vendor's servers, not from your machine, so it can't reach `workly dev`. It reaches your own server only if the server has a public address and the app can send its API key as a bearer token.
+A chat app connects from its vendor's servers, not from your machine, so it can't reach `workly dev`. It reaches a self-hosted server only if the server has a public address and the app can send its API key as a bearer token.
 
 ## Read-only by default
 
