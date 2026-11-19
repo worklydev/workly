@@ -35,8 +35,9 @@ type annotations struct {
 	ReadOnlyHint    bool   `json:"readOnlyHint"`
 	DestructiveHint bool   `json:"destructiveHint"`
 	IdempotentHint  bool   `json:"idempotentHint"`
-	// OpenWorldHint: the tool reaches outside Workly, by delivering a task
-	// to its endpoint.
+	// OpenWorldHint: the tool makes Workly call an endpoint, now (enqueue,
+	// trigger, retry, resume) or on a timetable (update_schedule). Cancelling
+	// and pausing only stop deliveries, so they aren't.
 	OpenWorldHint bool `json:"openWorldHint"`
 }
 

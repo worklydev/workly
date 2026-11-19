@@ -339,7 +339,7 @@ var updateSchedule = newTool("update_schedule", "Create or update schedule",
 		"missed":              prop("string", "Slots missed while the server was down: skip them (default) or catch_up (run the latest once).", "enum", []string{"skip", "catch_up"}),
 		"on_complete":         onCompleteProp("Callback: each time a run succeeds, fails or is cancelled, Workly POSTs a JSON summary of it (run_id, schedule, state, attempt_count, last_status, last_error) to url, as a task in the _callbacks queue. null removes it."),
 	}, "schedule"),
-	annotations{IdempotentHint: true},
+	annotations{IdempotentHint: true, OpenWorldHint: true},
 	func(ctx context.Context, api apiClient, args map[string]json.RawMessage) (any, error) {
 		var name string
 		if err := json.Unmarshal(args["schedule"], &name); err != nil || name == "" {
