@@ -57,6 +57,11 @@ func (h Handlers) PutQueue(ctx context.Context, req PutQueueRequestObject) (PutQ
 	if err != nil {
 		return nil, err
 	}
+	if SystemQueue(req.Queue) && cfg.AutoPauseAfter > 0 {
+		// They deliver to every workflow step's and callback's URL, so one
+		// endpoint being down would hold up all the others.
+		return nil, invalid("queue %q can't have auto_pause: it delivers to many endpoints", req.Queue)
+	}
 	ws := workspaceID(ctx)
 	if !SystemQueue(req.Queue) {
 		if err := h.checkReserved(ctx, ws, req.Queue); err != nil {

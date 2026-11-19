@@ -348,3 +348,51 @@ func TestQueueActivityRetention(t *testing.T) {
 		t.Fatalf("since = %v, %v; want 7 days ago", res.json["since"], err)
 	}
 }
+
+func TestQueueAutoPause(t *testing.T) {
+	st := newStore(t, true)
+	h := newServer(t, server.Options{Store: st, DisableDispatcher: true}).Handler()
+
+	res := doBody(t, h, "PUT", "/v1/queues/q", "", `{"auto_pause": {"after_failures": 20}}`)
+	if res.status != 201 || fmt.Sprint(res.json["auto_pause"]) != "map[after_failures:20]" {
+		t.Fatalf("PUT auto_pause = %d %s", res.status, res.body)
+	}
+	if _, ok := res.json["auto_paused"]; ok {
+		t.Fatalf("a new queue is auto-paused: %s", res.body)
+	}
+
+	now := time.Now()
+	if ok, err := st.AutoPauseQueue(t.Context(), "default", "q", "HTTP 503 Service Unavailable", now, now.Add(30*time.Second)); err != nil || !ok {
+		t.Fatalf("AutoPauseQueue = %v, %v", ok, err)
+	}
+	res = do(t, h, "GET", "/v1/queues/q", "")
+	paused, _ := res.json["auto_paused"].(map[string]any)
+	if res.json["paused"] != false || paused["error"] != "HTTP 503 Service Unavailable" || paused["probes"] != 0.0 || paused["next_probe_at"] == nil {
+		t.Fatalf("GET auto-paused queue = %s", res.body)
+	}
+	// Resuming by hand clears it.
+	res = do(t, h, "POST", "/v1/queues/q/resume", "")
+	if _, ok := res.json["auto_paused"]; res.status != 200 || ok {
+		t.Fatalf("resume = %d %s", res.status, res.body)
+	}
+
+	// Omitted, it's off.
+	res = doBody(t, h, "PUT", "/v1/queues/q", "", `{}`)
+	if _, ok := res.json["auto_pause"]; ok {
+		t.Errorf("PUT {} = %s, want no auto_pause", res.body)
+	}
+
+	for name, c := range map[string]struct{ queue, body string }{
+		"zero":      {"q", `{"auto_pause": {"after_failures": 0}}`},
+		"too many":  {"q", `{"auto_pause": {"after_failures": 20000}}`},
+		"callbacks": {"_callbacks", `{"auto_pause": {"after_failures": 5}}`},
+		"workflows": {"_workflows", `{"auto_pause": {"after_failures": 5}}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			res := doBody(t, h, "PUT", "/v1/queues/"+c.queue, "", c.body)
+			if res.status != 400 || errorCode(res) != "invalid_request" {
+				t.Fatalf("PUT %s %s = %d %s", c.queue, c.body, res.status, res.body)
+			}
+		})
+	}
+}

@@ -72,6 +72,9 @@ func queueConfig(in QueueConfig) (store.QueueConfig, error) {
 	if in.MaxConcurrency != nil {
 		cfg.MaxConcurrency = *in.MaxConcurrency
 	}
+	if in.AutoPause != nil {
+		cfg.AutoPauseAfter = in.AutoPause.AfterFailures
+	}
 
 	switch {
 	case cfg.MaxAttempts < 1 || cfg.MaxAttempts > maxAttemptsLimit:
@@ -88,6 +91,8 @@ func queueConfig(in QueueConfig) (store.QueueConfig, error) {
 		return cfg, invalid("rate_per_second must be above 0 and at most %d; omit it for no limit", maxLimit)
 	case cfg.MaxConcurrency < 1 || cfg.MaxConcurrency > maxLimit:
 		return cfg, invalid("max_concurrency must be between 1 and %d", maxLimit)
+	case in.AutoPause != nil && (cfg.AutoPauseAfter < 1 || cfg.AutoPauseAfter > maxLimit):
+		return cfg, invalid("auto_pause.after_failures must be between 1 and %d; omit auto_pause for none", maxLimit)
 	}
 	return cfg, nil
 }

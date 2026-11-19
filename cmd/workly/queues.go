@@ -48,9 +48,7 @@ func queuesListCmd() *cobra.Command {
 				var rows [][]string
 				for _, q := range res.JSON200.Queues {
 					status, due, scheduled, running, failed, oldest := "active", "-", "-", "-", "-", "-"
-					if q.Paused {
-						status = "paused"
-					}
+					status = queueStatus(q)
 					if s := q.Stats; s != nil {
 						due, scheduled, running, failed = count(s.Due), count(s.Scheduled), count(s.Running), count(s.Failed)
 						if s.OldestDueAt != nil {
@@ -95,7 +93,8 @@ Declarative, like the API: the queue ends up with exactly the settings given,
 and settings you leave out are reset to their defaults. Pausing is separate
 (see pause and resume).`,
 		Example: `  workly queues put emails --rate 50 --max-concurrency 10
-  workly queues put webhooks --max-attempts 5 --timeout 10s --retry-on-4xx`,
+  workly queues put webhooks --max-attempts 5 --timeout 10s --retry-on-4xx
+  workly queues put billing --auto-pause-after 20`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := newClient(cmd)
@@ -112,6 +111,9 @@ and settings you leave out are reset to their defaults. Pausing is separate
 			setIf(f.Changed("retry-on-4xx"), &cfg.RetryOn4xx, must(f.GetBool("retry-on-4xx")))
 			setIf(f.Changed("rate"), &cfg.RatePerSecond, must(f.GetFloat64("rate")))
 			setIf(f.Changed("max-concurrency"), &cfg.MaxConcurrency, must(f.GetInt("max-concurrency")))
+			if n := must(f.GetInt("auto-pause-after")); n != 0 {
+				cfg.AutoPause = &client.AutoPauseConfig{AfterFailures: n}
+			}
 
 			res, err := c.PutQueueWithResponse(cmd.Context(), args[0], cfg)
 			if err := check(res, err); err != nil {
@@ -133,6 +135,7 @@ and settings you leave out are reset to their defaults. Pausing is separate
 	f.Bool("retry-on-4xx", false, "retry 4xx responses (by default only 408 and 429 are retried)")
 	f.Float64("rate", 0, "most deliveries started per second (default no limit)")
 	f.Int("max-concurrency", 3, "most deliveries in flight at once")
+	f.Int("auto-pause-after", 0, "pause the queue by itself after this many 5xx, timeouts or network errors in a row, until a probe succeeds (default never)")
 	return cmd
 }
 
@@ -282,20 +285,37 @@ func queuesDeleteCmd() *cobra.Command {
 	return cmd
 }
 
+// queueStatus is active, paused (by hand) or auto-paused.
+func queueStatus(q client.Queue) string {
+	switch {
+	case q.Paused:
+		return "paused"
+	case q.AutoPaused != nil:
+		return "auto-paused"
+	}
+	return "active"
+}
+
 func printQueue(w io.Writer, q *client.Queue) {
-	status := "active"
-	if q.Paused {
-		status = "paused"
+	autoPause := "off"
+	if q.AutoPause != nil {
+		autoPause = fmt.Sprintf("after %d failures in a row", q.AutoPause.AfterFailures)
 	}
 	rows := [][]string{
 		{"Name", q.Name},
-		{"Status", status},
+		{"Status", queueStatus(*q)},
 		{"Max attempts", strconv.Itoa(q.MaxAttempts)},
 		{"Backoff", fmt.Sprintf("%s to %s, x%g", seconds(q.MinBackoffSeconds), seconds(q.MaxBackoffSeconds), q.BackoffMultiplier)},
 		{"Timeout", seconds(q.TimeoutSeconds)},
 		{"Retry on 4xx", strconv.FormatBool(q.RetryOn4xx)},
 		{"Rate", deref(q.RatePerSecond, "no limit") + perSecond(q.RatePerSecond)},
 		{"Max concurrency", strconv.Itoa(q.MaxConcurrency)},
+		{"Auto-pause", autoPause},
+	}
+	if p := q.AutoPaused; p != nil {
+		rows = append(rows,
+			[]string{"Auto-paused", short(time.Since(p.Since)) + " ago: " + p.Error},
+			[]string{"Next probe", "in " + short(time.Until(p.NextProbeAt))})
 	}
 	if s := q.Stats; s != nil {
 		oldest := "-"

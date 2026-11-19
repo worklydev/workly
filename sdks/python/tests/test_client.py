@@ -284,6 +284,37 @@ def test_queue_put_sends_only_given_settings() -> None:
     assert requests[0].method == "PUT"
     assert json.loads(requests[0].content) == {"max_attempts": 5, "rate_per_second": 10}
     assert (q.rate_per_second, q.max_concurrency, q.stats) == (10, 3, None)
+    assert (q.auto_pause_after, q.auto_paused) == (None, None)
+
+
+def test_queue_auto_pause() -> None:
+    queue = {
+        "name": "billing",
+        "paused": False,
+        "max_attempts": 5,
+        "min_backoff_seconds": 2,
+        "max_backoff_seconds": 3600,
+        "backoff_multiplier": 2,
+        "timeout_seconds": 30,
+        "retry_on_4xx": False,
+        "max_concurrency": 3,
+        "auto_pause": {"after_failures": 20},
+        "auto_paused": {
+            "since": "2026-11-19T10:00:00Z",
+            "error": "HTTP 503 Service Unavailable",
+            "probes": 2,
+            "next_probe_at": "2026-11-19T10:02:30Z",
+        },
+        "created_at": "2026-09-27T10:00:00Z",
+        "updated_at": "2026-09-27T10:00:00Z",
+    }
+    requests, handler = recorder(httpx.Response(200, json=queue))
+    q = client(handler).queues.put("billing", auto_pause_after=20)
+    assert json.loads(requests[0].content) == {"auto_pause": {"after_failures": 20}}
+    assert q.auto_pause_after == 20
+    assert q.auto_paused is not None
+    assert (q.auto_paused.error, q.auto_paused.probes) == ("HTTP 503 Service Unavailable", 2)
+    assert q.auto_paused.next_probe_at.minute == 2
 
 
 def test_queue_delete_cancel_pending_and_retry_failed() -> None:

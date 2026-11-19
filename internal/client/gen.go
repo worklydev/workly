@@ -567,6 +567,38 @@ type AttemptList struct {
 	Attempts []Attempt `json:"attempts"`
 }
 
+// AutoPauseConfig Pause the queue by itself when its endpoint looks down: after
+// `after_failures` attempts in a row end with a 5xx, a timeout or a
+// network error. Other 4xx responses, 429 and lost attempts don't
+// count, and only a success resets the count. While auto-paused, tasks
+// wait without using attempts, and one task at a time goes as a probe:
+// 30 seconds after the pause, then after twice as long each time it
+// fails, up to every 10 minutes. The first success resumes the queue.
+// Resuming it by hand does too. Omit for no auto-pause. Not for queues
+// whose tasks go to many endpoints, where one being down would hold up
+// the rest; Workly's own queues can't have it.
+type AutoPauseConfig struct {
+	AfterFailures int `json:"after_failures"`
+}
+
+// AutoPaused The queue paused itself after failures in a row (see `auto_pause`).
+// Absent when it hasn't, or once it resumed.
+type AutoPaused struct {
+	// Error The error of the attempt that paused it, or of the latest failed probe.
+	Error string `json:"error"`
+
+	// NextProbeAt When the next probe goes, unless one is in flight, in which case
+	// its result sets the next. No probes go while the queue is also
+	// paused by hand.
+	NextProbeAt time.Time `json:"next_probe_at"`
+
+	// Probes Probes that failed since it paused.
+	Probes int `json:"probes"`
+
+	// Since When it paused.
+	Since time.Time `json:"since"`
+}
+
 // BatchEnqueueRequest defines model for BatchEnqueueRequest.
 type BatchEnqueueRequest struct {
 	Tasks []EnqueueRequest `json:"tasks"`
@@ -896,6 +928,22 @@ type OverlapPolicy string
 
 // Queue defines model for Queue.
 type Queue struct {
+	// AutoPause Pause the queue by itself when its endpoint looks down: after
+	// `after_failures` attempts in a row end with a 5xx, a timeout or a
+	// network error. Other 4xx responses, 429 and lost attempts don't
+	// count, and only a success resets the count. While auto-paused, tasks
+	// wait without using attempts, and one task at a time goes as a probe:
+	// 30 seconds after the pause, then after twice as long each time it
+	// fails, up to every 10 minutes. The first success resumes the queue.
+	// Resuming it by hand does too. Omit for no auto-pause. Not for queues
+	// whose tasks go to many endpoints, where one being down would hold up
+	// the rest; Workly's own queues can't have it.
+	AutoPause *AutoPauseConfig `json:"auto_pause,omitempty"`
+
+	// AutoPaused The queue paused itself after failures in a row (see `auto_pause`).
+	// Absent when it hasn't, or once it resumed.
+	AutoPaused *AutoPaused `json:"auto_paused,omitempty"`
+
 	// BackoffMultiplier Retry n waits a random time between `min_backoff_seconds` and
 	// `min_backoff_seconds * backoff_multiplier^(n-1)`, capped at
 	// `max_backoff_seconds`. `Retry-After` response headers are honoured.
@@ -911,7 +959,9 @@ type Queue struct {
 	MaxConcurrency    int     `json:"max_concurrency"`
 	MinBackoffSeconds float64 `json:"min_backoff_seconds"`
 	Name              string  `json:"name"`
-	Paused            bool    `json:"paused"`
+
+	// Paused Paused by hand. See `auto_paused` for a pause the queue made itself.
+	Paused bool `json:"paused"`
 
 	// RatePerSecond Most deliveries started per second. Omit for no limit. Retries
 	// count; recovering a lost attempt does too. Deliveries are spread
@@ -960,6 +1010,18 @@ type QueueActivity struct {
 
 // QueueConfig A queue's delivery policy. Omitted fields take the default.
 type QueueConfig struct {
+	// AutoPause Pause the queue by itself when its endpoint looks down: after
+	// `after_failures` attempts in a row end with a 5xx, a timeout or a
+	// network error. Other 4xx responses, 429 and lost attempts don't
+	// count, and only a success resets the count. While auto-paused, tasks
+	// wait without using attempts, and one task at a time goes as a probe:
+	// 30 seconds after the pause, then after twice as long each time it
+	// fails, up to every 10 minutes. The first success resumes the queue.
+	// Resuming it by hand does too. Omit for no auto-pause. Not for queues
+	// whose tasks go to many endpoints, where one being down would hold up
+	// the rest; Workly's own queues can't have it.
+	AutoPause *AutoPauseConfig `json:"auto_pause,omitempty"`
+
 	// BackoffMultiplier Retry n waits a random time between `min_backoff_seconds` and
 	// `min_backoff_seconds * backoff_multiplier^(n-1)`, capped at
 	// `max_backoff_seconds`. `Retry-After` response headers are honoured.

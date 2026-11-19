@@ -27,9 +27,25 @@ func toQueue(q store.Queue) Queue {
 		RetryOn4xx:        q.RetryOn4xx,
 		RatePerSecond:     optionalLimit(q.RatePerSecond),
 		MaxConcurrency:    q.MaxConcurrency,
+		AutoPause:         toAutoPauseConfig(q.AutoPauseAfter),
+		AutoPaused:        toAutoPaused(q.AutoPaused),
 		CreatedAt:         q.CreatedAt,
 		UpdatedAt:         q.UpdatedAt,
 	}
+}
+
+func toAutoPauseConfig(after int) *AutoPauseConfig {
+	if after == 0 {
+		return nil
+	}
+	return &AutoPauseConfig{AfterFailures: after}
+}
+
+func toAutoPaused(p *store.AutoPause) *AutoPaused {
+	if p == nil {
+		return nil
+	}
+	return &AutoPaused{Since: p.Since, Error: p.Error, Probes: p.Probes, NextProbeAt: p.NextProbeAt}
 }
 
 // optionalLimit omits 0, which means unlimited.
