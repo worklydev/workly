@@ -118,6 +118,7 @@ client.queues.put(
     timeout_seconds=30,
     rate_per_second=50,
     max_concurrency=20,
+    auto_pause_after=20,  # pause after 20 failures in a row, until a probe succeeds
 )
 
 queue = client.queues.get("emails")

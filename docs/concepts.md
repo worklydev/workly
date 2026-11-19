@@ -14,10 +14,29 @@ A **queue** holds tasks and the policy for delivering them. It's created with th
 | `max_concurrency` | 3 | Deliveries in flight at once, up to 10,000. |
 | `rate_per_second` | none | Deliveries started per second. |
 | `retry_on_4xx` | false | Retry 4xx responses other than 408 and 429, which are always retried. |
+| `auto_pause` | none | `{after_failures: n}`: pause the queue by itself when its endpoint looks down (see [Auto-pause](#auto-pause)). |
 
 The full list is in the [API reference](../api/openapi.yaml). Queue names are lowercase letters, digits, `-` and `_`; names starting with `_` are Workly's own.
 
 A **paused** queue keeps accepting tasks but doesn't start deliveries; those already in flight finish. Workly shares deliveries fairly between queues, so a busy queue doesn't hold up a quiet one.
+
+### Auto-pause
+
+When an endpoint goes down, retries keep using up each task's attempts, and an outage longer than the retry window leaves every task `failed`, to retry by hand afterwards. A queue with `auto_pause` stops instead:
+
+```yaml
+queues:
+  billing:
+    auto_pause:
+      after_failures: 20
+```
+
+- **What pauses it:** `after_failures` attempts in a row that end with a 5xx, a timeout or a network error. These say the endpoint itself is unwell. Other 4xx responses (usually about one task), 429 (the endpoint is pacing you, and `Retry-After` handles it) and lost attempts don't count, and only a success resets the count.
+- **While it's paused:** no deliveries start, and tasks wait as `pending` without using attempts. One task at a time goes as a probe: 30 seconds after the pause, then after twice as long each time a probe fails, up to every 10 minutes. A probe is a normal attempt of the queue's oldest due task.
+- **Resuming:** the first success resumes the queue on its own, and the waiting tasks are delivered within its rate and concurrency limits. Resuming it by hand (`POST /v1/queues/{queue}/resume`, `workly queues resume`, or **Resume now** in the dashboard) does it at once. Pausing it by hand stops the probes too.
+- **Seeing it:** the queue's `auto_paused` says since when, the error, how many probes failed and when the next goes; it's absent when the queue isn't auto-paused. [Alerts](alerts.md) go out when a queue pauses itself and when it resumes, and the `workly_queue_auto_paused` metric is 1 while it's paused.
+
+Use it for a queue whose tasks go to one service. In a queue that delivers to many endpoints, such as webhooks to your customers' URLs, one of them being down would hold up the rest. Workly's own queues (`_workflows`, `_callbacks`) can't have it. A workflow step in an auto-paused queue waits like any task, and its run still fails after its `max_duration_seconds`.
 
 ## Tasks
 

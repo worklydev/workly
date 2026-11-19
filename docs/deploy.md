@@ -95,7 +95,7 @@ All three read `workly.yaml` in the current directory, or the file given with `-
 
 Settings are the fields of the `PUT` requests in the [API](../api/openapi.yaml), with the same names, defaults and limits:
 
-- **Queues:** `max_attempts`, `min_backoff_seconds`, `max_backoff_seconds`, `backoff_multiplier`, `timeout_seconds`, `retry_on_4xx`, `rate_per_second` and `max_concurrency`.
+- **Queues:** `max_attempts`, `min_backoff_seconds`, `max_backoff_seconds`, `backoff_multiplier`, `timeout_seconds`, `retry_on_4xx`, `rate_per_second`, `max_concurrency` and `auto_pause` (`{after_failures: n}`, see [Auto-pause](concepts.md#auto-pause)).
 - **Workflows:** `steps`, each with the settings in [Workflows](workflows.md#define-a-workflow), and `max_duration_seconds`.
 - **Schedules:** `cron` and `url` or `workflow` (required), `timezone`, `method`, `headers`, `payload` or `body` and `content_type`, the retry settings, `overlap` and `missed` (see [Schedules](schedules.md)).
 
