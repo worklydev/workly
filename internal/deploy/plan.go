@@ -270,6 +270,12 @@ var queueFields = []field[store.QueueConfig]{
 		return num(c.RatePerSecond)
 	}},
 	{"max_concurrency", func(c store.QueueConfig) string { return strconv.Itoa(c.MaxConcurrency) }},
+	{"auto_pause.after_failures", func(c store.QueueConfig) string {
+		if c.AutoPauseAfter == 0 {
+			return "off"
+		}
+		return strconv.Itoa(c.AutoPauseAfter)
+	}},
 }
 
 func queueDiffs(from, to store.QueueConfig) []Diff {

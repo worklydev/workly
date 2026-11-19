@@ -29,6 +29,8 @@ Metric names and labels are stable. Every per-queue metric has `workspace` and `
 | `workly_queue_running` | gauge | Tasks with a delivery in flight. |
 | `workly_queue_failed` | gauge | Failed tasks still retained (`WORKLY_RETENTION`). A rise means an endpoint is rejecting deliveries. |
 | `workly_queue_paused` | gauge | 1 if the queue is paused. |
+| `workly_queue_auto_paused` | gauge | 1 if the queue paused itself after failures in a row ([auto-pause](concepts.md#auto-pause)) and hasn't resumed. |
+| `workly_queue_auto_pauses_total` | counter | Times the queue paused itself. |
 | `workly_queue_oldest_due_age_seconds` | gauge | How long the longest-waiting due task has been due. **The metric to alert on.** |
 | `workly_dispatcher_is_leader` | gauge | 1 on the replica that delivers tasks, 0 on standbys. No labels. |
 

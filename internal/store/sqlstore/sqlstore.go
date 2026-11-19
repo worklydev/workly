@@ -272,20 +272,32 @@ func (s *Store) DeleteWorkspace(ctx context.Context, id workspace.ID) error {
 
 const queueColumns = `workspace_id, name, paused, max_attempts, min_backoff_ms, max_backoff_ms,
 	backoff_multiplier, timeout_ms, retry_on_4xx, rate_per_second, max_concurrency,
-	created_at, updated_at`
+	auto_pause_after, created_at, updated_at`
+
+// queueSelect is queueColumns and the auto-pause state, which only the
+// dispatcher writes.
+const queueSelect = queueColumns + `, auto_paused_at, auto_pause_error, auto_pause_probes, next_probe_at`
 
 func scanQueue(row interface{ Scan(...any) error }) (store.Queue, error) {
 	var (
 		q                               store.Queue
 		minBackoff, maxBackoff, timeout int64
 		rate                            sql.NullFloat64
-		concurrency                     sql.NullInt64
+		concurrency, autoPauseAfter     sql.NullInt64
 		createdAt, updatedAt            dbTime
+		autoPausedAt, nextProbeAt       dbTime
+		autoPause                       store.AutoPause
 	)
 	err := row.Scan(&q.WorkspaceID, &q.Name, &q.Paused, &q.MaxAttempts, &minBackoff, &maxBackoff,
 		&q.BackoffMultiplier, &timeout, &q.RetryOn4xx, &rate, &concurrency,
-		&createdAt, &updatedAt)
+		&autoPauseAfter, &createdAt, &updatedAt,
+		&autoPausedAt, &autoPause.Error, &autoPause.Probes, &nextProbeAt)
 	q.RatePerSecond, q.MaxConcurrency = rate.Float64, int(concurrency.Int64)
+	q.AutoPauseAfter = int(autoPauseAfter.Int64)
+	if autoPausedAt.Valid {
+		autoPause.Since, autoPause.NextProbeAt = autoPausedAt.Time, nextProbeAt.Time
+		q.AutoPaused = &autoPause
+	}
 	q.MinBackoff = time.Duration(minBackoff) * time.Millisecond
 	q.MaxBackoff = time.Duration(maxBackoff) * time.Millisecond
 	q.Timeout = time.Duration(timeout) * time.Millisecond
@@ -334,16 +346,27 @@ func (s *Store) upsertQueue(ctx context.Context, q querier, ws workspace.ID, nam
 			retry_on_4xx = excluded.retry_on_4xx,
 			rate_per_second = excluded.rate_per_second,
 			max_concurrency = excluded.max_concurrency,
+			auto_pause_after = excluded.auto_pause_after,
+			` + clearAutoPauseIf(`excluded.auto_pause_after IS NULL`) + `,
 			updated_at = excluded.updated_at`
 	}
 	now := s.ts(time.Now())
 	_, err := s.exec(ctx, q, `INSERT INTO queues (`+queueColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (workspace_id, name) `+onConflict,
 		ws, name, false, cfg.MaxAttempts, cfg.MinBackoff.Milliseconds(), cfg.MaxBackoff.Milliseconds(),
 		cfg.BackoffMultiplier, cfg.Timeout.Milliseconds(), cfg.RetryOn4xx,
-		nullIfZero(cfg.RatePerSecond), nullIfZero(cfg.MaxConcurrency), now, now)
+		nullIfZero(cfg.RatePerSecond), nullIfZero(cfg.MaxConcurrency), nullIfZero(cfg.AutoPauseAfter), now, now)
 	return err
+}
+
+// clearAutoPauseIf is the SET list of an UPDATE of queues that clears the
+// auto-pause state where cond holds and keeps it otherwise.
+func clearAutoPauseIf(cond string) string {
+	return fmt.Sprintf(`auto_paused_at = CASE WHEN %[1]s THEN NULL ELSE queues.auto_paused_at END,
+			auto_pause_error = CASE WHEN %[1]s THEN '' ELSE queues.auto_pause_error END,
+			auto_pause_probes = CASE WHEN %[1]s THEN 0 ELSE queues.auto_pause_probes END,
+			next_probe_at = CASE WHEN %[1]s THEN NULL ELSE queues.next_probe_at END`, cond)
 }
 
 func (s *Store) GetQueue(ctx context.Context, ws workspace.ID, name string) (store.Queue, error) {
@@ -352,7 +375,7 @@ func (s *Store) GetQueue(ctx context.Context, ws workspace.ID, name string) (sto
 
 func (s *Store) getQueue(ctx context.Context, q querier, ws workspace.ID, name string) (store.Queue, error) {
 	queue, err := scanQueue(s.queryRow(ctx, q,
-		`SELECT `+queueColumns+` FROM queues WHERE workspace_id = ? AND name = ?`, ws, name))
+		`SELECT `+queueSelect+` FROM queues WHERE workspace_id = ? AND name = ?`, ws, name))
 	if errors.Is(err, sql.ErrNoRows) {
 		return store.Queue{}, store.ErrNotFound
 	}
@@ -361,7 +384,7 @@ func (s *Store) getQueue(ctx context.Context, q querier, ws workspace.ID, name s
 
 func (s *Store) ListQueues(ctx context.Context, ws workspace.ID) ([]store.Queue, error) {
 	return s.listQueues(ctx,
-		`SELECT `+queueColumns+` FROM queues WHERE workspace_id = ? ORDER BY name`, ws)
+		`SELECT `+queueSelect+` FROM queues WHERE workspace_id = ? ORDER BY name`, ws)
 }
 
 func (s *Store) listQueues(ctx context.Context, query string, args ...any) ([]store.Queue, error) {
@@ -450,8 +473,11 @@ func (s *Store) DeleteQueue(ctx context.Context, ws workspace.ID, name string) e
 func (s *Store) SetQueuePaused(ctx context.Context, ws workspace.ID, name string, paused bool) (store.Queue, error) {
 	var q store.Queue
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
-		res, err := s.exec(ctx, tx, `UPDATE queues SET paused = ?, updated_at = ?
-			WHERE workspace_id = ? AND name = ?`, paused, s.ts(time.Now()), ws, name)
+		// Resuming by hand ends an auto-pause too: someone decided the
+		// endpoint is ready, so it gets deliveries now rather than at the
+		// next probe.
+		res, err := s.exec(ctx, tx, `UPDATE queues SET paused = ?, `+clearAutoPauseIf(`NOT ?`)+`, updated_at = ?
+			WHERE workspace_id = ? AND name = ?`, paused, paused, paused, paused, paused, s.ts(time.Now()), ws, name)
 		if err != nil {
 			return err
 		}
@@ -481,7 +507,7 @@ func cappedCount(cond string) string {
 }
 
 func queueStatsQuery() string {
-	return `SELECT q.workspace_id, q.name, q.paused, ` +
+	return `SELECT q.workspace_id, q.name, q.paused, q.auto_paused_at IS NOT NULL, ` +
 		cappedCount(`t.state = 'pending' AND t.run_at <= ?`) + `, ` +
 		cappedCount(`t.state = 'pending' AND t.run_at > ?`) + `, ` +
 		cappedCount(`t.state = 'running'`) + `, ` +
@@ -527,7 +553,7 @@ func (s *Store) queueStats(ctx context.Context, now time.Time, where string, arg
 			st     store.QueueStatus
 			oldest dbTime
 		)
-		if err := rows.Scan(&st.WorkspaceID, &st.Queue, &st.Paused, &st.Due, &st.Scheduled, &st.Running, &st.Failed, &oldest); err != nil {
+		if err := rows.Scan(&st.WorkspaceID, &st.Queue, &st.Paused, &st.AutoPaused, &st.Due, &st.Scheduled, &st.Running, &st.Failed, &oldest); err != nil {
 			return nil, err
 		}
 		st.OldestDueAt = oldest.ptr()
@@ -1339,19 +1365,24 @@ func (s *Store) RetryFailedTasks(ctx context.Context, ws workspace.ID, queue, la
 // Dispatch
 
 func (s *Store) DueQueues(ctx context.Context, now time.Time) ([]store.Queue, error) {
-	return s.listQueues(ctx, `SELECT `+queueColumns+` FROM queues q
-		WHERE NOT q.paused AND EXISTS (
+	return s.listQueues(ctx, `SELECT `+queueSelect+` FROM queues q
+		WHERE NOT q.paused AND (q.auto_paused_at IS NULL OR q.next_probe_at <= ?) AND EXISTS (
 			SELECT 1 FROM tasks t
 			WHERE t.workspace_id = q.workspace_id AND t.queue = q.name
 				AND t.state = 'pending' AND t.run_at <= ?
 		)
-		ORDER BY q.workspace_id, q.name`, s.ts(now))
+		ORDER BY q.workspace_id, q.name`, s.ts(now), s.ts(now))
 }
 
 func (s *Store) NextRunAt(ctx context.Context, after time.Time) (time.Time, bool, error) {
-	var next dbTime
-	err := s.queryRow(ctx, s.db, `SELECT MIN(run_at) FROM tasks WHERE state = 'pending' AND run_at > ?`,
-		s.ts(after)).Scan(&next)
+	var next, probe dbTime
+	err := s.queryRow(ctx, s.db, `SELECT
+			(SELECT MIN(run_at) FROM tasks WHERE state = 'pending' AND run_at > ?),
+			(SELECT MIN(next_probe_at) FROM queues WHERE auto_paused_at IS NOT NULL AND NOT paused AND next_probe_at > ?)`,
+		s.ts(after), s.ts(after)).Scan(&next, &probe)
+	if probe.Valid && (!next.Valid || probe.Time.Before(next.Time)) {
+		next = probe
+	}
 	return next.Time, next.Valid, err
 }
 
@@ -1360,11 +1391,87 @@ func (s *Store) ClaimTasks(ctx context.Context, q store.Queue, limit int, now ti
 	// dispatch throughput. The queue may have been paused since DueQueues
 	// listed it; a pause stops deliveries from starting as soon as it
 	// returns.
+	return s.claimTasks(ctx, s.db, q, limit, now, grace, `NOT q.paused AND q.auto_paused_at IS NULL`)
+}
+
+func (s *Store) ClaimProbe(ctx context.Context, q store.Queue, now time.Time, grace time.Duration) ([]store.Task, error) {
+	var tasks []store.Task
+	err := s.inTx(ctx, func(tx *sql.Tx) error {
+		// Taking the probe slot first, guarded by its time, means two
+		// dispatchers (a stale leader) can't both send one.
+		res, err := s.exec(ctx, tx, `UPDATE queues SET next_probe_at = ?
+			WHERE workspace_id = ? AND name = ? AND NOT paused AND auto_paused_at IS NOT NULL AND next_probe_at <= ?`,
+			s.ts(now), q.WorkspaceID, q.Name, s.ts(now))
+		if err != nil {
+			return err
+		}
+		if n, err := res.RowsAffected(); err != nil || n == 0 {
+			return err
+		}
+		if tasks, err = s.claimTasks(ctx, tx, q, 1, now, grace, `NOT q.paused`); err != nil || len(tasks) == 0 {
+			return err
+		}
+		// No other probe until this one's lease runs out; its result sets
+		// the real next time.
+		_, err = s.exec(ctx, tx, `UPDATE queues SET next_probe_at = ? WHERE workspace_id = ? AND name = ?`,
+			s.ts(*tasks[0].LeaseExpiresAt), q.WorkspaceID, q.Name)
+		return err
+	})
+	return tasks, err
+}
+
+func (s *Store) AutoPauseQueue(ctx context.Context, ws workspace.ID, name, errMsg string, now, nextProbe time.Time) (bool, error) {
+	res, err := s.exec(ctx, s.db, `UPDATE queues
+		SET auto_paused_at = ?, auto_pause_error = ?, auto_pause_probes = 0, next_probe_at = ?, updated_at = ?
+		WHERE workspace_id = ? AND name = ? AND auto_pause_after IS NOT NULL AND auto_paused_at IS NULL`,
+		s.ts(now), errMsg, s.ts(nextProbe), s.ts(now), ws, name)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
+func (s *Store) ProbeFailed(ctx context.Context, ws workspace.ID, name, errMsg string, nextProbe time.Time) error {
+	_, err := s.exec(ctx, s.db, `UPDATE queues
+		SET auto_pause_error = ?, auto_pause_probes = auto_pause_probes + 1, next_probe_at = ?
+		WHERE workspace_id = ? AND name = ? AND auto_paused_at IS NOT NULL`,
+		errMsg, s.ts(nextProbe), ws, name)
+	return err
+}
+
+func (s *Store) AutoResumeQueue(ctx context.Context, ws workspace.ID, name string) (*store.AutoPause, error) {
+	var cleared *store.AutoPause
+	err := s.inTx(ctx, func(tx *sql.Tx) error {
+		q, err := scanQueue(s.queryRow(ctx, tx, `SELECT `+queueSelect+` FROM queues
+			WHERE workspace_id = ? AND name = ? AND auto_paused_at IS NOT NULL`+s.forUpdate(), ws, name))
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if _, err := s.exec(ctx, tx, `UPDATE queues SET `+clearAutoPauseIf(`TRUE`)+`, updated_at = ?
+			WHERE workspace_id = ? AND name = ?`, s.ts(time.Now()), ws, name); err != nil {
+			return err
+		}
+		cleared = q.AutoPaused
+		return nil
+	})
+	if cleared != nil {
+		s.wake()
+	}
+	return cleared, err
+}
+
+// claimTasks claims up to limit due tasks of q, if the queue still matches
+// queueCond (on queues q).
+func (s *Store) claimTasks(ctx context.Context, db querier, q store.Queue, limit int, now time.Time, grace time.Duration, queueCond string) ([]store.Task, error) {
 	query := `WITH due AS (
 			SELECT id FROM tasks
 			WHERE workspace_id = ? AND queue = ? AND state = 'pending' AND run_at <= ?
 				AND EXISTS (SELECT 1 FROM queues q
-					WHERE q.workspace_id = tasks.workspace_id AND q.name = tasks.queue AND NOT q.paused)
+					WHERE q.workspace_id = tasks.workspace_id AND q.name = tasks.queue AND ` + queueCond + `)
 			ORDER BY run_at LIMIT ?`
 	if s.opts.Postgres {
 		// Redundant with a single leader, but keeps a stale leader that
@@ -1381,7 +1488,7 @@ func (s *Store) ClaimTasks(ctx context.Context, q store.Queue, limit int, now ti
 			lease_expires_at = ` + lease + `, updated_at = ?, started_at = COALESCE(started_at, ?)
 		WHERE id IN (SELECT id FROM due)
 		RETURNING ` + taskColumns
-	tasks, err := s.listTasks(ctx, s.db, query, q.WorkspaceID, q.Name, s.ts(now), limit,
+	tasks, err := s.listTasks(ctx, db, query, q.WorkspaceID, q.Name, s.ts(now), limit,
 		s.ts(now), q.Timeout.Milliseconds(), grace.Milliseconds(), s.ts(now), s.ts(now))
 	if err != nil {
 		return nil, err

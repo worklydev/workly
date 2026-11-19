@@ -49,11 +49,60 @@ export type QueueConfig = {
      *
      */
     max_concurrency?: number;
+    auto_pause?: AutoPauseConfig;
+};
+
+/**
+ * Pause the queue by itself when its endpoint looks down: after
+ * `after_failures` attempts in a row end with a 5xx, a timeout or a
+ * network error. Other 4xx responses, 429 and lost attempts don't
+ * count, and only a success resets the count. While auto-paused, tasks
+ * wait without using attempts, and one task at a time goes as a probe:
+ * 30 seconds after the pause, then after twice as long each time it
+ * fails, up to every 10 minutes. The first success resumes the queue.
+ * Resuming it by hand does too. Omit for no auto-pause. Not for queues
+ * whose tasks go to many endpoints, where one being down would hold up
+ * the rest; Workly's own queues can't have it.
+ *
+ */
+export type AutoPauseConfig = {
+    after_failures: number;
+};
+
+/**
+ * The queue paused itself after failures in a row (see `auto_pause`).
+ * Absent when it hasn't, or once it resumed.
+ *
+ */
+export type AutoPaused = {
+    /**
+     * When it paused.
+     */
+    since: string;
+    /**
+     * The error of the attempt that paused it, or of the latest failed probe.
+     */
+    error: string;
+    /**
+     * Probes that failed since it paused.
+     */
+    probes: number;
+    /**
+     * When the next probe goes, unless one is in flight, in which case
+     * its result sets the next. No probes go while the queue is also
+     * paused by hand.
+     *
+     */
+    next_probe_at: string;
 };
 
 export type Queue = QueueConfig & {
     name: string;
+    /**
+     * Paused by hand. See `auto_paused` for a pause the queue made itself.
+     */
     paused: boolean;
+    auto_paused?: AutoPaused;
     stats?: QueueStats;
     created_at: string;
     updated_at: string;

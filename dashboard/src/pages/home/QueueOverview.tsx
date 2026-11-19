@@ -10,8 +10,9 @@ import { useQueueActivity } from '../../hooks/useQueueActivity';
 import { useRange } from '../../hooks/useRange';
 import { formatRate } from '../../lib/format';
 import { behindBy } from '../../lib/home';
-import { isSystemQueue, LOW_SUCCESS } from '../../lib/queues';
+import { isSystemQueue, LOW_SUCCESS, queueHeld } from '../../lib/queues';
 import { Badge } from '../../primitives/badge';
+import { QueuePausedBadge } from '../../components/QueuePausedBadge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../primitives/table';
 
 const SHOWN = 5;
@@ -60,8 +61,8 @@ export function QueueOverview({ queues }: { queues: Queue[] }) {
               {q.name}
             </Link>
             {isSystemQueue(q.name) && <Badge>system</Badge>}
-            {q.paused ? (
-              <Badge variant="warning">paused</Badge>
+            {queueHeld(q) ? (
+              <QueuePausedBadge queue={q} />
             ) : (
               behindBy(q, now) && <Badge variant="warning">behind</Badge>
             )}

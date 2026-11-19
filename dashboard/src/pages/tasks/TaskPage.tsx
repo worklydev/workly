@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { cn } from 'cn';
-import { ChevronDown, Copy, RotateCcw, TriangleAlert } from 'lucide-react';
+import { ChevronDown, Copy, RotateCcw } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router';
 import {
@@ -18,6 +18,7 @@ import { ConfirmButton } from '../../components/ConfirmButton';
 import { DisabledReason } from '../../components/DisabledReason';
 import { CopyButton } from '../../components/CopyButton';
 import { InlineFields } from '../../components/InlineFields';
+import { Notice } from '../../components/Notice';
 import { PageHeader } from '../../components/PageHeader';
 import { ErrorText, Muted } from '../../components/QueryState';
 import { RelativeTime } from '../../components/RelativeTime';
@@ -305,6 +306,16 @@ function Notices({ task, queue, attempts }: { task: Task; queue?: Queue; attempt
   if (task.state === 'pending' && queue?.paused) {
     return <Notice tone="warning">Queue {queue.name} is paused. This task won't run until it's resumed.</Notice>;
   }
+  if (task.state === 'pending' && queue?.auto_paused) {
+    return (
+      <Notice
+        tone="warning"
+        detail="It runs once a probe to the queue's endpoint succeeds, or the queue is resumed, without using its attempts meanwhile."
+      >
+        Queue {queue.name} paused itself after failures in a row: {queue.auto_paused.error}
+      </Notice>
+    );
+  }
   if (task.state === 'failed') {
     const n = attempts ? attemptsSinceRetry(attempts) : task.attempt_count;
     return (
@@ -372,31 +383,6 @@ function whyFailed(task: Task, queue: Queue, attempts: Attempt[]): React.ReactNo
     );
   }
   return null;
-}
-
-function Notice({
-  tone,
-  detail,
-  children,
-}: {
-  tone: 'warning' | 'danger';
-  detail?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <div
-      className={cn(
-        'flex items-start gap-2 rounded-lg px-3 py-2',
-        tone === 'warning' ? 'bg-warning/12 text-warning' : 'bg-destructive/12 text-destructive',
-      )}
-    >
-      <TriangleAlert className="mt-0.5 size-4 shrink-0" />
-      <div className="flex min-w-0 flex-col gap-0.5 break-words">
-        <span>{children}</span>
-        {detail && <span className="text-xs text-foreground/70">{detail}</span>}
-      </div>
-    </div>
-  );
 }
 
 function Request({ task }: { task: Task }) {

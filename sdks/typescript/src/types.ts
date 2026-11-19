@@ -38,6 +38,30 @@ export interface QueueConfig {
   ratePerSecond?: number | undefined;
   /** Most deliveries in flight at once (default 3). */
   maxConcurrency?: number | undefined;
+  /**
+   * Pause the queue by itself after `afterFailures` 5xx responses, timeouts or
+   * network errors in a row, until a probe succeeds. Omit for none. For queues
+   * whose tasks go to one service.
+   */
+  autoPause?: AutoPauseConfig | undefined;
+}
+
+export interface AutoPauseConfig {
+  afterFailures: number;
+}
+
+/**
+ * A queue that paused itself after failures in a row. Its tasks wait without
+ * using attempts, and one at a time goes as a probe; the first success
+ * resumes the queue, as does resuming it by hand.
+ */
+export interface AutoPaused {
+  since: string;
+  /** The error of the attempt that paused it, or of the latest failed probe. */
+  error: string;
+  /** Probes that failed since it paused. */
+  probes: number;
+  nextProbeAt: string;
 }
 
 /** A queue's current work. Counts stop at 10,000. */
@@ -56,6 +80,7 @@ export interface QueueStats {
 
 export interface Queue {
   name: string;
+  /** Paused by hand. See `autoPaused` for a pause the queue made itself. */
   paused: boolean;
   maxAttempts: number;
   minBackoffSeconds: number;
@@ -65,6 +90,9 @@ export interface Queue {
   retryOn4xx: boolean;
   ratePerSecond?: number;
   maxConcurrency: number;
+  autoPause?: AutoPauseConfig;
+  /** Set while the queue has paused itself. */
+  autoPaused?: AutoPaused;
   stats?: QueueStats;
   createdAt: string;
   updatedAt: string;

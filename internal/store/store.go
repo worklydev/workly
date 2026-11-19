@@ -77,7 +77,8 @@ type Store interface {
 	ListQueues(ctx context.Context, ws workspace.ID) ([]Queue, error)
 	// DeleteQueue deletes the queue with all its tasks and attempts.
 	DeleteQueue(ctx context.Context, ws workspace.ID, name string) error
-	// SetQueuePaused pauses or resumes dispatch from a queue. PutQueue
+	// SetQueuePaused pauses or resumes dispatch from a queue. Resuming also
+	// clears an auto-pause. PutQueue
 	// doesn't change whether a queue is paused.
 	SetQueuePaused(ctx context.Context, ws workspace.ID, name string, paused bool) (Queue, error)
 	// QueueStats returns the stats of the named queue, or of every queue in
@@ -253,15 +254,33 @@ type Dispatch interface {
 	// ErrNotLeader if another process holds leadership.
 	TryLead(ctx context.Context) (Leader, error)
 
-	// DueQueues returns unpaused queues that have pending tasks due at now.
+	// DueQueues returns unpaused queues that have pending tasks due at now:
+	// those not auto-paused, and auto-paused ones whose next probe is due.
 	DueQueues(ctx context.Context, now time.Time) ([]Queue, error)
 	// NextRunAt returns the earliest run_at after the given time of any
-	// pending task.
+	// pending task, or the next probe time of an auto-paused queue if that
+	// is earlier.
 	NextRunAt(ctx context.Context, after time.Time) (t time.Time, ok bool, err error)
 	// ClaimTasks moves up to limit due tasks of a queue to running, increments
 	// their attempt count and leases them until now + their timeout + grace.
-	// It claims nothing if the queue has been paused.
+	// It claims nothing if the queue has been paused or auto-paused.
 	ClaimTasks(ctx context.Context, q Queue, limit int, now time.Time, grace time.Duration) ([]Task, error)
+	// ClaimProbe claims the oldest due task of an auto-paused queue whose
+	// probe is due, as ClaimTasks would, and holds off the next probe until
+	// the task's lease expires, so a probe in flight is never joined by
+	// another. It claims nothing if the queue isn't auto-paused, is paused by
+	// hand or its probe isn't due.
+	ClaimProbe(ctx context.Context, q Queue, now time.Time, grace time.Duration) ([]Task, error)
+	// AutoPauseQueue auto-pauses a queue that has AutoPauseAfter set and
+	// isn't auto-paused yet, with its first probe at nextProbe. paused
+	// reports whether it did.
+	AutoPauseQueue(ctx context.Context, ws workspace.ID, name, errMsg string, now, nextProbe time.Time) (paused bool, err error)
+	// ProbeFailed records a failed probe of an auto-paused queue and when to
+	// send the next one.
+	ProbeFailed(ctx context.Context, ws workspace.ID, name, errMsg string, nextProbe time.Time) error
+	// AutoResumeQueue clears a queue's auto-pause after a success. It returns
+	// the state it cleared, or nil if the queue wasn't auto-paused.
+	AutoResumeQueue(ctx context.Context, ws workspace.ID, name string) (*AutoPause, error)
 	// FinishAttempt records an attempt and moves the task to r.NextState,
 	// or leaves it cancelled if it was cancelled mid-attempt. It returns the
 	// task's resulting state, or ErrLeaseLost if attempt r.Number is no
@@ -379,6 +398,10 @@ type QueueConfig struct {
 	// RetryOn4xx retries 4xx responses other than 408 and 429, which are
 	// otherwise treated as permanent failures.
 	RetryOn4xx bool
+	// AutoPauseAfter pauses the queue after this many failed attempts in a
+	// row that say its endpoint is down (see dispatch.CountsTowardAutoPause).
+	// 0 never does.
+	AutoPauseAfter int
 }
 
 func DefaultQueueConfig() QueueConfig {
@@ -396,10 +419,27 @@ func DefaultQueueConfig() QueueConfig {
 type Queue struct {
 	WorkspaceID workspace.ID
 	Name        string
-	Paused      bool
+	// Paused is a pause by hand. It wins over AutoPaused: a queue paused by
+	// hand sends no probes.
+	Paused bool
+	// AutoPaused is set while the queue has paused itself (AutoPauseAfter).
+	AutoPaused *AutoPause
 	QueueConfig
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// AutoPause is the state of a queue that paused itself after failures in a
+// row. It delivers nothing but one probe task at a time, at NextProbeAt; the
+// first success, or resuming by hand, clears it.
+type AutoPause struct {
+	Since time.Time
+	// Error is the error of the attempt that paused the queue, or of the
+	// latest failed probe.
+	Error string
+	// Probes counts the probes that failed since it paused.
+	Probes      int
+	NextProbeAt time.Time
 }
 
 // StatsCountLimit caps the counts in QueueStats, so that stats stay cheap
@@ -479,6 +519,7 @@ type QueueStatus struct {
 	WorkspaceID workspace.ID
 	Queue       string
 	Paused      bool
+	AutoPaused  bool
 	QueueStats
 }
 
@@ -776,4 +817,20 @@ type GroupFilter struct {
 	Name   string
 	Cursor string
 	Limit  int
+}
+
+// AutoPauseEvent is a queue pausing itself after failures in a row, or
+// resuming after a success, for alerts.
+type AutoPauseEvent struct {
+	Workspace workspace.ID
+	Queue     string
+	// Resumed is false when the queue paused, true when it resumed.
+	Resumed bool
+	// Since is when the queue paused.
+	Since time.Time
+	// Error is the error that paused it (when pausing), or the last one
+	// before it resumed.
+	Error string
+	// Failures is how many failures in a row paused it (when pausing).
+	Failures int
 }

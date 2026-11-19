@@ -171,7 +171,7 @@ Read tools (marked read-only, so clients can run them without asking):
 
 | Tool | What it does |
 |---|---|
-| `list_queues` | All queues in summary: paused or not, rate and concurrency limits, current work (due, scheduled, running, failed, how far behind) and the last 24 hours (succeeded, failed, and p50 and p95 attempt duration with its sample size) |
+| `list_queues` | All queues in summary: paused or not (by hand, or auto-paused after failures in a row), rate and concurrency limits, current work (due, scheduled, running, failed, how far behind) and the last 24 hours (succeeded, failed, and p50 and p95 attempt duration with its sample size) |
 | `get_queue` | One queue with its full policy, the last 24 hours, how many tasks succeeded, failed and were cancelled recently, and its failed tasks grouped by error |
 | `list_tasks` | Task summaries, newest first, by queue, state, group, idempotency key, last error and creation time. Each says when its first attempt started and how long the latest took, so queue wait and handler time can be told apart |
 | `get_task` | A task with its attempts (outcomes, status codes, errors, response bodies, durations), how many attempts it gets and how many are left |
@@ -200,8 +200,8 @@ Write tools (`WORKLY_MCP=full`):
 | `cancel_task` | Cancels a pending or running task |
 | `retry_failed_tasks` | Retries every failed task in a queue, or only those with one error |
 | `cancel_pending_tasks` | Cancels a queue's pending tasks; they stay in the history and can be retried |
-| `pause_queue`, `resume_queue` | Stops and restarts a queue's deliveries |
-| `update_queue_policy` | Changes some of a queue's settings, keeping the rest |
+| `pause_queue`, `resume_queue` | Stops and restarts a queue's deliveries; resuming also ends an auto-pause |
+| `update_queue_policy` | Changes some of a queue's settings, keeping the rest, including `auto_pause` |
 | `delete_queue` | Deletes a queue and its finished tasks. Refuses while it has tasks due, scheduled or running, and for Workly's own queues |
 | `update_schedule` | Creates a schedule, or changes some of its settings, keeping the rest |
 | `trigger_schedule` | Runs a schedule now |

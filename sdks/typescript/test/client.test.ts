@@ -396,6 +396,26 @@ describe('queues', () => {
     assert.deepEqual(sent[0]?.body, { max_attempts: 3, rate_per_second: 5, retry_on_4xx: true });
   });
 
+  test('auto-pause', async () => {
+    const { fetch, sent } = fakeFetch(
+      json({
+        name: 'billing',
+        auto_pause: { after_failures: 20 },
+        auto_paused: {
+          since: '2030-01-01T00:00:00Z',
+          error: 'HTTP 503',
+          probes: 2,
+          next_probe_at: '2030-01-01T00:02:30Z',
+        },
+      }),
+    );
+    const q = await new Workly({ fetch }).queues.put('billing', { autoPause: { afterFailures: 20 } });
+    assert.deepEqual(sent[0]?.body, { auto_pause: { after_failures: 20 } });
+    assert.deepEqual(q.autoPause, { afterFailures: 20 });
+    assert.equal(q.autoPaused?.nextProbeAt, '2030-01-01T00:02:30Z');
+    assert.equal(q.autoPaused?.probes, 2);
+  });
+
   test('put without settings resets to defaults', async () => {
     const { fetch, sent } = fakeFetch(json({ name: 'emails' }));
     await new Workly({ fetch }).queues.put('emails');

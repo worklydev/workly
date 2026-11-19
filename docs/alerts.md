@@ -12,6 +12,8 @@ A task or run counts as failed once it has used up its attempts, or got a respon
 
 Alerts cover failures from the moment the first channel is added; earlier ones aren't news.
 
+A queue with [auto-pause](concepts.md#auto-pause) also alerts at once when it pauses itself, with the error that paused it, and when it resumes, with how long it was paused. These two don't wait for the 30 minutes.
+
 ## Slack
 
 In Slack, create an [incoming webhook](https://api.slack.com/messaging/webhooks) for the channel alerts should go to, then add its URL:

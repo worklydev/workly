@@ -120,6 +120,7 @@ await workly.queues.put('emails', {
   timeoutSeconds: 30,
   ratePerSecond: 50,
   maxConcurrency: 20,
+  autoPause: { afterFailures: 20 }, // pause after 20 failures in a row, until a probe succeeds
 });
 
 const queue = await workly.queues.get('emails');

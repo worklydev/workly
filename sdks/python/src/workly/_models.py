@@ -66,6 +66,31 @@ class QueueStats:
 
 
 @dataclass(frozen=True, slots=True)
+class AutoPaused:
+    """A queue that paused itself after failures in a row (`auto_pause_after`).
+
+    Its tasks wait without using attempts, and one at a time goes as a
+    probe; the first success resumes the queue, as does resuming it by hand.
+    """
+
+    since: datetime
+    error: str
+    """The error of the attempt that paused it, or of the latest failed probe."""
+    probes: int
+    """Probes that failed since it paused."""
+    next_probe_at: datetime
+
+    @classmethod
+    def _from_json(cls, d: dict[str, Any]) -> AutoPaused:
+        return cls(
+            since=_time(d["since"]),
+            error=d["error"],
+            probes=d["probes"],
+            next_probe_at=_time(d["next_probe_at"]),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class QueueActivity:
     """A queue's finished tasks since `since`, by final state. Counts stop at 10,000."""
 
@@ -210,6 +235,7 @@ class FailureGroup:
 class Queue:
     name: str
     paused: bool
+    """Paused by hand. See `auto_paused` for a pause the queue made itself."""
     max_attempts: int
     min_backoff_seconds: float
     max_backoff_seconds: float
@@ -221,10 +247,16 @@ class Queue:
     stats: QueueStats | None
     created_at: datetime
     updated_at: datetime
+    auto_pause_after: int | None = None
+    """Failures in a row that pause the queue; None if it never pauses itself."""
+    auto_paused: AutoPaused | None = None
+    """Set while the queue has paused itself."""
 
     @classmethod
     def _from_json(cls, d: dict[str, Any]) -> Queue:
         stats = d.get("stats")
+        auto_pause = d.get("auto_pause")
+        auto_paused = d.get("auto_paused")
         return cls(
             name=d["name"],
             paused=d["paused"],
@@ -239,6 +271,8 @@ class Queue:
             stats=None if stats is None else QueueStats._from_json(stats),
             created_at=_time(d["created_at"]),
             updated_at=_time(d["updated_at"]),
+            auto_pause_after=None if auto_pause is None else auto_pause["after_failures"],
+            auto_paused=None if auto_paused is None else AutoPaused._from_json(auto_paused),
         )
 
 

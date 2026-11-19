@@ -41,6 +41,7 @@ func Run(t *testing.T, factory Factory) {
 		{"CreateTasks", testCreateTasks},
 		{"ConcurrentEnqueues", testConcurrentEnqueues},
 		{"PauseResume", testPauseResume},
+		{"AutoPause", testAutoPause},
 		{"CancelPendingTasks", testCancelPendingTasks},
 		{"CancelTask", testCancelTask},
 		{"RetryTask", testRetryTask},

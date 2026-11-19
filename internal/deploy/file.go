@@ -224,6 +224,10 @@ func (p *parser) queues(f *File, n *yaml.Node) {
 			p.settingsError(kv[0], path, given, err)
 			continue
 		}
+		if api.SystemQueue(q.Name) && q.settings.AutoPauseAfter > 0 {
+			p.add(kv[0], path+".auto_pause", "Workly's own queues can't have auto_pause: they deliver to many endpoints")
+			continue
+		}
 		f.Queues = append(f.Queues, q)
 	}
 }
@@ -427,6 +431,12 @@ func (p *parser) settingsError(key *yaml.Node, path string, given map[string]*ya
 			p.add(n, path+"."+name, "%s", rest)
 			return
 		}
+		// A setting inside a mapping, such as auto_pause.after_failures.
+		if rest, ok := strings.CutPrefix(msg, name+"."); ok {
+			sub, rest, _ := strings.Cut(rest, " ")
+			p.add(n, path+"."+name+"."+sub, "%s", rest)
+			return
+		}
 	}
 	p.add(key, path, "%s", msg)
 }
@@ -499,7 +509,20 @@ func describe(t reflect.Type) string {
 	case reflect.Map:
 		return "a mapping of names to strings"
 	case reflect.Struct:
-		return "a mapping with url and, optionally, headers"
+		var required, optional []string
+		for i := range t.NumField() {
+			name, opts, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+			if opts == "omitempty" {
+				optional = append(optional, name)
+			} else {
+				required = append(required, name)
+			}
+		}
+		s := "a mapping with " + strings.Join(required, ", ")
+		if len(optional) > 0 {
+			s += " and, optionally, " + strings.Join(optional, ", ")
+		}
+		return s
 	}
 	return "a string"
 }

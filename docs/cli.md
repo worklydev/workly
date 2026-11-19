@@ -127,11 +127,13 @@ Examples:
 ```sh
 workly queues put emails --rate 50 --max-concurrency 10
 workly queues put webhooks --max-attempts 5 --timeout 10s --retry-on-4xx
+workly queues put billing --auto-pause-after 20
 ```
 
 Flags:
 
 ```text
+--auto-pause-after int       pause the queue by itself after this many 5xx, timeouts or network errors in a row, until a probe succeeds (default never)
 --backoff-multiplier float   how fast the wait between retries grows (default 2)
 --max-attempts int           total delivery attempts before a task fails (default 5)
 --max-backoff duration       longest wait before a retry (default 1h0m0s)

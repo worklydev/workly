@@ -431,6 +431,19 @@ func TestMCPTools(t *testing.T) {
 		}
 	}
 
+	if !nullKeys(overview, "auto_paused") {
+		t.Errorf("list_queues auto_paused = %v, want null", overview["auto_paused"])
+	}
+	// auto_pause is set like the other settings, and null turns it off.
+	q = c.call("update_queue_policy", map[string]any{"queue": "emails", "auto_pause": map[string]any{"after_failures": 10}})
+	if fmt.Sprint(q["auto_pause"]) != "map[after_failures:10]" || !nullKeys(q, "auto_paused") || q["max_concurrency"] != 1.0 {
+		t.Errorf("update_queue_policy auto_pause = %v", q)
+	}
+	q = c.call("update_queue_policy", map[string]any{"queue": "emails", "auto_pause": nil})
+	if !nullKeys(q, "auto_pause") {
+		t.Errorf("update_queue_policy auto_pause null = %v", q)
+	}
+
 	if q := c.call("pause_queue", map[string]any{"queue": "emails"}); q["paused"] != true || q["stats"] == nil || q["internal"] != false {
 		t.Errorf("pause_queue = %v", q)
 	}

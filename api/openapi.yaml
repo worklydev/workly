@@ -1445,6 +1445,51 @@ components:
           description: |
             Most deliveries in flight at once. There is always a limit; the
             default is low so a new queue can't overwhelm its endpoint.
+        auto_pause:
+          $ref: "#/components/schemas/AutoPauseConfig"
+    AutoPauseConfig:
+      type: object
+      description: |
+        Pause the queue by itself when its endpoint looks down: after
+        `after_failures` attempts in a row end with a 5xx, a timeout or a
+        network error. Other 4xx responses, 429 and lost attempts don't
+        count, and only a success resets the count. While auto-paused, tasks
+        wait without using attempts, and one task at a time goes as a probe:
+        30 seconds after the pause, then after twice as long each time it
+        fails, up to every 10 minutes. The first success resumes the queue.
+        Resuming it by hand does too. Omit for no auto-pause. Not for queues
+        whose tasks go to many endpoints, where one being down would hold up
+        the rest; Workly's own queues can't have it.
+      required: [after_failures]
+      properties:
+        after_failures:
+          type: integer
+          minimum: 1
+          maximum: 10000
+    AutoPaused:
+      type: object
+      description: |
+        The queue paused itself after failures in a row (see `auto_pause`).
+        Absent when it hasn't, or once it resumed.
+      required: [since, error, probes, next_probe_at]
+      properties:
+        since:
+          type: string
+          format: date-time
+          description: When it paused.
+        error:
+          type: string
+          description: The error of the attempt that paused it, or of the latest failed probe.
+        probes:
+          type: integer
+          description: Probes that failed since it paused.
+        next_probe_at:
+          type: string
+          format: date-time
+          description: |
+            When the next probe goes, unless one is in flight, in which case
+            its result sets the next. No probes go while the queue is also
+            paused by hand.
     Queue:
       allOf:
         - $ref: "#/components/schemas/QueueConfig"
@@ -1455,6 +1500,9 @@ components:
               type: string
             paused:
               type: boolean
+              description: Paused by hand. See `auto_paused` for a pause the queue made itself.
+            auto_paused:
+              $ref: "#/components/schemas/AutoPaused"
             stats:
               $ref: "#/components/schemas/QueueStats"
             created_at:

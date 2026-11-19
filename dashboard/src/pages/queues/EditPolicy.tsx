@@ -6,6 +6,7 @@ import { putQueueMutation } from '../../api/@tanstack/react-query.gen';
 import type { Queue, QueueConfig } from '../../api';
 import { FormGroup, FormRow, Unit } from '../../components/FormRows';
 import { errorMessage } from '../../lib/api';
+import { isSystemQueue } from '../../lib/queues';
 import { RETRY_4XX } from '../../lib/policy';
 import { Button } from '../../primitives/button';
 import { Dialog, DialogContent, DialogTitle } from '../../primitives/dialog';
@@ -19,7 +20,8 @@ type Form = Record<
   | 'backoff_multiplier'
   | 'timeout_seconds'
   | 'rate_per_second'
-  | 'max_concurrency',
+  | 'max_concurrency'
+  | 'auto_pause_after',
   string
 > & { retry_on_4xx: boolean };
 
@@ -34,6 +36,7 @@ function toForm(q?: Queue): Form {
     retry_on_4xx: q?.retry_on_4xx ?? false,
     rate_per_second: str(q?.rate_per_second),
     max_concurrency: str(q?.max_concurrency),
+    auto_pause_after: str(q?.auto_pause?.after_failures),
   };
 }
 
@@ -45,11 +48,13 @@ const LABELS: Record<Exclude<keyof Form, 'retry_on_4xx'>, string> = {
   timeout_seconds: 'Timeout',
   rate_per_second: 'Rate',
   max_concurrency: 'Max concurrency',
+  auto_pause_after: 'Auto-pause',
 };
 
 /**
- * The whole policy, as PUT expects: an empty rate means no limit. A new
- * queue may leave any field empty, for the server's default.
+ * The whole policy, as PUT expects: an empty rate means no limit, and an
+ * empty auto-pause none. A new queue may leave any field empty, for the
+ * server's default.
  */
 function toConfig(f: Form, creating: boolean): QueueConfig | string {
   const num = (key: Exclude<keyof Form, 'retry_on_4xx'>, optional = creating): number | undefined | string => {
@@ -67,11 +72,13 @@ function toConfig(f: Form, creating: boolean): QueueConfig | string {
     rate_per_second: num('rate_per_second', true),
     max_concurrency: num('max_concurrency'),
   };
-  const problem = Object.values(values).find((v) => typeof v === 'string');
+  const autoPause = num('auto_pause_after', true);
+  const problem = [...Object.values(values), autoPause].find((v) => typeof v === 'string');
   if (problem !== undefined) return problem as string;
   return {
     ...(values as Record<string, number | undefined>),
     retry_on_4xx: f.retry_on_4xx,
+    auto_pause: autoPause === undefined ? undefined : { after_failures: autoPause as number },
   } as QueueConfig;
 }
 
@@ -253,6 +260,26 @@ function PolicyForm({ queue, onClose }: { queue?: Queue; onClose: () => void }) 
             />
           </FormRow>
         </FormGroup>
+
+        {/* Workly's own queues deliver to every step's and callback's URL, so they can't. */}
+        {(creating || !isSystemQueue(queue.name)) && (
+          <FormGroup title="Auto-pause">
+            <FormRow
+              label="Pause after"
+              hint="Failures in a row (5xx, timeouts, network errors) that pause the queue until a probe succeeds. Tasks wait without using attempts. Empty for never. For queues whose tasks go to one service."
+            >
+              <Unit unit="failures">
+                <Input
+                  inputMode="numeric"
+                  placeholder="never"
+                  value={form.auto_pause_after}
+                  onChange={set('auto_pause_after')}
+                  className="w-24"
+                />
+              </Unit>
+            </FormRow>
+          </FormGroup>
+        )}
 
         <div className="flex items-center justify-end gap-2 border-t border-border pt-4">
           {error && <span className="mr-auto text-xs text-destructive">{error}</span>}

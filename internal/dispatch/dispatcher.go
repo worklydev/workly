@@ -93,6 +93,14 @@ type Options struct {
 	// isn't one (its steps are). It must not block for long: it is called
 	// from the delivery's goroutine.
 	Executed func(ctx context.Context, ws workspace.ID, kind Kind)
+	// AutoPaused, if set, is told when a queue pauses itself after failures
+	// in a row, and when it resumes after a success. It must not block.
+	AutoPaused func(store.AutoPauseEvent)
+	// FirstProbeDelay is how long after an auto-pause the first probe goes.
+	// Each failed probe doubles it, up to MaxProbeDelay. Defaults 30s and
+	// 10m.
+	FirstProbeDelay time.Duration
+	MaxProbeDelay   time.Duration
 }
 
 type Dispatcher struct {
@@ -112,6 +120,11 @@ type Dispatcher struct {
 	mu         sync.Mutex
 	queues     map[queueKey]*queueState
 	workspaces map[workspace.ID]*workspaceState
+	// failures counts each auto-pausing queue's failures in a row, and
+	// autoPaused holds the queues this process paused, whose snapshots in
+	// deliveries already under way still say they aren't (see autoPause).
+	failures   map[queueKey]int
+	autoPaused map[queueKey]time.Time
 	// round rotates which workspace, and which of its queues, is served
 	// first. Only lead uses it.
 	round int
@@ -137,6 +150,8 @@ func New(opts Options) *Dispatcher {
 	opts.LeaderRetryInterval = cmp.Or(opts.LeaderRetryInterval, 5*time.Second)
 	opts.ShutdownTimeout = cmp.Or(opts.ShutdownTimeout, 25*time.Second)
 	opts.SweepInterval = cmp.Or(opts.SweepInterval, time.Minute)
+	opts.FirstProbeDelay = cmp.Or(opts.FirstProbeDelay, 30*time.Second)
+	opts.MaxProbeDelay = cmp.Or(opts.MaxProbeDelay, 10*time.Minute)
 	if opts.Client == nil {
 		opts.Client = newHTTPClient(opts.MaxInFlight+opts.MaxRunsInFlight, opts.DialControl)
 	}
@@ -153,6 +168,8 @@ func New(opts Options) *Dispatcher {
 		metrics:    opts.Metrics,
 		queues:     map[queueKey]*queueState{},
 		workspaces: map[workspace.ID]*workspaceState{},
+		failures:   map[queueKey]int{},
+		autoPaused: map[queueKey]time.Time{},
 		deliverer: deliverer{
 			client: opts.Client,
 			signer: NewSigner(opts.SigningSecret, opts.PreviousSigningSecret, opts.UserAgent, opts.SigningSecrets),
@@ -169,7 +186,7 @@ func New(opts Options) *Dispatcher {
 // or multiply the queries.
 func (d *Dispatcher) collectQueueMetrics(ctx context.Context) {
 	m := d.metrics
-	gauges := []*metrics.Gauge{m.QueueDue, m.QueueScheduled, m.QueueRunning, m.QueueFailed, m.QueuePaused, m.QueueOldestDueAge}
+	gauges := []*metrics.Gauge{m.QueueDue, m.QueueScheduled, m.QueueRunning, m.QueueFailed, m.QueuePaused, m.QueueAutoPaused, m.QueueOldestDueAge}
 	for _, g := range gauges {
 		g.Reset()
 	}
@@ -189,6 +206,7 @@ func (d *Dispatcher) collectQueueMetrics(ctx context.Context) {
 		m.QueueRunning.Set(float64(q.Running), labels...)
 		m.QueueFailed.Set(float64(q.Failed), labels...)
 		m.QueuePaused.Set(boolFloat(q.Paused), labels...)
+		m.QueueAutoPaused.Set(boolFloat(q.AutoPaused), labels...)
 		var age time.Duration
 		if q.OldestDueAt != nil {
 			age = max(0, now.Sub(*q.OldestDueAt))
@@ -421,12 +439,24 @@ func (d *Dispatcher) dispatch(ctx, deliverCtx context.Context, wg *sync.WaitGrou
 			more = true
 			continue
 		}
+		// An auto-paused queue is listed only when its probe is due, and
+		// sends that one task.
+		probe := q.AutoPaused != nil
+		if probe {
+			allot = 1
+		}
 		n, w := d.reserve(q, allot, now)
 		if n == 0 {
 			later(w)
 			continue
 		}
-		tasks, err := d.store.ClaimTasks(ctx, q, n, now, d.opts.LeaseGrace)
+		claim := d.store.ClaimTasks
+		if probe {
+			claim = func(ctx context.Context, q store.Queue, _ int, now time.Time, grace time.Duration) ([]store.Task, error) {
+				return d.store.ClaimProbe(ctx, q, now, grace)
+			}
+		}
+		tasks, err := claim(ctx, q, n, now, d.opts.LeaseGrace)
 		if err != nil {
 			d.unreserve(q, n)
 			return more, wait, err
@@ -435,7 +465,7 @@ func (d *Dispatcher) dispatch(ctx, deliverCtx context.Context, wg *sync.WaitGrou
 		if len(tasks) > 0 {
 			d.opts.Changed(q.WorkspaceID)
 		}
-		if len(tasks) == n {
+		if len(tasks) == n && !probe {
 			if n < room[i] || n == claimBatch {
 				// Held back by the slots or the batch size, not by the
 				// queue's own limits.
@@ -458,16 +488,20 @@ func (d *Dispatcher) dispatch(ctx, deliverCtx context.Context, wg *sync.WaitGrou
 					default:
 					}
 				}()
-				d.deliver(deliverCtx, q, t)
+				d.deliver(deliverCtx, q, now, t, probe)
 			})
 		}
 	}
 	return more, wait, nil
 }
 
-func (d *Dispatcher) deliver(ctx context.Context, q store.Queue, t store.Task) {
+// deliver delivers task t of queue q, as listed at claimed.
+func (d *Dispatcher) deliver(ctx context.Context, q store.Queue, claimed time.Time, t store.Task, probe bool) {
 	r := d.deliverer.deliver(ctx, t, t.EffectiveTimeout(q.QueueConfig))
 	d.finish(q, t, decide(q.QueueConfig, t, r, rand.Float64))
+	// After the result is written, so a resumed queue's backlog starts
+	// behind this task rather than racing it.
+	d.autoPause(context.WithoutCancel(ctx), q, claimed, r, probe)
 	d.executed(ctx, t.WorkspaceID, taskKind(t), t.AttemptsSinceReplay())
 }
 

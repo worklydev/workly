@@ -145,12 +145,18 @@ class AsyncQueues:
         retry_on_4xx: bool | None = None,
         rate_per_second: float | None = None,
         max_concurrency: int | None = None,
+        auto_pause_after: int | None = None,
     ) -> Queue:
         """Create or update a queue.
 
         Declarative: the queue ends up with exactly this configuration, and
         omitted settings are reset to their defaults. It doesn't change
         whether the queue is paused.
+
+        With `auto_pause_after`, the queue pauses itself after that many
+        5xx responses, timeouts or network errors in a row, and resumes at
+        the first success of a probe. For queues whose tasks go to one
+        service.
         """
         config = dict(
             max_attempts=max_attempts,
@@ -161,6 +167,7 @@ class AsyncQueues:
             retry_on_4xx=retry_on_4xx,
             rate_per_second=rate_per_second,
             max_concurrency=max_concurrency,
+            auto_pause=None if auto_pause_after is None else {"after_failures": auto_pause_after},
         )
         return Queue._from_json(await self._client._send(r.put_queue(name, config)))
 

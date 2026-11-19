@@ -175,3 +175,47 @@ func duration(d time.Duration) string {
 	}
 	return d.String()
 }
+
+// autoPauseMessage is the alert about a queue that paused itself after
+// failures in a row, or resumed after a success.
+func autoPauseMessage(workspaceName string, ev store.AutoPauseEvent, links Links, now time.Time) Message {
+	var subject, body string
+	if ev.Resumed {
+		subject = fmt.Sprintf("Queue %s resumed", ev.Queue)
+		body = fmt.Sprintf("Queue %s resumed: a delivery succeeded after it was paused for %s. Its waiting tasks are being delivered.",
+			ev.Queue, pausedFor(now.Sub(ev.Since)))
+	} else {
+		subject = fmt.Sprintf("Queue %s paused itself after %d failures in a row", ev.Queue, ev.Failures)
+		body = fmt.Sprintf("Queue %s paused itself after %d failures in a row. The last: %s.\n\n"+
+			"Its tasks wait without using attempts. Workly tries one of them now and then, first after 30 seconds and then less often, "+
+			"up to every 10 minutes, and resumes the queue when one succeeds. Resume the queue to deliver to it now.",
+			ev.Queue, ev.Failures, describe(ev.Error))
+	}
+	link := links.to("/queues/" + url.PathEscape(ev.Queue))
+	text, slack := body+"\n", slackEscape(body)
+	if link != "" {
+		text += "\n  " + link + "\n"
+		slack += fmt.Sprintf("\n<%s|Open in Workly>", link)
+	}
+	if workspaceName != "" {
+		text += "\n--\nWorkspace: " + workspaceName + "\n"
+		slack += "\n_Workspace " + slackEscape(workspaceName) + "_"
+	}
+	return Message{Subject: prefixed(workspaceName, subject), Text: text, Slack: slack}
+}
+
+// pausedFor is a pause's length, to the minute once it's a minute or more.
+func pausedFor(d time.Duration) string {
+	if d < time.Minute {
+		return plural(int(d.Seconds()), "1 second", fmt.Sprintf("%d seconds", int(d.Seconds())))
+	}
+	d = d.Round(time.Minute)
+	h, m := int(d/time.Hour), int(d%time.Hour/time.Minute)
+	switch {
+	case h == 0:
+		return plural(m, "1 minute", fmt.Sprintf("%d minutes", m))
+	case m == 0:
+		return plural(h, "1 hour", fmt.Sprintf("%d hours", h))
+	}
+	return fmt.Sprintf("%s %s", plural(h, "1 hour", fmt.Sprintf("%d hours", h)), plural(m, "1 minute", fmt.Sprintf("%d minutes", m)))
+}

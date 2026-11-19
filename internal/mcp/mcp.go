@@ -250,6 +250,8 @@ Workflows run a DAG of HTTP steps; each step is delivered as a task (in the _wor
 
 Queues whose names start with _ are Workly's own (internal: true in list_queues and get_queue): _workflows delivers workflow steps and _callbacks callbacks. They aren't the application's queues: they can't be deleted, and pausing one holds up every workflow or callback.
 
+A queue with auto_pause pauses itself when its endpoint looks down, after that many 5xx, timeouts or network errors in a row: auto_paused is then set (null otherwise) with the error and next_probe_at. Its tasks wait without using attempts, and one at a time goes as a probe; the first success resumes the queue on its own. resume_queue ends it at once, which sends the waiting tasks straight to the endpoint.
+
 To check health: list_queues shows each queue's current work and its last 24 hours (last_24h: succeeded, failed, and p50/p95 duration of the latest attempt, over duration_samples attempts). In task and run summaries, started_at minus created_at is time spent waiting to be delivered, and last_duration_ms is time spent in the handler. Fields with no value are null, not left out.
 
 To debug failures: get_queue groups a queue's failed tasks by error, with the latest task of each group; get_task shows a task and its attempts (status codes, errors, response bodies). list_tasks with state "failed" (and last_error) lists the tasks behind a group. get_task_delivery returns the exact signed request, with a curl command to replay it against a local handler.

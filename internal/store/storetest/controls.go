@@ -527,3 +527,147 @@ func testManualRetryHistory(t *testing.T, open func() store.Store) {
 		}
 	}
 }
+
+func testAutoPause(t *testing.T, open func() store.Store) {
+	s := seeded(t, open)
+	ctx := t.Context()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+
+	cfg := store.DefaultQueueConfig()
+	if _, _, err := s.PutQueue(ctx, workspace.Default, "plain", cfg); err != nil {
+		t.Fatal(err)
+	}
+	// Only a queue that asks for it auto-pauses.
+	if paused, err := s.AutoPauseQueue(ctx, workspace.Default, "plain", "HTTP 503", now, now); err != nil || paused {
+		t.Fatalf("AutoPauseQueue without auto_pause_after = %v, %v", paused, err)
+	}
+
+	cfg.AutoPauseAfter = 3
+	q, _, err := s.PutQueue(ctx, workspace.Default, "emails", cfg)
+	if err != nil || q.AutoPauseAfter != 3 || q.AutoPaused != nil {
+		t.Fatalf("PutQueue = %+v, %v", q, err)
+	}
+	first := mustCreate(t, s, workspace.Default, store.NewTask{Queue: "emails", RunAt: now.Add(-time.Minute)})
+	mustCreate(t, s, workspace.Default, store.NewTask{Queue: "emails", RunAt: now.Add(-time.Second)})
+
+	if paused, err := s.AutoPauseQueue(ctx, otherWorkspace, "emails", "HTTP 503", now, now); err != nil || paused {
+		t.Fatalf("AutoPauseQueue from another workspace = %v, %v", paused, err)
+	}
+	probeAt := now.Add(30 * time.Second)
+	if paused, err := s.AutoPauseQueue(ctx, workspace.Default, "emails", "HTTP 503", now, probeAt); err != nil || !paused {
+		t.Fatalf("AutoPauseQueue = %v, %v", paused, err)
+	}
+	if paused, err := s.AutoPauseQueue(ctx, workspace.Default, "emails", "again", now, now); err != nil || paused {
+		t.Fatalf("AutoPauseQueue twice = %v, %v", paused, err)
+	}
+	q, err = s.GetQueue(ctx, workspace.Default, "emails")
+	want := store.AutoPause{Since: now, Error: "HTTP 503", NextProbeAt: probeAt}
+	if err != nil || q.Paused || q.AutoPaused == nil || *q.AutoPaused != want {
+		t.Fatalf("GetQueue = %+v (auto-paused %+v), %v; want %+v", q, q.AutoPaused, err, want)
+	}
+
+	// Nothing is due before the probe, and ClaimTasks claims nothing even
+	// for a dispatcher that listed the queue before it paused.
+	if due, _ := s.DueQueues(ctx, now); len(due) != 0 {
+		t.Fatalf("DueQueues before the probe = %v", queueNames(due))
+	}
+	if claimed, err := s.ClaimTasks(ctx, q, 10, now, time.Minute); err != nil || len(claimed) != 0 {
+		t.Fatalf("ClaimTasks on an auto-paused queue = %d tasks, %v", len(claimed), err)
+	}
+	if claimed, err := s.ClaimProbe(ctx, q, now, time.Minute); err != nil || len(claimed) != 0 {
+		t.Fatalf("ClaimProbe before it's due = %d tasks, %v", len(claimed), err)
+	}
+	if next, ok, err := s.NextRunAt(ctx, now); err != nil || !ok || !next.Equal(probeAt) {
+		t.Fatalf("NextRunAt = %v, %v, %v; want the probe at %v", next, ok, err, probeAt)
+	}
+
+	// At the probe time, one task goes, and no second one while it's out.
+	at := probeAt.Add(time.Millisecond)
+	due, err := s.DueQueues(ctx, at)
+	if err != nil || len(due) != 1 || due[0].AutoPaused == nil {
+		t.Fatalf("DueQueues at the probe = %+v, %v", due, err)
+	}
+	probe, err := s.ClaimProbe(ctx, due[0], at, time.Minute)
+	if err != nil || len(probe) != 1 || probe[0].ID != first.ID {
+		t.Fatalf("ClaimProbe = %+v, %v; want the oldest task", probe, err)
+	}
+	if again, err := s.ClaimProbe(ctx, due[0], at, time.Minute); err != nil || len(again) != 0 {
+		t.Fatalf("second ClaimProbe = %d tasks, %v", len(again), err)
+	}
+	if due, _ := s.DueQueues(ctx, at.Add(time.Second)); len(due) != 0 {
+		t.Fatalf("DueQueues with a probe in flight = %v", queueNames(due))
+	}
+
+	// A failed probe sets the next one.
+	if _, err := s.FinishAttempt(ctx, workspace.Default, store.AttemptResult{
+		Attempt:   store.Attempt{TaskID: first.ID, Number: 1, Outcome: store.OutcomeHTTPError, Error: "HTTP 500"},
+		NextState: store.TaskPending, RunAt: at,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	next := at.Add(time.Minute)
+	if err := s.ProbeFailed(ctx, workspace.Default, "emails", "HTTP 500", next); err != nil {
+		t.Fatal(err)
+	}
+	q, _ = s.GetQueue(ctx, workspace.Default, "emails")
+	if q.AutoPaused == nil || q.AutoPaused.Probes != 1 || q.AutoPaused.Error != "HTTP 500" || !q.AutoPaused.NextProbeAt.Equal(next) {
+		t.Fatalf("after a failed probe = %+v", q.AutoPaused)
+	}
+
+	// A pause by hand wins: no probes.
+	if _, err := s.SetQueuePaused(ctx, workspace.Default, "emails", true); err != nil {
+		t.Fatal(err)
+	}
+	if due, _ := s.DueQueues(ctx, next.Add(time.Second)); len(due) != 0 {
+		t.Fatalf("DueQueues when paused by hand = %v", queueNames(due))
+	}
+	if claimed, err := s.ClaimProbe(ctx, q, next.Add(time.Second), time.Minute); err != nil || len(claimed) != 0 {
+		t.Fatalf("ClaimProbe when paused by hand = %d tasks, %v", len(claimed), err)
+	}
+	q, _ = s.GetQueue(ctx, workspace.Default, "emails")
+	if q.AutoPaused == nil {
+		t.Fatal("pausing by hand cleared the auto-pause")
+	}
+	// Resuming by hand clears both.
+	if q, err = s.SetQueuePaused(ctx, workspace.Default, "emails", false); err != nil || q.Paused || q.AutoPaused != nil {
+		t.Fatalf("SetQueuePaused(false) = %+v, %v", q, err)
+	}
+	if due, _ := s.DueQueues(ctx, next); len(due) != 1 {
+		t.Fatalf("DueQueues after resuming = %v", queueNames(due))
+	}
+
+	// A success resumes it, once.
+	if _, err := s.AutoPauseQueue(ctx, workspace.Default, "emails", "HTTP 503", now, probeAt); err != nil {
+		t.Fatal(err)
+	}
+	cleared, err := s.AutoResumeQueue(ctx, workspace.Default, "emails")
+	if err != nil || cleared == nil || !cleared.Since.Equal(now) {
+		t.Fatalf("AutoResumeQueue = %+v, %v", cleared, err)
+	}
+	if cleared, err := s.AutoResumeQueue(ctx, workspace.Default, "emails"); err != nil || cleared != nil {
+		t.Fatalf("AutoResumeQueue twice = %+v, %v", cleared, err)
+	}
+
+	// Turning the setting off clears an auto-pause; other changes keep it.
+	if _, err := s.AutoPauseQueue(ctx, workspace.Default, "emails", "HTTP 503", now, probeAt); err != nil {
+		t.Fatal(err)
+	}
+	cfg.MaxAttempts = 7
+	if q, _, err = s.PutQueue(ctx, workspace.Default, "emails", cfg); err != nil || q.AutoPaused == nil {
+		t.Fatalf("PutQueue with auto-pause still on = %+v, %v", q, err)
+	}
+	cfg.AutoPauseAfter = 0
+	if q, _, err = s.PutQueue(ctx, workspace.Default, "emails", cfg); err != nil || q.AutoPaused != nil || q.AutoPauseAfter != 0 {
+		t.Fatalf("PutQueue with auto-pause off = %+v, %v", q, err)
+	}
+
+	st, err := s.AllQueueStats(ctx, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, qs := range st {
+		if qs.AutoPaused {
+			t.Fatalf("AllQueueStats: %s auto-paused", qs.Queue)
+		}
+	}
+}

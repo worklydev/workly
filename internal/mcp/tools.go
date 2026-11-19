@@ -257,7 +257,7 @@ func allTools() []*tool {
 // Read tools.
 
 var listQueues = newTool("list_queues", "List queues",
-	"All queues, each with whether it is paused, its limits (rate_per_second, max_concurrency), its current work (stats: due now, scheduled for later including retries, running and failed task counts, and oldest_due_at, how far behind the queue is) and the last 24 hours (last_24h: tasks succeeded, failed and cancelled, and the median and 95th percentile duration of their latest attempt, p50_duration_ms and p95_duration_ms, taken over duration_samples attempts; with few samples they say little, and with none they are null). internal is true for Workly's own queues (_workflows delivers workflow steps, _callbacks callbacks); they fill up from workflows and on_complete rather than enqueue_task, can't be deleted, and pausing one holds up every workflow or callback. Use get_queue for the rest of the delivery policy and failures.",
+	"All queues, each with whether it is paused by hand (paused) or paused itself after failures in a row (auto_paused, null if not: since, the error, failed probes and next_probe_at), its limits (rate_per_second, max_concurrency), its current work (stats: due now, scheduled for later including retries, running and failed task counts, and oldest_due_at, how far behind the queue is) and the last 24 hours (last_24h: tasks succeeded, failed and cancelled, and the median and 95th percentile duration of their latest attempt, p50_duration_ms and p95_duration_ms, taken over duration_samples attempts; with few samples they say little, and with none they are null). internal is true for Workly's own queues (_workflows delivers workflow steps, _callbacks callbacks); they fill up from workflows and on_complete rather than enqueue_task, can't be deleted, and pausing one holds up every workflow or callback. Use get_queue for the rest of the delivery policy and failures.",
 	object(map[string]any{}), readOnly,
 	func(ctx context.Context, api apiClient, _ struct{}) (any, error) {
 		var out struct {
@@ -282,7 +282,7 @@ var listQueues = newTool("list_queues", "List queues",
 func queueOverview(q, lastDay map[string]any) map[string]any {
 	out := map[string]any{"last_24h": lastDay, "internal": internalQueue(q["name"])}
 	queueStats(q)
-	for _, k := range []string{"name", "paused", "rate_per_second", "max_concurrency", "stats"} {
+	for _, k := range []string{"name", "paused", "auto_paused", "rate_per_second", "max_concurrency", "stats"} {
 		out[k] = q[k]
 	}
 	return out
@@ -576,13 +576,21 @@ func taskHeldUp(ctx context.Context, api apiClient, task map[string]any, deadlin
 	}
 	queue, _ := task["queue"].(string)
 	var q struct {
-		Paused bool `json:"paused"`
+		Paused     bool `json:"paused"`
+		AutoPaused *struct {
+			Error       string    `json:"error"`
+			NextProbeAt time.Time `json:"next_probe_at"`
+		} `json:"auto_paused"`
 	}
 	if err := api.do(ctx, "GET", apiPath("/v1/queues/%s", queue), nil, nil, &q); err != nil {
 		return "", "", err
 	}
 	if q.Paused {
 		return "queue_paused", fmt.Sprintf("queue %s is paused: the task won't be delivered until it's resumed (resume_queue)", queue), nil
+	}
+	if p := q.AutoPaused; p != nil {
+		return "queue_auto_paused", fmt.Sprintf("queue %s paused itself after failures in a row (%s): its tasks wait until a probe succeeds, the next at %s, or the queue is resumed (resume_queue)",
+			queue, truncate(p.Error, maxErrorLength), p.NextProbeAt.UTC().Format(time.RFC3339)), nil
 	}
 	if runAt := timeField(task, "run_at"); runAt.After(deadline) {
 		return "scheduled_for_later", fmt.Sprintf("the task isn't due until %s", runAt.UTC().Format(time.RFC3339)), nil
@@ -732,7 +740,7 @@ var pauseQueue = newTool("pause_queue", "Pause queue",
 	})
 
 var resumeQueue = newTool("resume_queue", "Resume queue",
-	"Resumes delivering a paused queue's tasks. Returns the queue.",
+	"Resumes delivering a paused queue's tasks. It also ends an auto-pause (auto_paused): the queue's waiting tasks go to its endpoint at once instead of after the next successful probe, so check the endpoint is back first. Returns the queue.",
 	object(map[string]any{"queue": queueProp}, "queue"),
 	annotations{IdempotentHint: true, OpenWorldHint: true},
 	func(ctx context.Context, api apiClient, args struct {
@@ -742,7 +750,7 @@ var resumeQueue = newTool("resume_queue", "Resume queue",
 	})
 
 var updateQueuePolicy = newTool("update_queue_policy", "Update queue policy",
-	"Changes a queue's delivery policy. Only the settings given change; the others keep their current values. Pass null for rate_per_second to remove the rate limit. Creates the queue if it doesn't exist. Returns the queue, with created true if it was just created, which for a queue you meant to change means a misspelt name. Workly's own queues can be tuned too: _workflows' and _callbacks' concurrency and rate limits are how hard workflow steps and callbacks hit your endpoints.",
+	"Changes a queue's delivery policy. Only the settings given change; the others keep their current values. Pass null for rate_per_second to remove the rate limit, or for auto_pause to turn it off. Creates the queue if it doesn't exist. Returns the queue, with created true if it was just created, which for a queue you meant to change means a misspelt name. Workly's own queues can be tuned too: _workflows' and _callbacks' concurrency and rate limits are how hard workflow steps and callbacks hit your endpoints.",
 	object(map[string]any{
 		"queue":               queueProp,
 		"max_attempts":        prop("integer", "Total delivery attempts before a task fails.", "minimum", 1, "maximum", 1000),
@@ -753,6 +761,15 @@ var updateQueuePolicy = newTool("update_queue_policy", "Update queue policy",
 		"retry_on_4xx":        prop("boolean", "Retry 4xx responses. By default only 408 and 429 are retried."),
 		"rate_per_second":     nullable("number", "Most deliveries started per second; null for no limit.", "exclusiveMinimum", 0, "maximum", 10000),
 		"max_concurrency":     prop("integer", "Most deliveries in flight at once.", "minimum", 1, "maximum", 10000),
+		"auto_pause": map[string]any{
+			"type":        []string{"object", "null"},
+			"description": "Pause the queue by itself after after_failures attempts in a row end with a 5xx, a timeout or a network error; null to turn it off. While auto-paused, tasks wait without using attempts and one task goes as a probe now and then (30 s after the pause, doubling up to every 10 minutes); the first success resumes the queue. Only for queues whose tasks go to one service: in a queue that delivers to many endpoints, one being down would hold up the rest. Not allowed on _workflows and _callbacks.",
+			"properties": map[string]any{
+				"after_failures": prop("integer", "Failures in a row that pause the queue.", "minimum", 1, "maximum", 10000),
+			},
+			"required":             []string{"after_failures"},
+			"additionalProperties": false,
+		},
 	}, "queue"),
 	annotations{IdempotentHint: true},
 	func(ctx context.Context, api apiClient, args map[string]json.RawMessage) (any, error) {
@@ -802,7 +819,7 @@ var updateQueuePolicy = newTool("update_queue_policy", "Update queue policy",
 
 var policyFields = []string{
 	"max_attempts", "min_backoff_seconds", "max_backoff_seconds", "backoff_multiplier", "timeout_seconds",
-	"retry_on_4xx", "rate_per_second", "max_concurrency",
+	"retry_on_4xx", "rate_per_second", "max_concurrency", "auto_pause",
 }
 
 func taskAction(ctx context.Context, api apiClient, id, action string) (any, error) {
@@ -937,7 +954,7 @@ func latestAttempt(ctx context.Context, api apiClient, path string) (map[string]
 func queueView(q map[string]any) map[string]any {
 	q["internal"] = internalQueue(q["name"])
 	queueStats(q)
-	return withNulls(q, "rate_per_second")
+	return withNulls(q, "rate_per_second", "auto_pause", "auto_paused")
 }
 
 // queueStats gives a queue's stats every key: oldest_due_at is null when
