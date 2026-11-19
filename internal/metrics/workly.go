@@ -19,6 +19,7 @@ type Workly struct {
 	AttemptDuration *Histogram
 	DispatchLag     *Histogram
 	IsLeader        *Gauge
+	QueueAutoPauses *Counter
 
 	// Read from the database at scrape time by the leader, so that
 	// replicas don't report the same queues.
@@ -27,6 +28,7 @@ type Workly struct {
 	QueueRunning      *Gauge
 	QueueFailed       *Gauge
 	QueuePaused       *Gauge
+	QueueAutoPaused   *Gauge
 	QueueOldestDueAge *Gauge
 
 	// Schedules, counted by the leader.
@@ -71,6 +73,10 @@ func New() *Workly {
 			"Failed tasks still retained. Stops counting at 10000.", q...),
 		QueuePaused: r.Gauge("workly_queue_paused",
 			"1 if the queue is paused.", q...),
+		QueueAutoPaused: r.Gauge("workly_queue_auto_paused",
+			"1 if the queue paused itself after failures in a row (auto_pause) and hasn't resumed.", q...),
+		QueueAutoPauses: r.Counter("workly_queue_auto_pauses_total",
+			"Times the queue paused itself after failures in a row.", q...),
 		QueueOldestDueAge: r.Gauge("workly_queue_oldest_due_age_seconds",
 			"How long the longest-waiting due task has been due; 0 when nothing is due. The metric to alert on.", q...),
 		ScheduleRuns: r.Counter("workly_schedule_runs_total",
