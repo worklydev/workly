@@ -16,7 +16,7 @@ import {
 } from '../../api/@tanstack/react-query.gen';
 import type { FailureGroup, ListTasksData, Queue, TaskState } from '../../api';
 import { ConfirmItem, MoreActions } from '../../components/MoreActions';
-import { isSystemQueue, LOW_SUCCESS, systemQueuePurpose } from '../../lib/queues';
+import { isSystemQueue, LOW_SUCCESS, queueHeld, systemQueuePurpose } from '../../lib/queues';
 import { WORKFLOW_QUEUE } from '../../lib/workflows';
 import { useSetting } from '../../context';
 import { ListPager } from '../../components/ListControls';
@@ -25,6 +25,9 @@ import { useRange, useRangeSince } from '../../hooks/useRange';
 import { RangeTabs } from '../../components/RangeTabs';
 import { DisabledReason } from '../../components/DisabledReason';
 import { InlineFields } from '../../components/InlineFields';
+import { Notice } from '../../components/Notice';
+import { QueuePausedBadge } from '../../components/QueuePausedBadge';
+import { useNow } from '../../hooks/useNow';
 import { PageHeader } from '../../components/PageHeader';
 import { ErrorText, Muted } from '../../components/QueryState';
 import { RelativeTime } from '../../components/RelativeTime';
@@ -68,7 +71,7 @@ export function QueuePage() {
           badge={
             <>
               {isSystemQueue(queue.name) && <Badge>system</Badge>}
-              {queue.paused && <Badge variant="warning">paused</Badge>}
+              <QueuePausedBadge queue={queue} />
             </>
           }
         >
@@ -76,6 +79,7 @@ export function QueuePage() {
         </PageHeader>
         <Policy queue={queue} />
       </div>
+      <AutoPausedNotice queue={queue} />
       <Overview queue={queue} />
       <Failures queue={queue} />
       <QueueTasks queue={queue} />
@@ -236,10 +240,20 @@ function QueueActions({ queue }: { queue: Queue }) {
           </Button>
         </DisabledReason>
       )}
-      {queue.paused ? (
-        <Button variant="ghost" size="sm" onClick={() => resume.mutate(path)} disabled={resume.isPending}>
+      {queueHeld(queue) ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          title={
+            queue.paused
+              ? undefined
+              : 'Deliver the waiting tasks now, without waiting for a probe to succeed. Check the endpoint is back first.'
+          }
+          onClick={() => resume.mutate(path)}
+          disabled={resume.isPending}
+        >
           <Play />
-          Resume
+          {queue.paused ? 'Resume' : 'Resume now'}
         </Button>
       ) : (
         <Button variant="ghost" size="sm" onClick={() => pause.mutate(path)} disabled={pause.isPending}>
@@ -417,7 +431,39 @@ function Policy({ queue }: { queue: Queue }) {
       : { label: 'Rate', value: `${q.rate_per_second}/s` },
     { label: 'Concurrency', value: String(q.max_concurrency) },
   ];
+  if (q.auto_pause)
+    items.push({ label: 'Auto-pause', value: `after ${q.auto_pause.after_failures} failures`, prose: true });
   return <InlineFields items={items} />;
+}
+
+/** Why an auto-paused queue isn't delivering, and when it tries again. */
+function AutoPausedNotice({ queue }: { queue: Queue }) {
+  const now = useNow();
+  const p = queue.auto_paused;
+  if (!p || queue.paused) return null;
+  const after = queue.auto_pause?.after_failures;
+  const next = Date.parse(p.next_probe_at);
+  return (
+    <Notice
+      tone="warning"
+      detail={
+        <>
+          Paused <RelativeTime iso={p.since} />. Its tasks wait without using attempts. One goes as a probe{' '}
+          {next > now ? (
+            <>
+              <RelativeTime iso={p.next_probe_at} />
+            </>
+          ) : (
+            'now'
+          )}
+          {p.probes > 0 && ` (${p.probes} failed so far)`}, and the queue resumes when one succeeds. Resume now to
+          deliver them all at once.
+        </>
+      }
+    >
+      Paused itself after {after === undefined ? 'failures' : `${after} failures`} in a row: {p.error}
+    </Notice>
+  );
 }
 
 /** Tab counts for the states the stats cover; finished tasks aren't counted. */
@@ -485,7 +531,7 @@ function QueueTasks({ queue }: { queue: Queue }) {
         <TaskTable
           pages={pages}
           sorting={sorting}
-          paused={() => queue.paused}
+          paused={() => queueHeld(queue)}
           empty={
             lastError !== null
               ? 'No tasks with this error.'

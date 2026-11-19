@@ -10,7 +10,7 @@ import { PageHeader } from '../../components/PageHeader';
 import { Section } from '../../components/Section';
 import { ErrorText, Muted } from '../../components/QueryState';
 import { LIVE } from '../../lib/api';
-import { Badge } from '../../primitives/badge';
+import { QueuePausedBadge } from '../../components/QueuePausedBadge';
 import { Button } from '../../primitives/button';
 import { ActivityChart } from './ActivityChart';
 import { QueuesGettingStarted } from './GettingStarted';
@@ -130,7 +130,7 @@ function QueueTable({ queues, system = false }: { queues: Queue[]; system?: bool
                 >
                   {q.name}
                 </Link>
-                {q.paused && <Badge variant="warning">paused</Badge>}
+                <QueuePausedBadge queue={q} />
                 <RowHint />
               </div>
               {system && (

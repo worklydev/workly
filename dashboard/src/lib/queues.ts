@@ -23,3 +23,8 @@ export function systemQueuePurpose(name: string): string {
       return 'Used by Workly itself.';
   }
 }
+
+/** Whether a queue's pending tasks are held, by hand or by an auto-pause. */
+export function queueHeld(queue: Pick<Queue, 'paused' | 'auto_paused'>): boolean {
+  return queue.paused || queue.auto_paused !== undefined;
+}
