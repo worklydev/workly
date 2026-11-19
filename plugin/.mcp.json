@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "workly": {
+      "type": "http",
+      "url": "https://api.workly.run/mcp"
+    }
+  }
+}

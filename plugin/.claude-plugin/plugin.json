@@ -1,0 +1,20 @@
+{
+  "name": "workly",
+  "displayName": "Workly",
+  "version": "1.0.0",
+  "description": "Connect to hosted Workly, the HTTP task queue and scheduler: see what queues, schedules and workflows are doing, find out why deliveries fail, and retry them once they're fixed.",
+  "author": {
+    "name": "Workly",
+    "email": "contact@workly.run",
+    "url": "https://workly.run"
+  },
+  "homepage": "https://workly.run/docs/mcp/",
+  "repository": "https://github.com/worklydev/workly",
+  "license": "Apache-2.0",
+  "keywords": ["task-queue", "background-jobs", "cron", "webhooks", "workflows", "retries"],
+  "icon": "./assets/logo.png",
+  "documentationUrl": "https://workly.run/docs/mcp/",
+  "supportUrl": "https://workly.run/support/",
+  "privacyPolicyUrl": "https://workly.run/privacy/",
+  "termsOfServiceUrl": "https://workly.run/terms/"
+}
