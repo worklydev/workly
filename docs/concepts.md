@@ -57,6 +57,7 @@ This history is what the dashboard, the CLI and [MCP](mcp.md) show when you ask 
 
 - **Retried:** 5xx, 408 and 429 responses, timeouts, network errors and lost attempts.
 - **Not retried:** other 4xx responses fail the task at once, since sending the same request again won't change the answer. Set `retry_on_4xx` on the queue if your endpoint uses them for temporary problems. Connections the server refuses to make, such as to a private address on a server that only delivers to the public internet, aren't retried either.
+- **Redirects:** Workly doesn't follow them. A 3xx response (or a 1xx) fails the task at once, since it usually means the URL is wrong: point the task at where the redirect goes.
 - **Backoff:** retry *n* waits a random time between `min_backoff_seconds` and `min_backoff_seconds × backoff_multiplier^(n−1)`, capped at `max_backoff_seconds`. The randomness (jitter) spreads out a burst of failures. A `Retry-After` header on the response is honoured.
 
 ## Delivery semantics
