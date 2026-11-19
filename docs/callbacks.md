@@ -57,7 +57,7 @@ The CLI takes `--on-complete URL`, and `enqueue_task` over [MCP](mcp.md) takes `
 }
 ```
 
-`last_status`, `last_outcome` and `last_error` are absent when there was no attempt (a task cancelled before it ran), and `idempotency_key` and `group_id` when the task has none. The body carries the outcome, not the response: to see what the endpoint answered, `GET /v1/tasks/{task_id}/attempts`.
+`last_error` is present only when the last attempt failed, so it's absent when the task succeeded. `last_status`, `last_outcome` and `last_error` are all absent when there was no attempt (a task cancelled before it ran), and `idempotency_key` and `group_id` when the task has none. The body carries the outcome, not the response: to see what the endpoint answered, `GET /v1/tasks/{task_id}/attempts`.
 
 ## On a schedule
 
@@ -90,6 +90,8 @@ It can also be set with `PUT /v1/schedules/{name}`, `client.schedules.put(…, o
   "finished_at": "2026-11-12T02:00:01.873Z"
 }
 ```
+
+The `last_*` fields follow the same rules as a task's: a failed run adds `last_error` (such as `"last_error": "HTTP 500 Internal Server Error"`), a run that succeeded has none, and a run cancelled before its first attempt has no `last_*` fields at all.
 
 Skipped runs (an overlap, or a slot missed while the server was down) were never delivered and don't call back. The schedule's current `on_complete` applies when a run finishes, so a change takes effect for runs already in progress.
 
