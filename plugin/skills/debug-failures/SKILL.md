@@ -13,6 +13,8 @@ Workly delivers each task, schedule run and workflow step as an HTTP request to 
 - `list_runs` with `state: "failed"`: failed runs of every schedule.
 - `list_workflow_runs` with `status: "failed"`: failed workflow runs.
 
+A queue with `auto_paused` set (not null) paused itself after failures in a row: its endpoint looked down. Its tasks are waiting, not failing, and `auto_paused.error` is the error that paused it. Treat that error like a failure group below. It resumes on its own once a probe succeeds (`next_probe_at`), so after the fix there's usually nothing to retry.
+
 ## 2. Group the failures
 
 `get_queue` groups a queue's failed tasks by error, with the latest task of each group. Usually one or two errors account for most failures; work on the largest group first. `list_tasks` with `state: "failed"` and `last_error` lists the tasks behind a group.
@@ -30,6 +32,7 @@ Read the pattern across attempts:
 | 5xx with an exception in the body | A bug in the handler for this payload. |
 | Timeouts | The handler is slower than the queue's `timeout_seconds`, or blocked on something. |
 | Connection errors | The endpoint is down, or the URL points somewhere Workly can't reach. |
+| A run of 5xx or timeouts across many tasks at once | The endpoint was down. If it keeps happening, suggest `auto_pause` on the queue (`update_queue_policy`, e.g. `{"after_failures": 20}`): the queue pauses itself instead of using up every task's attempts, and resumes when the endpoint is back. Only for a queue whose tasks go to one service. |
 | Failures only some of the time | A flaky dependency, or a rate limit the queue's `rate_per_second` should respect. |
 
 `started_at` minus `created_at` is time spent waiting in the queue; `last_duration_ms` is time in the handler. Slow but successful tasks are a capacity question (`max_concurrency`, `rate_per_second`), not a bug.
@@ -48,5 +51,6 @@ Only after the cause is fixed and deployed:
 - One group of failures: `retry_failed_tasks` with the queue and that group's `last_error`. Retrying the whole queue also retries failures with other causes.
 - A schedule: `trigger_schedule`, then `wait_for_run`.
 - A workflow run: `retry_workflow_run` runs its failed and skipped steps again.
+- An auto-paused queue: nothing, usually. Its next probe resumes it once the endpoint answers. `resume_queue` resumes it at once, sending every waiting task to the endpoint, so use it only when the user wants that and the endpoint is back.
 
 Ask before retrying many tasks at once, since every retry calls the user's endpoint again. Prefer pausing a queue or schedule to deleting it when the aim is to stop it; deletions can't be undone. If a write tool isn't available, the connection is read-only: tell the user what to run or to reconnect with read and write access.
