@@ -326,6 +326,7 @@ func New(opts Options) (*Server, error) {
 		s.handler = opts.WrapHandler(s.handler)
 	}
 	if !opts.DisableDispatcher {
+		notifier := &alert.Notifier{Store: opts.Store, Sender: alerts, Logger: opts.Logger}
 		s.dispatcher = dispatch.New(dispatch.Options{
 			Store:                 opts.Store,
 			Logger:                opts.Logger,
@@ -341,7 +342,8 @@ func New(opts Options) (*Server, error) {
 			WorkspaceRetention:    opts.WorkspaceRetention,
 			Metrics:               m,
 			DialControl:           opts.DeliveryDialControl,
-			Alerts:                &alert.Notifier{Store: opts.Store, Sender: alerts, Logger: opts.Logger},
+			Alerts:                notifier,
+			AutoPaused:            notifier.AutoPaused,
 			Changed:               hub.Changed,
 			Executed:              opts.Executed,
 		})

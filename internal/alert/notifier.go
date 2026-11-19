@@ -156,3 +156,42 @@ func WorkspaceName(ctx context.Context, st store.Store, ws workspace.ID) (string
 func (s *Sender) Test(ctx context.Context, workspaceName string, c store.AlertChannel) error {
 	return s.Send(ctx, c, testMessage(workspaceName, s.Links))
 }
+
+// AutoPaused sends the alert about a queue that paused itself or resumed,
+// at once rather than at the next check, and outside the cooldown: both are
+// news. It returns at once and sends in the background.
+func (n *Notifier) AutoPaused(ev store.AutoPauseEvent) {
+	go n.sendAutoPause(context.Background(), ev, time.Now())
+}
+
+func (n *Notifier) sendAutoPause(ctx context.Context, ev store.AutoPauseEvent, now time.Time) {
+	log := n.Logger.With("queue", ev.Queue)
+	if ev.Workspace != workspace.Default {
+		log = log.With("workspace", ev.Workspace)
+	}
+	channels, err := n.Store.ListAlertChannels(ctx, ev.Workspace)
+	if err != nil {
+		log.Warn("could not list alert channels", "err", err)
+		return
+	}
+	if len(channels) == 0 {
+		return
+	}
+	name, err := WorkspaceName(ctx, n.Store, ev.Workspace)
+	if err != nil {
+		log.Warn("could not send auto-pause alert", "err", err)
+		return
+	}
+	m := autoPauseMessage(name, ev, n.Sender.Links, now)
+	for _, c := range channels {
+		if !n.Sender.CanSend(c) {
+			continue
+		}
+		sendCtx, cancel := context.WithTimeout(ctx, sendTimeout)
+		err := n.Sender.Send(sendCtx, c, m)
+		cancel()
+		if err != nil {
+			log.Warn("could not send alert", "channel_id", c.ID, "type", c.Type, "err", err)
+		}
+	}
+}

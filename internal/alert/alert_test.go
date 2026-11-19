@@ -384,3 +384,77 @@ func TestNotifier(t *testing.T) {
 }
 
 var _ Mailer = (*SMTP)(nil)
+
+func TestAutoPauseMessage(t *testing.T) {
+	since := time.Date(2026, 11, 19, 9, 0, 0, 0, time.UTC)
+	paused := autoPauseMessage("Acme", store.AutoPauseEvent{Queue: "emails", Since: since, Error: "HTTP 503 Service Unavailable", Failures: 20},
+		"http://workly.test", since)
+	if paused.Subject != "[Acme] Queue emails paused itself after 20 failures in a row" {
+		t.Errorf("subject = %q", paused.Subject)
+	}
+	for _, want := range []string{"The last: HTTP 503 Service Unavailable.", "wait without using attempts", "http://workly.test/queues/emails", "Workspace: Acme"} {
+		if !strings.Contains(paused.Text, want) {
+			t.Errorf("text lacks %q:\n%s", want, paused.Text)
+		}
+	}
+	if !strings.Contains(paused.Slack, "<http://workly.test/queues/emails|Open in Workly>") {
+		t.Errorf("slack = %s", paused.Slack)
+	}
+
+	resumed := autoPauseMessage("", store.AutoPauseEvent{Queue: "emails", Resumed: true, Since: since},
+		"", since.Add(95*time.Minute))
+	if resumed.Subject != "Queue emails resumed" ||
+		!strings.Contains(resumed.Text, "after it was paused for 1 hour 35 minutes") || strings.Contains(resumed.Text, "Workspace") {
+		t.Errorf("resumed = %+v", resumed)
+	}
+}
+
+func TestPausedFor(t *testing.T) {
+	for d, want := range map[time.Duration]string{
+		time.Second:                  "1 second",
+		40 * time.Second:             "40 seconds",
+		time.Minute:                  "1 minute",
+		12*time.Minute + time.Second: "12 minutes",
+		2 * time.Hour:                "2 hours",
+		61 * time.Minute:             "1 hour 1 minute",
+	} {
+		if got := pausedFor(d); got != want {
+			t.Errorf("pausedFor(%v) = %q, want %q", d, got, want)
+		}
+	}
+}
+
+func TestSendAutoPause(t *testing.T) {
+	ctx := t.Context()
+	st, err := sqlite.Open(filepath.Join(t.TempDir(), "workly.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.EnsureWorkspace(ctx, workspace.Default, "default"); err != nil {
+		t.Fatal(err)
+	}
+	var posted []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct{ Text string }
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		posted = append(posted, body.Text)
+	}))
+	defer srv.Close()
+	sender := NewSender(nil, "http://workly.test")
+	sender.Client.Transport = to(srv)
+	n := &Notifier{Store: st, Sender: sender, Logger: slog.New(slog.DiscardHandler)}
+
+	ev := store.AutoPauseEvent{Workspace: workspace.Default, Queue: "emails", Since: time.Now(), Error: "HTTP 500", Failures: 5}
+	n.sendAutoPause(ctx, ev, time.Now()) // no channels: nothing to do
+	if _, err := st.CreateAlertChannel(ctx, workspace.Default, store.AlertSlack, SlackPrefix+"services/x"); err != nil {
+		t.Fatal(err)
+	}
+	n.sendAutoPause(ctx, ev, time.Now())
+	if len(posted) != 1 || !strings.Contains(posted[0], "paused itself after 5 failures in a row") {
+		t.Fatalf("posted = %q", posted)
+	}
+}
