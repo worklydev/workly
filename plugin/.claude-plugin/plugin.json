@@ -8,7 +8,7 @@
     "email": "contact@workly.run",
     "url": "https://workly.run"
   },
-  "homepage": "https://workly.run/docs/mcp/",
+  "homepage": "https://workly.run/",
   "repository": "https://github.com/worklydev/workly",
   "license": "Apache-2.0",
   "keywords": ["task-queue", "background-jobs", "cron", "webhooks", "workflows", "retries"],
